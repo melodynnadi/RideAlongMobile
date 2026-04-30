@@ -350,7 +350,7 @@ The RideAlong Team`,
       <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => router.canGoBack() ? router.back() : router.push('/settings')}
         >
           <ArrowLeft size={24} color={theme.colors.secondary} />
         </TouchableOpacity>

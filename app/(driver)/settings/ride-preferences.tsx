@@ -150,7 +150,7 @@ export default function RidePreferencesScreen() {
       
       setOriginal(preferences);
       Alert.alert('Success', 'Your ride preferences have been saved!');
-      router.back();
+      router.canGoBack() ? router.back() : router.push('/settings');
     } catch (error) {
       console.error('Error saving preferences:', error);
       Alert.alert(
@@ -163,7 +163,7 @@ export default function RidePreferencesScreen() {
   };
 
   const handleCancel = () => {
-    router.back();
+    router.canGoBack() ? router.back() : router.push('/settings');
   };
 
   return (
@@ -171,7 +171,7 @@ export default function RidePreferencesScreen() {
       <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => router.canGoBack() ? router.back() : router.push('/settings')}
         >
           <ArrowLeft size={24} color={theme.colors.secondary} />
         </TouchableOpacity>

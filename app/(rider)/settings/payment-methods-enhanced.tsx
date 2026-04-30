@@ -107,7 +107,7 @@ export default function EnhancedPaymentMethodsScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.bg }]}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.canGoBack() ? router.back() : router.push('/settings')}>
           <ArrowLeft size={24} color={theme.colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>

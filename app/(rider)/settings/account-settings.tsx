@@ -226,7 +226,7 @@ export default function AccountSettingsScreen() {
 
       setOriginalPhone(phoneNumber);
       Alert.alert('Success', 'Your account information has been updated');
-      router.back();
+      router.canGoBack() ? router.back() : router.push('/settings');
     } catch (error) {
       console.error('Error saving profile:', error);
       Alert.alert('Error', 'Failed to save changes. Please try again.');
@@ -260,7 +260,7 @@ export default function AccountSettingsScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={() => router.canGoBack() ? router.back() : router.push('/settings')}
           >
             <ArrowLeft size={24} color={theme.colors.secondary} />
           </TouchableOpacity>
