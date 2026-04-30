@@ -48,7 +48,7 @@ export default function ProfileScreen() {
         const fetchAllData = async () => {
           try {
             const [userSnap, driverSnap, ridesCount] = await Promise.all([
-              getDoc(doc(firestore, 'users', u.uid)),
+              getDoc(doc(firestore, 'drivers', u.uid)),
               getDoc(doc(firestore, 'drivers', u.uid)),
               getCountFromServer(query(
                 collection(firestore, 'confirmedRides'),
@@ -248,7 +248,7 @@ export default function ProfileScreen() {
             </Text>
             <TouchableOpacity 
               style={styles.editButton} 
-              onPress={() => router.push('/account-settings')}
+              onPress={() => router.push('/settings/account-settings')}
             >
               <Edit2 size={16} color={theme.colors.primary} />
               <Text style={[styles.editText, { color: theme.colors.primary }]}>Edit</Text>
@@ -340,7 +340,7 @@ export default function ProfileScreen() {
             </Text>
             <TouchableOpacity 
               style={styles.editButton} 
-              onPress={() => router.push('/vehicle-info')}
+              onPress={() => router.push('/settings/vehicle-info')}
             >
               <Edit2 size={16} color={theme.colors.primary} />
               <Text style={[styles.editText, { color: theme.colors.primary }]}>Edit</Text>

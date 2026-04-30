@@ -6,6 +6,7 @@
 import { doc, onSnapshot, Timestamp } from 'firebase/firestore';
 import { firebaseAuth, firestore } from '@/constants/services';
 import { useVerificationStore } from '@/stores/verificationStore';
+import { useAuthStore } from '@/stores/authStore';
 import { Alert, ToastAndroid, Platform } from 'react-native';
 
 // Keep track of the unsubscribe function for the Firestore listener
@@ -62,24 +63,46 @@ export async function fetchVerificationStatus(): Promise<void> {
       },
     });
 
+    if (response.status === 404) {
+      // API couldn't find the user (e.g. deployed backend not yet reading from 'riders').
+      // Do NOT overwrite the store — the Firestore real-time listener (setupVerificationListener)
+      // may have already set isVerified:true from the live document. Just reset banner dismissal.
+      console.log('[Verification] 404 from API — deferring to Firestore listener for state');
+      useVerificationStore.getState().resetBannerDismissal();
+      return;
+    }
+
     if (!response.ok) {
       const text = await response.text().catch(() => '');
       throw new Error(`API returned ${response.status} for ${endpoint} ${text ? '- ' + text.slice(0,120) : ''}`);
     }
 
     const data = await response.json();
-    
+
     // Backend returns data in a nested 'user' object
     const userData = data.user || {};
-    console.log('[fetchVerificationStatus] API response:', { 
-      isVerified: userData.isVerified, 
-      verificationStatus: userData.verificationStatus 
+    console.log('[fetchVerificationStatus] API response:', {
+      isVerified: userData.isVerified,
+      verificationStatus: userData.verificationStatus
     });
-    
-    // Update store with API data
+
+    // Treat auto-approved/approved as verified even if isVerified flag isn't set
+    const status = userData.verificationStatus || null;
+    const isVerified = userData.isVerified === true || status === 'auto-approved' || status === 'approved';
+
+    // Never downgrade a verified state that the Firestore listener already established.
+    // The Firestore listener fires faster than the network API call; if it already set
+    // isVerified:true, don't overwrite that with a stale API result.
+    const currentIsVerified = useVerificationStore.getState().isVerified;
+    if (!isVerified && currentIsVerified) {
+      console.log('[Verification] API says unverified but Firestore already confirmed verified — keeping verified state');
+      useVerificationStore.getState().resetBannerDismissal();
+      return;
+    }
+
     useVerificationStore.getState().setVerificationData({
-      isVerified: userData.isVerified || false,
-      verificationStatus: userData.verificationStatus || null,
+      isVerified,
+      verificationStatus: status,
       blocked: userData.blocked || false,
       daysRemaining: userData.daysLeft ?? null,
       verificationDeadline: userData.deadline ? new Date(userData.deadline) : null,
@@ -109,7 +132,9 @@ export function setupVerificationListener(): void {
     unsubscribeVerificationListener();
   }
 
-  const userDocRef = doc(firestore, 'users', user.uid);
+  const activeRole = useAuthStore.getState().activeRole;
+  const collection = activeRole === 'driver' ? 'drivers' : 'riders';
+  const userDocRef = doc(firestore, collection, user.uid);
   
   let previousIsVerified: boolean | null = null;
 

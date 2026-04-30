@@ -9,7 +9,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { AddBankAccountModal } from '@/components/AddBankAccountModal';
 import type { AddBankAccountPayload, BankAccount } from '@/types';
-import { createDashboardLink, createOnboardingLink, instantDeposit, fetchPayouts, type Payout } from '../src/services/payouts';
+import { createDashboardLink, createOnboardingLink, instantDeposit, fetchPayouts, type Payout } from '@/src/services/payouts';
 import { logActivity } from '@/src/services/activity';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { doc, setDoc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
@@ -66,7 +66,7 @@ export default function EarningsScreen() {
     // Firestore user + rides query in parallel
     const firestorePromise = (async () => {
       try {
-        const userRef = doc(firestore, 'users', user.uid);
+        const userRef = doc(firestore, 'drivers', user.uid);
         const [userDoc, ridesSnap] = await Promise.all([
           getDoc(userRef),
           getDocs(query(
@@ -359,7 +359,7 @@ export default function EarningsScreen() {
           // Store account ID if it's new
           if (!accountId && newAccountId) {
             console.log('[Payouts] Storing new account ID:', newAccountId);
-            const userRef = doc(firestore, 'users', user!.uid);
+            const userRef = doc(firestore, 'drivers', user!.uid);
             try {
               await setDoc(userRef, { stripeAccountId: newAccountId }, { merge: true });
               setAccountId(newAccountId);
@@ -752,7 +752,7 @@ export default function EarningsScreen() {
         <Card style={[styles.sectionCard, { width: '100%', marginTop: 16, marginBottom: 20 }]}> 
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <Text style={[styles.infoTitle, { color: theme.colors.secondary }]}>Recent Payouts</Text>
-            <TouchableOpacity onPress={() => router.push('/payout-history')}>
+            <TouchableOpacity onPress={() => router.push('/settings/payout-history')}>
               <Text style={{ color: theme.colors.primary, fontWeight: '600' }}>View All</Text>
             </TouchableOpacity>
           </View>

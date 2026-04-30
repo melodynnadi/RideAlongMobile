@@ -86,7 +86,7 @@ export default function AccountSettingsScreen() {
         return;
       }
 
-      const userDoc = await getDoc(doc(firestore, 'users', user.uid));
+      const userDoc = await getDoc(doc(firestore, 'riders', user.uid));
       if (userDoc.exists()) {
         const data = userDoc.data();
         setFullName(data.fullName || data.fullname || data.name || '');
@@ -206,7 +206,7 @@ export default function AccountSettingsScreen() {
 
       const uniData = universityData || { name: university.trim(), custom: true };
       
-      await updateDoc(doc(firestore, 'users', user.uid), {
+      await updateDoc(doc(firestore, 'riders', user.uid), {
         fullName: fullName.trim(),
         name: fullName.trim(),
         phoneNumber: phoneNumber.trim(),

@@ -4,29 +4,26 @@ import { X } from 'lucide-react-native';
 import { useVerificationStore } from '@/stores/verificationStore';
 import { firebaseAuth } from '@/constants/services';
 
-export default function StudentVerificationBanner() {
-  const { 
-    isVerified, 
+export function StudentVerificationBanner() {
+  const {
+    isVerified,
     verificationStatus,
-    daysRemaining, 
-    bannerDismissed, 
+    daysRemaining,
+    bannerDismissed,
     dismissBanner,
-    lastChecked 
   } = useVerificationStore();
 
-  // Debug: Log verification state
   console.log('[StudentVerificationBanner] State:', { isVerified, verificationStatus, bannerDismissed });
 
   // Don't show banner if user is verified or has dismissed it
-  // Note: Backend normalizes "auto-approved" to "approved", so we check for "approved"
   if (isVerified || bannerDismissed) {
-    console.log('[StudentVerificationBanner] Hiding banner - user is verified or dismissed');
     return null;
   }
-  
-  // Don't show banner during initial load (before first data fetch)
-  // This prevents flash of banner for verified users
-  if (!lastChecked && verificationStatus === null) {
+
+  // Hide banner until we have confirmation the user is NOT verified.
+  // verificationStatus===null means data hasn't loaded yet (Firestore listener hasn't fired).
+  // This prevents a flash of the banner for users who are already verified.
+  if (verificationStatus === null) {
     return null;
   }
 
@@ -144,3 +141,5 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+
+export default StudentVerificationBanner;

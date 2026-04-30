@@ -45,7 +45,7 @@ export default function PaymentMethodsScreen() {
       }
 
       setLoading(true);
-      const userRef = doc(firestore, 'users', user.uid);
+      const userRef = doc(firestore, 'riders', user.uid);
 
       try {
         // Prefer server as source of truth for Stripe PaymentMethods
@@ -137,7 +137,7 @@ export default function PaymentMethodsScreen() {
               setSelectedMethod(def ? def.id : null);
               try {
                 const stored = normalized.map(pm => ({ id: pm.id, brand: pm.type, last4: pm.lastFour, exp_month: pm.expiryMonth, exp_year: pm.expiryYear, isDefault: pm.isDefault }));
-                await updateDoc(doc(firestore, 'users', uid), { paymentMethods: stored });
+                await updateDoc(doc(firestore, 'riders', uid), { paymentMethods: stored });
               } catch (err) {
                 console.error('Failed to store payment methods', err);
               }
@@ -148,7 +148,7 @@ export default function PaymentMethodsScreen() {
               if (selectedMethod === cardId) setSelectedMethod(remaining[0]?.id ?? null);
               try {
                 const stored = remaining.map(pm => ({ id: pm.id, brand: pm.type, last4: pm.lastFour, exp_month: pm.expiryMonth, exp_year: pm.expiryYear, isDefault: pm.isDefault }));
-                await updateDoc(doc(firestore, 'users', uid), { paymentMethods: stored });
+                await updateDoc(doc(firestore, 'riders', uid), { paymentMethods: stored });
               } catch (err) {
                 console.error('Failed to store payment methods', err);
               }
@@ -301,7 +301,7 @@ export default function PaymentMethodsScreen() {
                       const added = normalized.find((m) => m.id === paymentMethodId) || null;
                       try {
                         const stored = normalized.map(pm => ({ id: pm.id, brand: pm.type, last4: pm.lastFour, exp_month: pm.expiryMonth, exp_year: pm.expiryYear, isDefault: pm.isDefault }));
-                        await updateDoc(doc(firestore, 'users', uid), { paymentMethods: stored });
+                        await updateDoc(doc(firestore, 'riders', uid), { paymentMethods: stored });
                       } catch (err) {
                         console.error('Failed to store payment methods', err);
                       }
@@ -379,7 +379,7 @@ export default function PaymentMethodsScreen() {
 
                       try {
                         const stored = normalized.map(pm => ({ id: pm.id, brand: pm.type, last4: pm.lastFour, exp_month: pm.expiryMonth, exp_year: pm.expiryYear, isDefault: pm.isDefault }));
-                        await updateDoc(doc(firestore, 'users', uid), { paymentMethods: stored });
+                        await updateDoc(doc(firestore, 'riders', uid), { paymentMethods: stored });
                       } catch (err) {
                         console.error('Failed to store payment methods', err);
                       }

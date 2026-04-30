@@ -16,7 +16,7 @@ import { pickAndUploadAvatar } from '@/services/avatarUpload';
 
 export default function ProfileScreen() {
   const theme = useTheme();
-  const { isEmailVerified, refreshAuthState } = useAuthStore();
+  const { isEmailVerified, refreshProfiles: refreshAuthState } = useAuthStore();
   const { isVerified, verificationStatus } = useVerificationStore();
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
@@ -49,7 +49,7 @@ export default function ProfileScreen() {
     const unsub = onAuthStateChanged(firebaseAuth, async (u) => {
       setUser(u);
       if (u) {
-        const ref = doc(firestore, 'users', u.uid);
+        const ref = doc(firestore, 'riders', u.uid);
         const snap = await getDoc(ref);
         const data = snap.exists() ? (snap.data() as any) : null;
         setProfile(data);
@@ -289,7 +289,7 @@ export default function ProfileScreen() {
             </Text>
             <TouchableOpacity 
               style={styles.editButton} 
-              onPress={() => router.push('/account-settings')}
+              onPress={() => router.push('/settings/account-settings')}
             >
               <Edit2 size={16} color={theme.colors.primary} />
               <Text style={[styles.editText, { color: theme.colors.primary }]}>Edit</Text>

@@ -91,6 +91,15 @@ export default function RiderTabLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size || 24} color={color} />,
         }}
       />
+      {/* Hide all non-tab screens from the tab bar */}
+      <Tabs.Screen name="available-rides" options={{ href: null }} />
+      <Tabs.Screen name="settings" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="legal" options={{ href: null }} />
+      <Tabs.Screen name="legal/privacy" options={{ href: null }} />
+      <Tabs.Screen name="legal/terms" options={{ href: null }} />
+      <Tabs.Screen name="messages/[chatId]" options={{ href: null }} />
+      <Tabs.Screen name="ride/[id]" options={{ href: null }} />
+      <Tabs.Screen name="driver/[driverId]" options={{ href: null }} />
     </Tabs>
   );
 }

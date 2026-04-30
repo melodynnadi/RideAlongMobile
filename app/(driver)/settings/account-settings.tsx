@@ -88,7 +88,7 @@ export default function AccountSettingsScreen() {
       // Try drivers collection first, fallback to users
       let userDoc = await getDoc(doc(firestore, 'drivers', user.uid));
       if (!userDoc.exists()) {
-        userDoc = await getDoc(doc(firestore, 'users', user.uid));
+        userDoc = await getDoc(doc(firestore, 'drivers', user.uid));
       }
       
       if (userDoc.exists()) {

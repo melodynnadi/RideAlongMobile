@@ -66,13 +66,7 @@ export default function DriverTabLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="notifications" size={size || 24} color={color} />,
         }}
       />
-      <Tabs.Screen
-        name="earnings"
-        options={{
-          title: 'Earnings',
-          tabBarIcon: ({ color, size }) => <Ionicons name="cash" size={size || 24} color={color} />,
-        }}
-      />
+      <Tabs.Screen name="earnings" options={{ href: null }} />
       <Tabs.Screen
         name="profile"
         options={{
@@ -80,6 +74,15 @@ export default function DriverTabLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size || 24} color={color} />,
         }}
       />
+      {/* Hide all non-tab screens from the tab bar */}
+      <Tabs.Screen name="invite" options={{ href: null }} />
+      <Tabs.Screen name="settings" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="legal" options={{ href: null }} />
+      <Tabs.Screen name="legal/privacy" options={{ href: null }} />
+      <Tabs.Screen name="legal/terms" options={{ href: null }} />
+      <Tabs.Screen name="messages/[chatId]" options={{ href: null }} />
+      <Tabs.Screen name="request/[id]" options={{ href: null }} />
+      <Tabs.Screen name="rider/[id]" options={{ href: null }} />
     </Tabs>
   );
 }

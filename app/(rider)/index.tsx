@@ -416,7 +416,7 @@ export default function HomeScreen() {
   // Fetch profile for name
     (async () => {
       try {
-        const userDoc = await getDoc(doc(firestore, 'users', uid));
+        const userDoc = await getDoc(doc(firestore, 'riders', uid));
         const data = userDoc.exists() ? (userDoc.data() as any) : null;
         // Try multiple keys for first name, then auth displayName, then email prefix
         let firstName: string | undefined = getFirstNameFromProfile(data);
@@ -435,7 +435,7 @@ export default function HomeScreen() {
         
         if (!firstName && email) {
           // Fallback: query by email if doc id != uid
-          const q = query(collection(firestore, 'users'), where('email', '==', email), fsLimit(1));
+          const q = query(collection(firestore, 'riders'), where('email', '==', email), fsLimit(1));
           const snap = await getDocs(q);
           const docData = snap.docs[0]?.data();
           firstName = getFirstNameFromProfile(docData);
@@ -1007,7 +1007,7 @@ export default function HomeScreen() {
       // Force re-fetch user profile
       if (uid) {
         try {
-          const userDoc = await getDoc(doc(firestore, 'users', uid));
+          const userDoc = await getDoc(doc(firestore, 'riders', uid));
           const data = userDoc.exists() ? (userDoc.data() as any) : null;
           const firstName = getFirstNameFromProfile(data);
           const profilePhoto = data?.avatarUrl || data?.photoURL || data?.photoUrl || firebaseAuth.currentUser?.photoURL;
@@ -1039,7 +1039,7 @@ export default function HomeScreen() {
             
             if (uid) {
               try {
-                const userDoc = await getDoc(doc(firestore, 'users', uid));
+                const userDoc = await getDoc(doc(firestore, 'riders', uid));
                 const data = userDoc.exists() ? (userDoc.data() as any) : null;
                 const firstName = getFirstNameFromProfile(data);
                 const profilePhoto = data?.avatarUrl || data?.photoURL || data?.photoUrl || firebaseAuth.currentUser?.photoURL;
@@ -1442,11 +1442,11 @@ export default function HomeScreen() {
         router.push(`/messages/${chatId}`);
       } else {
         // Navigate to messages tab - chat will be auto-created when first message is sent
-        router.push('/(tabs)/messages');
+        router.push('/rider/messages');
       }
     } catch (error) {
       console.error('Error finding chat:', error);
-      router.push('/(tabs)/messages');
+      router.push('/rider/messages');
     }
   };
 
@@ -1853,13 +1853,13 @@ export default function HomeScreen() {
         }
         if (!prof && driverId) {
           try {
-            const d2 = await getDoc(doc(firestore, 'users', String(driverId)));
+            const d2 = await getDoc(doc(firestore, 'drivers', String(driverId)));
             prof = d2.exists() ? (d2.data() as any) : undefined;
           } catch {}
         }
         if (!prof && driverEmail) {
           try {
-            const q2 = query(collection(firestore, 'users'), where('email', '==', driverEmail), fsLimit(1));
+            const q2 = query(collection(firestore, 'drivers'), where('email', '==', driverEmail), fsLimit(1));
             const s2 = await getDocs(q2);
             prof = s2.docs[0]?.data() as any;
           } catch {}
@@ -1940,7 +1940,7 @@ export default function HomeScreen() {
             </View>
             <TouchableOpacity 
               style={styles.cleanNotificationButton}
-              onPress={() => router.push('/(tabs)/notifications')}
+              onPress={() => router.push('/rider/notifications')}
               accessibilityLabel="Notifications"
             >
               <Bell size={20} color="#1A2942" />
@@ -1981,7 +1981,7 @@ export default function HomeScreen() {
           <View style={styles.whereToContainer}>
             <TouchableOpacity 
               style={styles.whereToButton}
-              onPress={() => router.push('/(tabs)/book')}
+              onPress={() => router.push('/rider/book')}
             >
               <MapPin size={24} color="#FFFFFF" />
               <View style={styles.whereToTextContainer}>
@@ -2094,7 +2094,7 @@ export default function HomeScreen() {
           <View style={styles.upcomingSection}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Upcoming Rides</Text>
-              <TouchableOpacity onPress={() => router.push('/ride-history')}>
+              <TouchableOpacity onPress={() => router.push('/settings/ride-history')}>
                 <Text style={styles.viewAllText}>View All</Text>
               </TouchableOpacity>
             </View>
@@ -2271,7 +2271,7 @@ export default function HomeScreen() {
         <View style={styles.upcomingSection}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Recent Rides</Text>
-            <TouchableOpacity onPress={() => router.push('/ride-history')}>
+            <TouchableOpacity onPress={() => router.push('/settings/ride-history')}>
               <Text style={styles.viewAllText}>View All</Text>
             </TouchableOpacity>
           </View>
@@ -2324,7 +2324,7 @@ export default function HomeScreen() {
                         <Text style={styles.rateBtnText}>Rate</Text>
                       </TouchableOpacity>
                     )}
-                    <TouchableOpacity onPress={() => router.push('/ride-history')}>
+                    <TouchableOpacity onPress={() => router.push('/settings/ride-history')}>
                       <Text style={styles.viewDetailsText}>View History →</Text>
                     </TouchableOpacity>
                   </View>

@@ -308,11 +308,11 @@ export default function HomeScreen() {
         router.push(`/messages/${chatId}`);
       } else {
         // Navigate to messages tab - chat will be auto-created when first message is sent
-        router.push('/(tabs)/messages');
+        router.push('/driver/messages');
       }
     } catch (error) {
       console.error('Error finding chat:', error);
-      router.push('/(tabs)/messages');
+      router.push('/driver/messages');
     }
   };
 
@@ -396,11 +396,13 @@ export default function HomeScreen() {
     const unsubs: Array<() => void> = [];
 
     // Listen to user document for student verification status changes
-    const userDocRef = doc(firestore, 'users', uid);
+    const userDocRef = doc(firestore, 'drivers', uid);
     const unsubUser = onSnapshot(userDocRef, (snap) => {
       if (snap.exists()) {
         const data = snap.data() as any;
-        const verified = data?.isVerified === true;
+        const rawIsVerified = data?.isVerified === true;
+        const vs_status = data?.verificationStatus || null;
+        const verified = rawIsVerified || vs_status === 'approved' || vs_status === 'auto-approved';
         const prevVerified = useVerificationStore.getState().isVerified;
         const vs = useVerificationStore.getState();
 
@@ -463,7 +465,7 @@ export default function HomeScreen() {
     // Fetch profile for name and rating
     (async () => {
       try {
-        const userDoc = await getDoc(doc(firestore, 'users', uid));
+        const userDoc = await getDoc(doc(firestore, 'drivers', uid));
         const data = userDoc.exists() ? (userDoc.data() as any) : null;
         const rating = typeof data?.rating === 'number' ? (data.rating as number) : null;
         // Try multiple keys for first name, then auth displayName, then email prefix
@@ -476,7 +478,7 @@ export default function HomeScreen() {
         }
         if (!firstName && email) {
           // Fallback: query by email if doc id != uid
-          const q = query(collection(firestore, 'users'), where('email', '==', email), fsLimit(1));
+          const q = query(collection(firestore, 'drivers'), where('email', '==', email), fsLimit(1));
           const snap = await getDocs(q);
           const docData = snap.docs[0]?.data();
           firstName = getFirstNameFromProfile(docData);
@@ -1504,7 +1506,7 @@ export default function HomeScreen() {
         
         // Re-fetch user profile
         try {
-          const userDoc = await getDoc(doc(firestore, 'users', uid));
+          const userDoc = await getDoc(doc(firestore, 'drivers', uid));
           const data = userDoc.exists() ? (userDoc.data() as any) : null;
           const firstName = getFirstNameFromProfile(data);
           const profilePhoto = data?.avatarUrl || data?.photoURL || data?.photoUrl || firebaseAuth.currentUser?.photoURL;
@@ -1534,7 +1536,7 @@ export default function HomeScreen() {
             
             // Re-fetch user profile
             try {
-              const userDoc = await getDoc(doc(firestore, 'users', uid));
+              const userDoc = await getDoc(doc(firestore, 'drivers', uid));
               const data = userDoc.exists() ? (userDoc.data() as any) : null;
               const firstName = getFirstNameFromProfile(data);
               const profilePhoto = data?.avatarUrl || data?.photoURL || data?.photoUrl || firebaseAuth.currentUser?.photoURL;
@@ -2141,13 +2143,13 @@ export default function HomeScreen() {
         let prof: any = undefined;
         if (riderId) {
           try {
-            const d1 = await getDoc(doc(firestore, 'users', String(riderId)));
+            const d1 = await getDoc(doc(firestore, 'riders', String(riderId)));
             prof = d1.exists() ? (d1.data() as any) : undefined;
           } catch {}
         }
         if (!prof && riderEmail) {
           try {
-            const q1 = query(collection(firestore, 'users'), where('email', '==', riderEmail), fsLimit(1));
+            const q1 = query(collection(firestore, 'riders'), where('email', '==', riderEmail), fsLimit(1));
             const s1 = await getDocs(q1);
             prof = s1.docs[0]?.data() as any;
           } catch {}
@@ -2232,7 +2234,7 @@ export default function HomeScreen() {
           let userDoc: any = undefined;
           if (riderId) {
             try {
-              const d = await getDoc(doc(firestore, 'users', String(riderId)));
+              const d = await getDoc(doc(firestore, 'riders', String(riderId)));
               userDoc = d.exists() ? d.data() : undefined;
             } catch {}
           }
@@ -2328,7 +2330,7 @@ export default function HomeScreen() {
             </View>
             <TouchableOpacity 
               style={styles.cleanNotificationButton}
-              onPress={() => router.push('/(tabs)/notifications')}
+              onPress={() => router.push('/driver/notifications')}
               accessibilityLabel="Notifications"
             >
               <Bell size={20} color="#1A2942" />
@@ -2372,7 +2374,7 @@ export default function HomeScreen() {
           <View style={styles.findRidesContainer}>
             <TouchableOpacity 
               style={styles.findRidesButton}
-              onPress={() => router.push('/(tabs)/requests')}
+              onPress={() => router.push('/driver/requests')}
             >
               <MapPin size={24} color="#FFFFFF" />
               <View style={styles.findRidesTextContainer}>
@@ -2475,7 +2477,7 @@ export default function HomeScreen() {
         <View style={styles.upcomingSection}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Upcoming Rides</Text>
-            <TouchableOpacity onPress={() => router.push('/ride-history')}>
+            <TouchableOpacity onPress={() => router.push('/settings/ride-history')}>
               <Text style={styles.viewAllText}>View All</Text>
             </TouchableOpacity>
           </View>
@@ -2982,7 +2984,7 @@ export default function HomeScreen() {
                   )}
                   <View style={styles.rideFooter}>
                     <Text style={[styles.ridePrice, { flex: 1 }]}>{price}{seatCount > 1 ? ` · ${seatCount} seats` : ''}</Text>
-                    <TouchableOpacity onPress={() => router.push('/ride-history')} accessibilityRole="button" accessibilityLabel="View ride history">
+                    <TouchableOpacity onPress={() => router.push('/settings/ride-history')} accessibilityRole="button" accessibilityLabel="View ride history">
                       <Text style={styles.viewDetailsText}>View History →</Text>
                     </TouchableOpacity>
                   </View>
