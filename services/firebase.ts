@@ -36,38 +36,15 @@ export const firestore = _firestore;
 export const storage = getStorage(firebaseApp);
 export const functions = getFunctions(firebaseApp, 'us-central1');
 
-export const GOOGLE_MAPS_API_KEY = 'AIzaSyDWOpCIVn_oPxn4qWYE4eG3teKtn0c5G-w';
-
-let _stripeKey: string | null = null;
-let _stripeKeyPromise: Promise<string> | null = null;
-
-export async function getStripePublishableKey(): Promise<string> {
-  if (_stripeKey) return _stripeKey;
-  if (_stripeKeyPromise) return _stripeKeyPromise;
-
-  _stripeKeyPromise = (async () => {
-    try {
-      const apiUrl = getApiBaseUrl();
-      const response = await fetch(`${apiUrl}/api/payments/config`);
-      if (!response.ok) throw new Error('Failed to fetch payment config');
-      const config = await response.json();
-      _stripeKey = config.publishableKey || '';
-      return _stripeKey!;
-    } catch {
-      _stripeKey = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
-      return _stripeKey!;
-    } finally {
-      _stripeKeyPromise = null;
-    }
-  })();
-
-  return _stripeKeyPromise;
-}
+export const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyDWOpCIVn_oPxn4qWYE4eG3teKtn0c5G-w';
 
 export const getApiBaseUrl = (): string => {
   let base = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
-  if (base.startsWith('https://') || (base.startsWith('http://') && !base.includes('localhost') && !base.includes('127.0.0.1'))) {
+  if (
+    base.startsWith('https://') ||
+    (base.startsWith('http://') && !base.includes('localhost') && !base.includes('127.0.0.1'))
+  ) {
     return base.replace(/\/+$/, '');
   }
 
@@ -75,7 +52,10 @@ export const getApiBaseUrl = (): string => {
     const url = new URL(base);
     const isLocalhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
     if (isLocalhost) {
-      const hostUri = (Constants.expoConfig as any)?.hostUri || (Constants as any)?.manifest?.debuggerHost || '';
+      const hostUri =
+        (Constants.expoConfig as any)?.hostUri ||
+        (Constants as any)?.manifest?.debuggerHost ||
+        '';
       const host = typeof hostUri === 'string' ? hostUri.split(':')[0] : '';
       if (host && /^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
         url.hostname = host;

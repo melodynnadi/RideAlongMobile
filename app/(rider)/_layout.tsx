@@ -1,43 +1,94 @@
 import { Tabs } from 'expo-router';
-import { MapPin, Clock, User } from 'lucide-react-native';
-import { Colors } from '@/constants/colors';
+import React, { useEffect } from 'react';
+import { Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 
-export default function RiderLayout() {
+import { HapticTab } from '@/components/HapticTab';
+import TabBarBackground from '@/components/ui/TabBarBackground';
+import { useTheme } from '@/hooks/useTheme';
+import { useAuthStore } from '@/stores/authStore';
+import { useUnreadMessages } from '@/hooks/useUnreadMessages';
+
+export default function RiderTabLayout() {
+  const theme = useTheme();
+  const { isAuthenticated, isEmailVerified, checkEmailVerification } = useAuthStore();
+  const totalUnread = useUnreadMessages();
+
+  useEffect(() => {
+    if (isAuthenticated && !isEmailVerified) {
+      const verifyStatus = async () => {
+        try {
+          const verified = await checkEmailVerification();
+          if (!verified) router.replace('/(auth)/verify-email');
+        } catch {
+          router.replace('/(auth)/verify-email');
+        }
+      };
+      verifyStatus();
+    }
+  }, [isAuthenticated, isEmailVerified, checkEmailVerification]);
+
   return (
     <Tabs
       screenOptions={{
+        tabBarActiveTintColor: theme.colors.primary,
+        tabBarInactiveTintColor: theme.colors.muted,
         headerShown: false,
+        tabBarButton: HapticTab,
+        tabBarBackground: TabBarBackground,
         tabBarStyle: {
           backgroundColor: '#101826',
           borderTopColor: '#1E2D45',
           borderTopWidth: 1,
-          height: 60,
-          paddingBottom: 8,
+          height: Platform.OS === 'ios' ? 90 : 80,
+          paddingBottom: Platform.OS === 'ios' ? 25 : 15,
+          paddingTop: 10,
         },
-        tabBarActiveTintColor: Colors.primary,
-        tabBarInactiveTintColor: Colors.muted,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color }) => <MapPin size={22} color={color} />,
+          tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size || 24} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="rides"
+        name="book"
+        options={{
+          title: 'Book',
+          tabBarIcon: ({ color, size }) => <Ionicons name="car" size={size || 24} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="requests"
         options={{
           title: 'Rides',
-          tabBarIcon: ({ color }) => <Clock size={22} color={color} />,
+          tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size || 24} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="messages"
+        options={{
+          title: 'Messages',
+          tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" size={size || 24} color={color} />,
+          tabBarBadge: totalUnread > 0 ? totalUnread : undefined,
+          tabBarBadgeStyle: { backgroundColor: '#EF4444', color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' },
+        }}
+      />
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          title: 'Alerts',
+          tabBarIcon: ({ color, size }) => <Ionicons name="notifications" size={size || 24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color }) => <User size={22} color={color} />,
+          tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size || 24} color={color} />,
         }}
       />
     </Tabs>

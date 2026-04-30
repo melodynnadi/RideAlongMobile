@@ -92,14 +92,7 @@
         }
       ],
       "expo-font",
-      "expo-web-browser",
-      [
-        "@sentry/react-native/expo",
-        {
-          "organization": "ridealong-qh",
-          "project": "ridealong-mobile"
-        }
-      ]
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

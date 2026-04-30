@@ -14,6 +14,9 @@ module.exports = {
         card: '#101826',
         text: '#F8FAFC',
         muted: '#94A3B8',
+        border: '#1E2D45',
+        white: '#FFFFFF',
+        black: '#000000',
       },
       borderRadius: {
         '2xl': '24px',

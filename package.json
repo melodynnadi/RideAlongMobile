@@ -1,6 +1,6 @@
 {
   "name": "ridealongmobile",
-  "main": "expo-router/entry",
+  "main": "index.tsx",
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
+    "@expo/ngrok": "^4.1.0",
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-picker/picker": "^2.11.1",
@@ -70,7 +71,8 @@
     "@babel/core": "^7.25.2",
     "@testing-library/react-native": "^12.9.0",
     "@types/jest": "^29.5.14",
-    "@types/react": "~19.1.13",
+    "@types/react": "~19.1.10",
+    "cross-env": "^10.1.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
     "jest": "^29.7.0",
