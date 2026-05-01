@@ -11,6 +11,12 @@
     "newArchEnabled": true,
     "description": "A student-friendly ride-sharing platform. Book rides or drive — one app, your choice.",
     "primaryColor": "#E05E1A",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/291e6c2d-b949-4105-9b9e-afed7c864810"
+    },
     "notification": {
       "icon": "./assets/icon.png",
       "color": "#E05E1A"
