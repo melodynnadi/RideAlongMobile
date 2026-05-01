@@ -4,6 +4,7 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import { doc, updateDoc } from 'firebase/firestore';
 import { firestore, firebaseAuth } from '@/constants/services';
+import { useAuthStore } from '@/stores/authStore';
 
 // Configure notification behavior
 Notifications.setNotificationHandler({
@@ -79,13 +80,15 @@ async function saveFCMToken(token: string) {
       // Not a driver, try users collection
     }
 
-    // Save to users collection
-    const userDocRef = doc(firestore, 'users', firebaseAuth.currentUser.uid);
+    // Save to role-specific collection
+    const activeRole = useAuthStore.getState().activeRole;
+    const collection = activeRole === 'driver' ? 'drivers' : 'riders';
+    const userDocRef = doc(firestore, collection, firebaseAuth.currentUser.uid);
     await updateDoc(userDocRef, {
       fcmToken: token,
       fcmTokenUpdatedAt: new Date(),
     });
-    console.log('FCM token saved to users collection');
+    console.log(`FCM token saved to ${collection} collection`);
   } catch (error) {
     console.error('Error saving FCM token:', error);
   }

@@ -56,7 +56,7 @@ export default function AvailableRidesScreen() {
   useEffect(() => {
     const uid = firebaseAuth.currentUser?.uid;
     if (!uid) return;
-    const ref = doc(firestore, 'users', uid);
+    const ref = doc(firestore, 'riders', uid);
     getDoc(ref).then((snap) => { if (snap.exists()) setViewerProfile(snap.data()); }).catch(() => {});
   }, []);
 
@@ -359,7 +359,7 @@ export default function AvailableRidesScreen() {
       await Promise.all(missingIdKeys.map(async (uid) => {
         try {
           // Try users/<uid>
-          const snapUser = await getDoc(doc(firestore, 'users', uid));
+          const snapUser = await getDoc(doc(firestore, 'drivers', uid));
           if (snapUser.exists()) {
             const d: any = snapUser.data();
             const prof = normalizeProfile(d);
@@ -404,7 +404,7 @@ export default function AvailableRidesScreen() {
       while (emailArr.length) {
         const chunk = emailArr.splice(0, 10);
         try {
-          const q = query(collection(firestore, 'users'), where('email', 'in', chunk), fsLimit(10));
+          const q = query(collection(firestore, 'drivers'), where('email', 'in', chunk), fsLimit(10));
           const snap = await getDocs(q);
           snap.forEach((docu) => {
             const d: any = docu.data();

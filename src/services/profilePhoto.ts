@@ -34,7 +34,7 @@ export async function pickAndUploadProfilePhoto(): Promise<PickUploadResult> {
 
   // 3) Get old avatar info to delete after successful upload
   // Skip this pre-fetch - backend will handle old photo deletion
-  const userDocRef = doc(firestore, 'users', user.uid);
+  const userDocRef = doc(firestore, 'drivers', user.uid);
   const oldPhotoPath = undefined; // Backend retrieves this
 
   // 4) Resize/compress to keep uploads light (square, max 512)
@@ -122,7 +122,7 @@ export async function removeProfilePhoto(): Promise<void> {
   const user = firebaseAuth.currentUser;
   if (!user) throw new Error('Must be signed in to remove a profile photo.');
 
-  const userRef = doc(firestore, 'users', user.uid);
+  const userRef = doc(firestore, 'drivers', user.uid);
   const snap = await getDoc(userRef);
   const data = snap.exists() ? (snap.data() as any) : null;
   const photoPath: string | undefined = data?.photoPath;

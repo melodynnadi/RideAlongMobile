@@ -654,7 +654,7 @@ export default function RequestsInboxScreen() {
       
       for (const id of missing) {
         try {
-          const u = await getDoc(doc(firestore, 'users', id));
+          const u = await getDoc(doc(firestore, 'riders', id));
           if (u.exists()) {
             const d: any = u.data();
             
@@ -706,7 +706,7 @@ export default function RequestsInboxScreen() {
       if (!uid) { Alert.alert('Sign in required', 'Please sign in to offer a ride.'); return; }
       
       // Check verification status
-      const userDoc = await getDoc(doc(firestore, 'users', uid));
+      const userDoc = await getDoc(doc(firestore, 'drivers', uid));
       const isVerified = userDoc.exists() && userDoc.data()?.isVerified === true;
       if (!isVerified) {
         const verificationDeadline = userDoc.data()?.verificationDeadline;

@@ -619,7 +619,7 @@ export default function BookScreen() {
       const newRequestId: string | null = result?.requestId || result?.id || result?.rideRequestId || null;
       void newRequestId; // captured for future use
       Alert.alert('Request Posted!', 'Your ride request is live. Drivers will be able to find you.');
-      router.push('/(tabs)');
+      router.push('/rider');
     } catch (e: any) {
       console.error('Ride request API error:', e);
       
@@ -679,7 +679,7 @@ export default function BookScreen() {
         setPaymentModalVisible(false);
 
         Alert.alert('Request Posted!', 'Your ride request is live. Drivers will be able to find you.');
-        router.push('/(tabs)');
+        router.push('/rider');
       } catch (fallbackError) {
         console.error('Fallback also failed:', fallbackError);
         Alert.alert('Submit failed', 'Could not submit your request. Please try again.');

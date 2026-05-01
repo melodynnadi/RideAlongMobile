@@ -177,7 +177,7 @@ export default function MessagesScreen() {
               Promise.all(
                 userIdsToFetchArr.map(async (userId) => {
                   try {
-                    let userDoc = await getDoc(doc(firestore, 'users', userId));
+                    let userDoc = await getDoc(doc(firestore, 'riders', userId));
                     if (!userDoc.exists()) {
                       try {
                         userDoc = await getDoc(doc(firestore, 'drivers', userId));

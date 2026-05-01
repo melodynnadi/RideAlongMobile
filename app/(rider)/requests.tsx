@@ -1,1 +1,1 @@
-export { default } from '../available-rides';
+export { default } from './available-rides';

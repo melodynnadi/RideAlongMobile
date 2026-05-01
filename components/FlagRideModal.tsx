@@ -349,3 +349,5 @@ const styles = StyleSheet.create({
   actionsRow: { flexDirection: 'row', gap: 12, marginTop: 16 },
   btn: { flex: 1 },
 });
+
+export default FlagRideModal;

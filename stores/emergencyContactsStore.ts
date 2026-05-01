@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { firestore, firebaseAuth } from '@/constants/services';
+import { useAuthStore } from '@/stores/authStore';
 import { EmergencyContact, UserProfile } from '@/types';
 
 interface EmergencyContactsState {
@@ -33,7 +34,7 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
     
     try {
       set({ isLoading: true });
-      const userDoc = await getDoc(doc(firestore, 'users', uid));
+      const userDoc = await getDoc(doc(firestore, useAuthStore.getState().activeRole === 'driver' ? 'drivers' : 'riders', uid));
       
       if (!userDoc.exists()) {
         throw new Error('User document not found');
@@ -66,7 +67,7 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
       const updatedContacts = [...contacts, newContact];
       
       // Update Firebase
-      await updateDoc(doc(firestore, 'users', uid), {
+      await updateDoc(doc(firestore, useAuthStore.getState().activeRole === 'driver' ? 'drivers' : 'riders', uid), {
         emergencyContacts: updatedContacts,
         updatedAt: serverTimestamp(),
       });
@@ -98,7 +99,7 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
       updatedContacts[index] = updatedContact;
       
       // Update Firebase
-      await updateDoc(doc(firestore, 'users', uid), {
+      await updateDoc(doc(firestore, useAuthStore.getState().activeRole === 'driver' ? 'drivers' : 'riders', uid), {
         emergencyContacts: updatedContacts,
         updatedAt: serverTimestamp(),
       });
@@ -129,7 +130,7 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
       const updatedContacts = contacts.filter((_, i) => i !== index);
       
       // Update Firebase
-      await updateDoc(doc(firestore, 'users', uid), {
+      await updateDoc(doc(firestore, useAuthStore.getState().activeRole === 'driver' ? 'drivers' : 'riders', uid), {
         emergencyContacts: updatedContacts,
         updatedAt: serverTimestamp(),
       });

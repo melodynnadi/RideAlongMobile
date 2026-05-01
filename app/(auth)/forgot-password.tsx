@@ -1,85 +1,124 @@
-import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { useRouter } from 'expo-router';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { useTheme } from '@/hooks/useTheme';
+import { router } from 'expo-router';
 import { sendPasswordResetEmail } from 'firebase/auth';
-import Toast from 'react-native-toast-message';
-import { firebaseAuth } from '@/services/firebase';
+import { firebaseAuth } from '@/constants/services';
 
 export default function ForgotPasswordScreen() {
-  const router = useRouter();
+  const theme = useTheme();
   const [email, setEmail] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
 
   const handleSend = async () => {
     if (!email.trim()) {
-      Toast.show({ type: 'error', text1: 'Enter your email address.' });
+      Alert.alert('Reset Password', 'Enter your email address first.');
       return;
     }
-    setSubmitting(true);
     try {
+      setLoading(true);
       await sendPasswordResetEmail(firebaseAuth, email.trim().toLowerCase());
       setSent(true);
+      Alert.alert('Reset Email Sent', 'Check your inbox for a password reset link.');
     } catch {
-      Toast.show({ type: 'error', text1: 'Could not send reset email. Check the address and try again.' });
+      Alert.alert('Error', 'Could not send reset email. Check the address and try again.');
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-bg">
-      <View className="flex-1 px-6 pt-6">
-        <TouchableOpacity className="mb-8 self-start" onPress={() => router.back()}>
-          <ChevronLeft size={28} color="#F8FAFC" />
-        </TouchableOpacity>
-
-        <Text className="text-3xl font-bold text-text mb-2">Reset password</Text>
-        <Text className="text-muted text-base mb-8">
-          {sent
-            ? "We've sent a password reset link to your email. Check your inbox."
-            : "Enter your email and we'll send you a reset link."}
-        </Text>
-
-        {!sent && (
-          <View className="gap-4">
-            <View>
-              <Text className="text-muted text-sm mb-2">Email</Text>
-              <TextInput
-                className="bg-card border border-border rounded-2xl px-4 py-4 text-text"
-                placeholder="you@example.com"
-                placeholderTextColor="#94A3B8"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-
-            <TouchableOpacity
-              className="bg-primary rounded-2xl py-4 items-center active:opacity-80"
-              onPress={handleSend}
-              disabled={submitting}
-            >
-              {submitting
-                ? <ActivityIndicator color="#fff" />
-                : <Text className="text-white font-bold text-base">Send reset link</Text>}
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+    >
+      <LinearGradient colors={['#F8FAFC', '#EFF6FF']} style={styles.gradient}>
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+              <Ionicons name="arrow-back" size={24} color={theme.colors.secondary} />
             </TouchableOpacity>
-          </View>
-        )}
 
-        {sent && (
-          <TouchableOpacity
-            className="bg-card border border-border rounded-2xl py-4 items-center"
-            onPress={() => router.push('/(auth)/sign-in')}
-          >
-            <Text className="text-text font-semibold">Back to sign in</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </SafeAreaView>
+            <View style={styles.titleContainer}>
+              <Text style={[styles.title, { color: theme.colors.secondary }]}>Reset Password</Text>
+              <Text style={styles.subtitle}>
+                {sent
+                  ? "We've sent a password reset link to your email. Check your inbox."
+                  : "Enter your email and we'll send you a reset link."}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.formCard}>
+            {!sent ? (
+              <View style={styles.form}>
+                <Input
+                  label="Email"
+                  placeholder="you@university.edu"
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  value={email}
+                  onChangeText={setEmail}
+                />
+                <Button onPress={handleSend} loading={loading} fullWidth size="lg" style={styles.sendButton}>
+                  <Text style={styles.sendButtonText}>Send Reset Link</Text>
+                </Button>
+              </View>
+            ) : (
+              <View style={styles.form}>
+                <View style={styles.successContainer}>
+                  <Ionicons name="checkmark-circle" size={48} color="#10B981" />
+                  <Text style={styles.successText}>Reset link sent to {email}</Text>
+                </View>
+                <Button onPress={() => router.push('/(auth)/sign-in')} fullWidth size="lg" style={styles.sendButton}>
+                  <Text style={styles.sendButtonText}>Back to Sign In</Text>
+                </Button>
+              </View>
+            )}
+          </View>
+        </SafeAreaView>
+      </LinearGradient>
+    </ScrollView>
   );
 }
+
+const { height } = Dimensions.get('window');
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  scrollContent: { flexGrow: 1 },
+  gradient: { flex: 1, minHeight: height },
+  safeArea: { flex: 1, paddingHorizontal: 24 },
+  header: { paddingTop: 20, marginBottom: 40 },
+  backButton: {
+    width: 44, height: 44, borderRadius: 22, backgroundColor: 'white',
+    justifyContent: 'center', alignItems: 'center', marginBottom: 20,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1, shadowRadius: 4, elevation: 3,
+  },
+  titleContainer: { alignItems: 'center' },
+  title: { fontSize: 32, fontWeight: '800', textAlign: 'center', marginBottom: 8 },
+  subtitle: { fontSize: 16, color: '#64748B', textAlign: 'center', fontWeight: '400', lineHeight: 24 },
+  formCard: {
+    backgroundColor: 'white', borderRadius: 24,
+    borderWidth: 1, borderColor: '#F1F5F9', padding: 24, marginBottom: 20,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12, shadowRadius: 16, elevation: 8,
+  },
+  form: { gap: 20 },
+  sendButton: {
+    backgroundColor: '#E05E1A', borderRadius: 50, paddingVertical: 14,
+    shadowColor: '#E05E1A', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 8, elevation: 8,
+  },
+  sendButtonText: { fontSize: 18, fontWeight: '700', color: 'white', textAlign: 'center' },
+  successContainer: { alignItems: 'center', gap: 12, paddingVertical: 8 },
+  successText: { fontSize: 16, color: '#475569', textAlign: 'center', lineHeight: 24 },
+});

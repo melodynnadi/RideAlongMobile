@@ -19,6 +19,8 @@ function AuthGate() {
     if (isLoading) return;
 
     const inAuth = segments[0] === '(auth)';
+    const inRider = segments[0] === '(rider)';
+    const inDriver = segments[0] === '(driver)';
 
     if (!isAuthenticated) {
       if (!inAuth) router.replace('/(auth)/sign-in');
@@ -30,12 +32,12 @@ function AuthGate() {
       return;
     }
 
-    if (inAuth) {
-      if (activeRole === 'driver') {
-        router.replace('/(driver)');
-      } else {
-        router.replace('/(rider)');
-      }
+    // Redirect to correct role group if in wrong one or in auth
+    if (activeRole === 'driver') {
+      if (!inDriver) router.replace('/(driver)');
+    } else {
+      // rider or both (defaulting to rider)
+      if (!inRider) router.replace('/(rider)');
     }
   }, [isAuthenticated, isLoading, isEmailVerified, activeRole, segments]);
 

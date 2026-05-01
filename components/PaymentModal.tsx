@@ -75,7 +75,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       loadKeyRef.current = key;
       try {
         setCreating(true);
-        const userRef = doc(firestore, 'users', riderId);
+        const userRef = doc(firestore, 'riders', riderId);
         const applyCards = (cards: Array<{ id: string; brand: string; last4: string; isDefault?: boolean }>) => {
           if (cancelled) return;
           setSavedCards(cards);
@@ -378,14 +378,14 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
         const ridePostingData = ridePostingDoc.exists() ? ridePostingDoc.data() : {};
         
         // Get rider's profile information
-        const userDoc = await getDoc(doc(firestore, 'users', riderId));
+        const userDoc = await getDoc(doc(firestore, 'riders', riderId));
         const userData = userDoc.exists() ? userDoc.data() : {};
         const riderName = userData.firstName && userData.lastName ? 
           `${userData.firstName} ${userData.lastName}` :
           userData.name || firebaseAuth.currentUser?.displayName || 'RideAlong User';
         
         // Get driver information from ride posting
-        const driverDoc = driverId ? await getDoc(doc(firestore, 'users', driverId)) : null;
+        const driverDoc = driverId ? await getDoc(doc(firestore, 'drivers', driverId)) : null;
         const driverData = driverDoc?.exists() ? driverDoc.data() : {};
         const driverName = driverData.firstName && driverData.lastName ? 
           `${driverData.firstName} ${driverData.lastName}` :

@@ -40,7 +40,7 @@ export default function RideDeepLinkScreen() {
           const dId = data.driverId || data.driverUID || data.ownerId || data.driver?.id;
           if (dId) {
             try {
-              const uSnap = await getDoc(doc(firestore, 'users', dId));
+              const uSnap = await getDoc(doc(firestore, 'drivers', dId));
               if (uSnap.exists()) {
                 const u = uSnap.data() as any;
                 const name = u.name || u.displayName || u.fullName ||
@@ -124,7 +124,7 @@ export default function RideDeepLinkScreen() {
   if (notFound || !ride) {
     return (
       <SafeAreaView style={styles.container}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.canGoBack() ? router.back() : router.replace('/rider')}>
           <ArrowLeft size={22} color="#1E293B" />
         </TouchableOpacity>
         <View style={styles.center}>
@@ -166,7 +166,7 @@ export default function RideDeepLinkScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/rider')} style={styles.backBtn}>
           <ArrowLeft size={20} color="#0F172A" />
         </TouchableOpacity>
         <View style={styles.headerTextWrap}>

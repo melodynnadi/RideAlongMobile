@@ -22,7 +22,7 @@ export async function pickAndUploadAvatar(): Promise<AvatarUploadResult> {
   const user = firebaseAuth.currentUser;
   if (!user) throw new Error('Must be signed in');
 
-  const userRef = doc(firestore, 'users', user.uid);
+  const userRef = doc(firestore, 'riders', user.uid);
   const snap = await getDoc(userRef);
   const data = snap.exists() ? (snap.data() as any) : null;
   const oldAvatarUrl = data?.avatarUrl || data?.photoURL || null;

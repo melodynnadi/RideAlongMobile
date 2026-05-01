@@ -38,7 +38,7 @@ export default function ProfileScreen() {
     
     const fetchUserPhoto = async () => {
       try {
-        const ref = doc(firestore, 'users', uid);
+        const ref = doc(firestore, 'drivers', uid);
         const snap = await getDoc(ref);
         if (mounted && snap.exists()) {
           const data = snap.data();

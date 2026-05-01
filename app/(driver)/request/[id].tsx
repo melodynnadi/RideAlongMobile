@@ -53,7 +53,7 @@ export default function RequestDeepLinkScreen() {
           const rId = data.userId || data.riderId || data.requesterId;
           if (rId) {
             try {
-              const uSnap = await getDoc(doc(firestore, 'users', rId));
+              const uSnap = await getDoc(doc(firestore, 'riders', rId));
               if (uSnap.exists()) {
                 const u = uSnap.data() as any;
                 const name = u.name || u.displayName || u.fullName ||
@@ -180,7 +180,7 @@ export default function RequestDeepLinkScreen() {
   if (notFound || !request) {
     return (
       <SafeAreaView style={styles.container}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.canGoBack() ? router.back() : router.replace('/driver')}>
           <ArrowLeft size={22} color="#1E293B" />
         </TouchableOpacity>
         <View style={styles.center}>
@@ -190,7 +190,7 @@ export default function RequestDeepLinkScreen() {
           </Text>
           <TouchableOpacity
             style={[styles.browseBtn, { backgroundColor: theme.colors.primary }]}
-            onPress={() => router.replace('/(tabs)/requests')}
+            onPress={() => router.replace('/driver/requests')}
           >
             <Text style={styles.browseBtnText}>Browse Requests</Text>
           </TouchableOpacity>
@@ -222,7 +222,7 @@ export default function RequestDeepLinkScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/driver')} style={styles.backBtn}>
           <ArrowLeft size={20} color="#0F172A" />
         </TouchableOpacity>
         <View style={styles.headerTextWrap}>

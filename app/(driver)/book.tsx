@@ -506,7 +506,7 @@ export default function BookScreen() {
       // Check student verification status before allowing post
       // Only block if BOTH not verified AND past deadline (matching server logic)
       try {
-        const userDoc = await getDoc(doc(firestore, 'users', user.uid));
+        const userDoc = await getDoc(doc(firestore, 'drivers', user.uid));
         if (userDoc.exists()) {
           const data = userDoc.data();
           const isVerified = data?.isVerified === true;
@@ -682,7 +682,7 @@ export default function BookScreen() {
         setNotes('');
 
         Alert.alert('Ride Posted!', 'Your ride is now visible to riders.');
-        router.push('/(tabs)');
+        router.push('/driver');
       } catch (apiError: any) {
         console.error('Ride posting API error:', apiError);
         
@@ -749,7 +749,7 @@ export default function BookScreen() {
         setNotes('');
 
         Alert.alert('Ride Posted!', 'Your ride is now visible to riders.');
-        router.push('/(tabs)');
+        router.push('/driver');
       }
     } catch (e) {
   console.warn('ride posting submit error', e);

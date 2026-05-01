@@ -31,7 +31,7 @@ export default function DriverDetailsScreen() {
         let data: any = snap.exists() ? (snap.data() as any) : null;
         if (!data) {
           // fallback to users/{driverId}
-          const uRef = doc(firestore, 'users', String(driverId));
+          const uRef = doc(firestore, 'drivers', String(driverId));
           const usnap = await getDoc(uRef);
           data = usnap.exists() ? (usnap.data() as any) : null;
         }
@@ -84,7 +84,7 @@ export default function DriverDetailsScreen() {
                   fetchedProfiles[rid] = { ...data, name: displayName, displayName, fullName: displayName };
                   console.log('[DriverProfile] Found rider profile for', rid, ':', displayName);
                 } else {
-                  const uSnap = await getDoc(doc(firestore, 'users', rid));
+                  const uSnap = await getDoc(doc(firestore, 'riders', rid));
                   if (uSnap.exists()) {
                     const data = uSnap.data();
                     // Normalize name from multiple possible fields

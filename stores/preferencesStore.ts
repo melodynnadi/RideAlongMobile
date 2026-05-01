@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { firestore, firebaseAuth } from '@/constants/services';
+import { useAuthStore } from '@/stores/authStore';
 import { UserPreferences, UserProfile } from '@/types';
 
 interface PreferencesState {
@@ -37,7 +38,7 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
     
     try {
       set({ isLoading: true });
-      const userDoc = await getDoc(doc(firestore, 'users', uid));
+      const userDoc = await getDoc(doc(firestore, useAuthStore.getState().activeRole === 'driver' ? 'drivers' : 'riders', uid));
       
       if (!userDoc.exists()) {
         throw new Error('User document not found');
@@ -76,7 +77,7 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
       set({ isLoading: true });
       
       // Update the user document with new preferences
-      await updateDoc(doc(firestore, 'users', uid), {
+      await updateDoc(doc(firestore, useAuthStore.getState().activeRole === 'driver' ? 'drivers' : 'riders', uid), {
         musicPreference: preferences.musicPreference,
         soundEnvironment: preferences.soundEnvironment,
         conversationLevel: preferences.conversationLevel,

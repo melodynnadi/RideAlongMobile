@@ -117,7 +117,7 @@ export default function ChatDetailScreen() {
           try {
             const isDriver = participantId === driverId;
             const userDoc = await getDoc(
-              doc(firestore, isDriver ? 'drivers' : 'users', participantId)
+              doc(firestore, isDriver ? 'drivers' : 'riders', participantId)
             );
             if (userDoc.exists()) {
               const userData = userDoc.data();
@@ -133,7 +133,7 @@ export default function ChatDetailScreen() {
         // 1-on-1 chat
         const isRecipientDriver = recId === driverId;
         const recipientDoc = await getDoc(
-          doc(firestore, isRecipientDriver ? 'drivers' : 'users', recId)
+          doc(firestore, isRecipientDriver ? 'drivers' : 'riders', recId)
         );
 
         if (recipientDoc.exists()) {
@@ -289,14 +289,14 @@ export default function ChatDetailScreen() {
       await deleteMessageThread(threadId);
       await addHiddenDeletedThreadIdForCurrentUser(threadId);
       showSuccessToast('Conversation deleted', 'This conversation was removed.');
-      router.replace('/(tabs)/messages');
+      router.replace('/driver/messages');
     } catch (error) {
       const statusCode = (error as DeleteMessageThreadError | undefined)?.statusCode;
 
       if (statusCode === 404) {
         await addHiddenDeletedThreadIdForCurrentUser(threadId);
         showSuccessToast('Conversation deleted', 'Conversation no longer exists.');
-        router.replace('/(tabs)/messages');
+        router.replace('/driver/messages');
         return;
       }
 

@@ -62,7 +62,7 @@ export default function RiderProfilePage() {
           await Promise.all(raterIds.map(async (rid) => {
             try {
               // First, attempt to read the users doc and look for driver flags
-              const udoc = await getDoc(doc(firestore, 'users', rid));
+              const udoc = await getDoc(doc(firestore, 'riders', rid));
               if (udoc.exists()) {
                 const u = udoc.data() as any;
                 const isDriver = (u?.role === 'driver') || (u?.isDriver === true) || (u?.type === 'driver');
@@ -131,7 +131,7 @@ export default function RiderProfilePage() {
     (async () => {
       try {
         // Primary user profile
-        const d = await getDoc(doc(firestore, 'users', riderId));
+        const d = await getDoc(doc(firestore, 'riders', riderId));
         const userData = d.exists() ? (d.data() as any) : null;
 
         // Try to enrich preferences from a dedicated `riders` collection (preferred source for ride prefs)

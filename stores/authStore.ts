@@ -11,6 +11,7 @@ import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firest
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 import { firebaseAuth, firestore } from '@/services/firebase';
+import { registerRiderPushToken, registerDriverPushToken } from '@/utils/registerPushToken';
 import type { ActiveRole, UserRole, RiderProfile, DriverProfile } from '@/types';
 
 const LAST_ROLE_KEY = '@ridealong_last_active_role';
@@ -122,6 +123,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
         if (!role) {
           await firebaseSignOut(firebaseAuth);
+          Alert.alert(
+            'No profile found',
+            'This account does not have a rider or driver profile. Please sign up first.',
+          );
           set({
             uid: null, email: null, isLoading: false,
             isAuthenticated: false, isEmailVerified: false,
@@ -159,6 +164,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           riderProfile,
           driverProfile,
         });
+
+        // Register push token for notifications
+        if (firebaseUser.emailVerified) {
+          if (activeRole === 'driver') {
+            registerDriverPushToken(firebaseUser.uid).catch(console.error);
+          } else {
+            registerRiderPushToken(firebaseUser.uid).catch(console.error);
+          }
+        }
       } catch (err) {
         console.error('[authStore] initializeAuth error:', err);
         set({ isLoading: false });

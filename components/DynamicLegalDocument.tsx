@@ -138,8 +138,8 @@ const ContentRenderer = ({ content }: { content: string }) => {
   return <View style={styles.contentContainer}>{renderContent(content)}</View>;
 };
 
-export default function DynamicLegalDocument({ 
-  documentType, 
+export function DynamicLegalDocument({
+  documentType,
   onBack 
 }: DynamicLegalDocumentProps) {
   const theme = useTheme();
@@ -443,3 +443,4 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+export default DynamicLegalDocument;

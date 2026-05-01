@@ -17,6 +17,9 @@ export interface VerificationState {
     blocked?: boolean;
     daysRemaining?: number | null;
   }) => void;
+  setIsVerified: (isVerified: boolean) => void;
+  setVerificationStatus: (status: 'pending' | 'approved' | 'rejected' | 'manual-review' | 'auto-approved' | null) => void;
+  setVerificationDeadline: (deadline: Date | null) => void;
   dismissBanner: () => void;
   resetBannerDismissal: () => void;
   setLoading: (loading: boolean) => void;
@@ -42,6 +45,10 @@ export const useVerificationStore = create<VerificationState>((set, get) => ({
       daysRemaining: data.daysRemaining ?? null,
       lastChecked: new Date(),
     }),
+
+  setIsVerified: (isVerified) => set({ isVerified, lastChecked: new Date() }),
+  setVerificationStatus: (verificationStatus) => set({ verificationStatus, lastChecked: new Date() }),
+  setVerificationDeadline: (verificationDeadline) => set({ verificationDeadline, lastChecked: new Date() }),
 
   dismissBanner: () => set({ bannerDismissed: true }),
   resetBannerDismissal: () => set({ bannerDismissed: false }),
