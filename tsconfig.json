@@ -18,7 +18,8 @@
     "allowSyntheticDefaultImports": true,
     "paths": {
       "@/*": ["./*"]
-    }
+    },
+    "baseUrl": "."
   },
   "include": [
     "**/*.ts",
