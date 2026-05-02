@@ -1,169 +1,315 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, Modal, ActivityIndicator } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  View, Text, StyleSheet, TouchableOpacity, Dimensions,
+  Animated, Easing, Image, useColorScheme, StatusBar,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { Button } from '@/components/ui/Button';
-import { useTheme } from '@/hooks/useTheme';
 import { router } from 'expo-router';
-import { WebView } from 'react-native-webview';
 
-interface RoleCardProps {
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  description: string;
-  onPress: () => void;
-  primary?: boolean;
+const { width, height } = Dimensions.get('window');
+
+// ─── Design Tokens ────────────────────────────────────────────────────────────
+const COLORS = {
+  orange:       '#F4621F',
+  orangeLight:  '#FF8C4A',
+  orangeGlow:   'rgba(244,98,31,0.18)',
+  orangeBorder: 'rgba(244,98,31,0.45)',
+  navy:         '#0D1B2A',
+  darkBg:       '#080E17',
+  darkCard:     'rgba(255,255,255,0.06)',
+  darkBorder:   'rgba(255,255,255,0.12)',
+  darkText:     '#F0F4FF',
+  darkSub:      '#7A8FA8',
+  lightBg:      '#EEF1F7',
+  lightCard:    'rgba(255,255,255,0.72)',
+  lightBorder:  'rgba(255,255,255,0.9)',
+  lightText:    '#0D1B2A',
+  lightSub:     '#5A6A7E',
+};
+
+function useAppTheme() {
+  const dark = useColorScheme() === 'dark';
+  return {
+    dark,
+    bg:     dark ? COLORS.darkBg     : COLORS.lightBg,
+    card:   dark ? COLORS.darkCard   : COLORS.lightCard,
+    border: dark ? COLORS.darkBorder : COLORS.lightBorder,
+    text:   dark ? COLORS.darkText   : COLORS.lightText,
+    sub:    dark ? COLORS.darkSub    : COLORS.lightSub,
+  };
 }
 
-function RoleCard({ icon, title, description, onPress, primary }: RoleCardProps) {
-  const theme = useTheme();
+// ─── Floating Orb ─────────────────────────────────────────────────────────────
+function FloatingOrb({ startX, startY, size, color, opacity, driftX, driftY, duration }: {
+  startX: number; startY: number; size: number; color: string;
+  opacity: number; driftX: number; driftY: number; duration: number;
+}) {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 1, duration, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 0, duration, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+  const translateX = anim.interpolate({ inputRange: [0, 1], outputRange: [0, driftX] });
+  const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [0, driftY] });
   return (
-    <TouchableOpacity
-      style={[styles.roleCard, primary && { borderColor: theme.colors.primary, borderWidth: 2 }]}
-      onPress={onPress}
-      activeOpacity={0.8}
-    >
-      <View style={[styles.roleIconContainer, { backgroundColor: primary ? theme.colors.primary + '20' : '#F1F5F9' }]}>
-        <Ionicons name={icon} size={28} color={primary ? theme.colors.primary : '#475569'} />
-      </View>
-      <View style={styles.roleTextContainer}>
-        <Text style={[styles.roleTitle, { color: theme.colors.secondary }]}>{title}</Text>
-        <Text style={styles.roleDescription}>{description}</Text>
-      </View>
-      <Ionicons name="chevron-forward" size={20} color="#CBD5E1" />
+    <Animated.View pointerEvents="none" style={{
+      position: 'absolute',
+      left: startX - size / 2, top: startY - size / 2,
+      width: size, height: size, borderRadius: size / 2,
+      backgroundColor: color, opacity,
+      transform: [{ translateX }, { translateY }],
+      shadowColor: color, shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.8, shadowRadius: size / 3,
+    }} />
+  );
+}
+
+// ─── Glass Card ───────────────────────────────────────────────────────────────
+function GlassCard({ children, selected, onPress, dark }: {
+  children: React.ReactNode; selected: boolean;
+  onPress: () => void; dark: boolean;
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const glow  = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(scale, { toValue: selected ? 1.025 : 1, useNativeDriver: true, friction: 7 }),
+      Animated.timing(glow,  { toValue: selected ? 1 : 0, duration: 220, useNativeDriver: false }),
+    ]).start();
+  }, [selected]);
+
+  const borderColor = glow.interpolate({
+    inputRange:  [0, 1],
+    outputRange: [dark ? COLORS.darkBorder : 'rgba(200,210,220,0.6)', COLORS.orangeBorder],
+  });
+  const bgColor = glow.interpolate({
+    inputRange:  [0, 1],
+    outputRange: [
+      dark ? COLORS.darkCard : 'rgba(255,255,255,0.72)',
+      dark ? 'rgba(244,98,31,0.10)' : 'rgba(244,98,31,0.06)',
+    ],
+  });
+
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.88}>
+      <Animated.View style={{ transform: [{ scale }] }}>
+        <Animated.View style={[s.glassCard, { backgroundColor: bgColor, borderColor, shadowColor: selected ? COLORS.orange : 'transparent' }]}>
+          <BlurView intensity={dark ? 28 : 55} tint={dark ? 'dark' : 'light'} style={StyleSheet.absoluteFillObject} />
+          <View style={s.glassCardInner}>{children}</View>
+        </Animated.View>
+      </Animated.View>
     </TouchableOpacity>
   );
 }
 
+// ─── Screen ───────────────────────────────────────────────────────────────────
 export default function SelectRoleScreen() {
-  const theme = useTheme();
-  const [showDriverWebView, setShowDriverWebView] = useState(false);
+  const theme = useAppTheme();
+  const [selected, setSelected] = useState<'rider' | 'driver' | 'both' | null>(null);
+
+  const fadeTitle  = useRef(new Animated.Value(0)).current;
+  const slideTitle = useRef(new Animated.Value(28)).current;
+  const fadeCards  = useRef(new Animated.Value(0)).current;
+  const slideCards = useRef(new Animated.Value(40)).current;
+  const fadeBottom = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(fadeTitle,  { toValue: 1, duration: 520, useNativeDriver: true }),
+        Animated.spring(slideTitle, { toValue: 0, friction: 8,   useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(fadeCards,  { toValue: 1, duration: 420, useNativeDriver: true }),
+        Animated.spring(slideCards, { toValue: 0, friction: 8,   useNativeDriver: true }),
+      ]),
+      Animated.timing(fadeBottom, { toValue: 1, duration: 320, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  const toggle = (role: 'rider' | 'driver') => {
+    if (selected === 'both')        { setSelected(role === 'rider' ? 'driver' : 'rider'); return; }
+    if (selected === role)          { setSelected(null); return; }
+    if (selected !== null)          { setSelected('both'); return; }
+    setSelected(role);
+  };
+
+  const handleContinue = () => {
+    if (!selected) return;
+    if (selected === 'driver') {
+      router.push('/(auth)/driver-signup');
+    } else {
+      router.push({ pathname: '/(auth)/sign-up', params: { role: selected } });
+    }
+  };
+
+  const riderSelected  = selected === 'rider'  || selected === 'both';
+  const driverSelected = selected === 'driver' || selected === 'both';
+  const bothSelected   = selected === 'both';
+  const canContinue    = selected !== null;
+
+  const bgGradient: [string, string, string] = theme.dark
+    ? ['#080E17', '#0D1620', '#111E2C']
+    : ['#EEF1F7', '#F5F7FB', '#FFFFFF'];
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-    >
-      <LinearGradient colors={['#F8FAFC', '#EFF6FF']} style={styles.gradient}>
-        <SafeAreaView style={styles.safeArea}>
-          <View style={styles.heroSection}>
-            <Text style={[styles.welcomeTitle, { color: theme.colors.secondary }]}>
-              Welcome to{'\n'}
-              <Text style={{ color: theme.colors.primary }}>RideAlong!</Text>
-            </Text>
-            <Text style={styles.welcomeSubtitle}>
-              Your trusted companion for safe, affordable rides with fellow students
-            </Text>
-          </View>
+    <View style={s.root}>
+      <StatusBar barStyle={theme.dark ? 'light-content' : 'dark-content'} />
+      <LinearGradient colors={bgGradient} style={StyleSheet.absoluteFillObject} />
 
-          <View style={styles.rolesSection}>
-            <Text style={[styles.rolesTitle, { color: theme.colors.secondary }]}>
-              How would you like to join?
-            </Text>
+      <FloatingOrb startX={-30}        startY={height * 0.10} size={280} color={COLORS.orange}      opacity={theme.dark ? 0.11 : 0.07} driftX={24}  driftY={18}  duration={5510} />
+      <FloatingOrb startX={width + 40} startY={height * 0.35} size={240} color={COLORS.navy}        opacity={theme.dark ? 0.35 : 0.07} driftX={-20} driftY={28}  duration={6840} />
+      <FloatingOrb startX={width * 0.25} startY={height * 0.72} size={160} color={COLORS.orange}    opacity={theme.dark ? 0.08 : 0.05} driftX={16}  driftY={-22} duration={6175} />
+      <FloatingOrb startX={width * 0.80} startY={height * 0.18} size={110} color={COLORS.orangeLight} opacity={theme.dark ? 0.09 : 0.06} driftX={-14} driftY={20} duration={7600} />
 
-            <RoleCard
-              icon="map-outline"
-              title="Ride with us"
-              description="Book affordable rides to and from campus with verified student drivers"
-              onPress={() => router.push({ pathname: '/(auth)/sign-up', params: { role: 'rider' } })}
-              primary
-            />
+      <SafeAreaView style={s.safe}>
 
-            <RoleCard
-              icon="car-outline"
-              title="Drive & earn"
-              description="Earn money giving rides to fellow students on your schedule"
-              onPress={() => setShowDriverWebView(true)}
-            />
-          </View>
+        {/* Logo */}
+        <Animated.View style={[s.logoRow, { opacity: fadeTitle, transform: [{ translateY: slideTitle }] }]}>
+          <Image source={require('@/assets/images/logo.png')} style={s.logoImage} resizeMode="contain" />
+        </Animated.View>
 
-          <TouchableOpacity onPress={() => router.push('/(auth)/sign-in')} style={styles.signInContainer}>
-            <Text style={styles.signInText}>
-              Already have an account?{' '}
-              <Text style={[styles.signInLink, { color: theme.colors.primary }]}>Sign In</Text>
-            </Text>
-          </TouchableOpacity>
-        </SafeAreaView>
-      </LinearGradient>
+        {/* Hero */}
+        <Animated.View style={[s.hero, { opacity: fadeTitle, transform: [{ translateY: slideTitle }] }]}>
+          <Text style={[s.heroTitle, { color: theme.text }]}>What do you</Text>
+          <Text style={[s.heroTitle, { color: theme.text }]}>
+            want to <Text style={s.heroAccent}>do?</Text>
+          </Text>
+          <Text style={[s.heroSub, { color: theme.sub }]}>You can choose one or both.</Text>
+        </Animated.View>
 
-      {/* Driver sign-up WebView modal */}
-      <Modal
-        visible={showDriverWebView}
-        animationType="slide"
-        onRequestClose={() => setShowDriverWebView(false)}
-      >
-        <SafeAreaView style={styles.modalContainer} edges={['top', 'bottom']}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Driver Application</Text>
-            <TouchableOpacity
-              onPress={() => setShowDriverWebView(false)}
-              style={styles.closeButton}
-            >
-              <Ionicons name="close" size={28} color="#1E293B" />
-            </TouchableOpacity>
-          </View>
-          <WebView
-            source={{ uri: 'https://ridealongapp.com/pages/driver-signup' }}
-            style={{ flex: 1 }}
-            startInLoadingState
-            renderLoading={() => (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#E05E1A" />
+        {/* Cards */}
+        <Animated.View style={[s.cards, { opacity: fadeCards, transform: [{ translateY: slideCards }] }]}>
+
+          <GlassCard selected={riderSelected} onPress={() => toggle('rider')} dark={theme.dark}>
+            <View style={s.cardRow}>
+              <View style={s.cardLeft}>
+                <Text style={[s.cardLabel, { color: riderSelected ? COLORS.orange : theme.sub }]}>I want to</Text>
+                <Text style={[s.cardName,  { color: riderSelected ? theme.text  : theme.sub }]}>Ride</Text>
+                <Text style={[s.cardDesc,  { color: theme.sub }]}>Book affordable rides with{'\n'}verified student drivers</Text>
+              </View>
+              <View style={[s.cardIconWrap, riderSelected && s.cardIconWrapActive]}>
+                <Ionicons name="car-sport" size={36} color={riderSelected ? COLORS.orange : (theme.dark ? '#3A5068' : '#BCC8D6')} />
+              </View>
+            </View>
+            {riderSelected && (
+              <View style={s.selectedBadge}>
+                <Ionicons name="checkmark-circle" size={17} color={COLORS.orange} />
+                <Text style={s.selectedBadgeText}>Selected</Text>
               </View>
             )}
-          />
-        </SafeAreaView>
-      </Modal>
-    </ScrollView>
+          </GlassCard>
+
+          <GlassCard selected={driverSelected} onPress={() => toggle('driver')} dark={theme.dark}>
+            <View style={s.cardRow}>
+              <View style={s.cardLeft}>
+                <Text style={[s.cardLabel, { color: driverSelected ? COLORS.orange : theme.sub }]}>I want to</Text>
+                <Text style={[s.cardName,  { color: driverSelected ? theme.text  : theme.sub }]}>Drive</Text>
+                <Text style={[s.cardDesc,  { color: theme.sub }]}>Earn money giving rides{'\n'}on your own schedule</Text>
+              </View>
+              <View style={[s.cardIconWrap, driverSelected && s.cardIconWrapActive]}>
+                <Ionicons name="car" size={36} color={driverSelected ? COLORS.orange : (theme.dark ? '#3A5068' : '#BCC8D6')} />
+              </View>
+            </View>
+            {driverSelected && (
+              <View style={s.selectedBadge}>
+                <Ionicons name="checkmark-circle" size={17} color={COLORS.orange} />
+                <Text style={s.selectedBadgeText}>Selected</Text>
+              </View>
+            )}
+          </GlassCard>
+
+          <TouchableOpacity style={s.bothRow} onPress={() => setSelected(bothSelected ? null : 'both')} activeOpacity={0.7}>
+            <View style={[s.checkbox, bothSelected && s.checkboxActive]}>
+              {bothSelected && <Ionicons name="checkmark" size={13} color="white" />}
+            </View>
+            <Text style={[s.bothText, { color: theme.sub }]}>
+              I want to do <Text style={{ color: theme.text, fontWeight: '600' }}>both</Text>
+            </Text>
+          </TouchableOpacity>
+        </Animated.View>
+
+        {/* CTA */}
+        <Animated.View style={[s.bottom, { opacity: fadeBottom }]}>
+          <TouchableOpacity onPress={handleContinue} disabled={!canContinue} activeOpacity={0.86}>
+            <LinearGradient
+              colors={canContinue
+                ? [COLORS.orange, COLORS.orangeLight]
+                : (theme.dark ? ['#1C2A38', '#1C2A38'] : ['#D8DFE8', '#D8DFE8'])}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={s.ctaButton}
+            >
+              <Text style={[s.ctaText, !canContinue && { color: theme.dark ? '#3A5068' : '#9CAABB' }]}>
+                Continue
+              </Text>
+              {canContinue && (
+                <View style={s.ctaArrow}>
+                  <Ionicons name="arrow-forward" size={18} color="white" />
+                </View>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => router.push('/(auth)/sign-in')} style={s.signInRow}>
+            <Text style={[s.signInText, { color: theme.sub }]}>
+              Already have an account?{'  '}
+              <Text style={s.signInLink}>Sign In</Text>
+            </Text>
+          </TouchableOpacity>
+        </Animated.View>
+
+      </SafeAreaView>
+    </View>
   );
 }
 
-const { height } = Dimensions.get('window');
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  root: { flex: 1 },
+  safe: { flex: 1, paddingHorizontal: 22 },
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  scrollContent: { flexGrow: 1 },
-  gradient: { flex: 1, minHeight: height },
-  safeArea: { flex: 1, paddingHorizontal: 24, justifyContent: 'center' },
-  heroSection: { alignItems: 'center', paddingTop: 40, paddingBottom: 32 },
-  welcomeTitle: {
-    fontSize: 34, fontWeight: '800', textAlign: 'center',
-    marginBottom: 12, lineHeight: 42,
+  logoRow:   { paddingTop: 10, paddingBottom: 4 },
+  logoImage: { height: 52, width: 52, borderRadius: 14 },
+
+  hero:       { paddingTop: 32, paddingBottom: 28 },
+  heroTitle:  { fontSize: 38, fontWeight: '800', letterSpacing: -1, lineHeight: 46 },
+  heroAccent: { color: COLORS.orange },
+  heroSub:    { fontSize: 15, fontWeight: '400', marginTop: 10, lineHeight: 22 },
+
+  cards: { gap: 14 },
+  glassCard: {
+    borderRadius: 22, borderWidth: 1.5, overflow: 'hidden',
+    shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 10,
   },
-  welcomeSubtitle: {
-    fontSize: 16, color: '#64748B', textAlign: 'center',
-    lineHeight: 24, fontWeight: '400',
-  },
-  rolesSection: { paddingBottom: 20 },
-  rolesTitle: {
-    fontSize: 20, fontWeight: '700', textAlign: 'center', marginBottom: 16,
-  },
-  roleCard: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'white', borderRadius: 20,
-    padding: 18, marginBottom: 12, borderWidth: 1, borderColor: '#F1F5F9',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08, shadowRadius: 12, elevation: 6,
-  },
-  roleIconContainer: {
-    width: 52, height: 52, borderRadius: 26,
-    justifyContent: 'center', alignItems: 'center', marginRight: 16,
-  },
-  roleTextContainer: { flex: 1 },
-  roleTitle: { fontSize: 17, fontWeight: '700', marginBottom: 4 },
-  roleDescription: { fontSize: 14, color: '#64748B', lineHeight: 20 },
-  signInContainer: { alignItems: 'center', paddingVertical: 24, paddingBottom: 40 },
-  signInText: { fontSize: 16, color: '#64748B', textAlign: 'center', fontWeight: '500' },
-  signInLink: { fontWeight: '700', textDecorationLine: 'underline' },
-  modalContainer: { flex: 1, backgroundColor: 'white' },
-  modalHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingVertical: 12,
-    backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
-  },
-  modalTitle: { fontSize: 20, fontWeight: '700', color: '#1E293B' },
-  closeButton: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  glassCardInner:    { padding: 20 },
+  cardRow:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  cardLeft:          { flex: 1 },
+  cardLabel:         { fontSize: 12, fontWeight: '600', letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 2 },
+  cardName:          { fontSize: 30, fontWeight: '800', letterSpacing: -0.8, marginBottom: 6 },
+  cardDesc:          { fontSize: 13, lineHeight: 19, fontWeight: '400' },
+  cardIconWrap:      { width: 68, height: 68, borderRadius: 18, backgroundColor: 'rgba(180,200,220,0.10)', alignItems: 'center', justifyContent: 'center' },
+  cardIconWrapActive:{ backgroundColor: COLORS.orangeGlow },
+  selectedBadge:     { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: COLORS.orangeBorder },
+  selectedBadgeText: { fontSize: 13, color: COLORS.orange, fontWeight: '600' },
+
+  bothRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, paddingHorizontal: 2 },
+  checkbox:       { width: 22, height: 22, borderRadius: 7, borderWidth: 1.5, borderColor: 'rgba(150,170,190,0.5)', alignItems: 'center', justifyContent: 'center' },
+  checkboxActive: { backgroundColor: COLORS.orange, borderColor: COLORS.orange },
+  bothText:       { fontSize: 14, fontWeight: '400' },
+
+  bottom:    { flex: 1, justifyContent: 'flex-end', paddingBottom: 28, gap: 16 },
+  ctaButton: { borderRadius: 50, paddingVertical: 17, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  ctaText:   { fontSize: 17, fontWeight: '700', color: 'white', letterSpacing: 0.2 },
+  ctaArrow:  { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+  signInRow: { alignItems: 'center' },
+  signInText:{ fontSize: 14, fontWeight: '400' },
+  signInLink:{ color: COLORS.orange, fontWeight: '700' },
 });
