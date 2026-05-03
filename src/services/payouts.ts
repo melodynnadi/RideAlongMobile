@@ -171,7 +171,7 @@ export async function getDriverEarnings(userId: string): Promise<EarningsData> {
   // Firestore: get user profile totalEarnings
   let totalEarnings = 0;
   try {
-    const userRef = doc(firestore as any, 'users', userId);
+    const userRef = doc(firestore as any, 'drivers', userId);
     const snap = await getDoc(userRef);
     if (snap.exists()) {
       const data: any = snap.data();

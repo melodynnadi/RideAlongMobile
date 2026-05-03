@@ -58,7 +58,7 @@ export async function loadEarningsData(
 
   let snapshot: Awaited<ReturnType<typeof getDoc>> | null = null;
   try {
-    const userRef = deps.docFn(deps.firestoreInstance, 'users', userId);
+    const userRef = deps.docFn(deps.firestoreInstance, 'drivers', userId);
     snapshot = await deps.getDocFn(userRef);
   } catch {
     snapshot = null;

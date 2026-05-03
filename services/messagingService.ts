@@ -65,8 +65,6 @@ async function saveFCMToken(token: string) {
 
   try {
     // Determine user collection (driver or rider)
-    let userCollection = 'users';
-
     // Check if user is a driver
     const driverDocRef = doc(firestore, 'drivers', firebaseAuth.currentUser.uid);
     try {

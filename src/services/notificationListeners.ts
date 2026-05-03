@@ -230,7 +230,7 @@ export function setupDriverNotificationListeners(driverId: string, driverEmail?:
               const { doc: firestoreDoc, getDoc } = await import('firebase/firestore');
               const isDriver = senderId === data?.driverId;
               const senderDoc = await getDoc(
-                firestoreDoc(firestore, isDriver ? 'drivers' : 'users', senderId)
+                firestoreDoc(firestore, isDriver ? 'drivers' : 'riders', senderId)
               );
               
               if (senderDoc.exists()) {
