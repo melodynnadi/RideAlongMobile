@@ -21,7 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { firestore, firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import { logActivity } from '@/utils/activityLogger';
 import { addDoc, collection, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
@@ -30,37 +30,37 @@ import * as Location from 'expo-location';
 import { PaymentModal } from '@/components/PaymentModal';
 import { checkCanRequestRide } from '@/services/verification';
 import { computeBaseFare } from '@/utils/fees';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import { AppColors, BRAND } from '@/constants/theme';
 
 // ─── Design Tokens ──────────────────────────────────────────────────────────
-const C = {
-  orange:      '#F4621F',
-  orangeLight: '#FF8C4A',
-  orangeGlow:  'rgba(244,98,31,0.18)',
-  orangeBorder:'rgba(244,98,31,0.40)',
-  green:       '#10B981',
-  red:         '#EF4444',
-  dkBg:        '#080E17',
-  dkBg2:       '#0D1620',
-  dkBg3:       '#111E2C',
-  dkCard:      'rgba(255,255,255,0.07)',
-  dkBorder:    'rgba(255,255,255,0.12)',
-  dkText:      '#F0F4FF',
-  dkSub:       '#7A8FA8',
-  dkInput:     'rgba(255,255,255,0.08)',
-  dkInputBdr:  'rgba(255,255,255,0.14)',
-  ltBg:        '#EEF1F7',
-  ltCard:      'rgba(255,255,255,0.85)',
-  ltBorder:    'rgba(255,255,255,0.9)',
-  ltText:      '#0D1B2A',
-  ltSub:       '#5A6A7E',
-  ltInput:     'rgba(255,255,255,0.95)',
-  ltInputBdr:  'rgba(200,210,225,0.9)',
+type GradientStops = readonly [string, string, ...string[]];
+
+const asGradientStops = (stops: string[]): GradientStops => {
+  return stops as unknown as GradientStops;
 };
 
-function useT() {
-  const dark = useColorScheme() === 'dark';
-  return { dark, bg:dark?C.dkBg:C.ltBg, card:dark?C.dkCard:C.ltCard, bdr:dark?C.dkBorder:C.ltBorder, txt:dark?C.dkText:C.ltText, sub:dark?C.dkSub:C.ltSub, inp:dark?C.dkInput:C.ltInput, inpB:dark?C.dkInputBdr:C.ltInputBdr };
-}
+const C = {
+  orange: BRAND.orange,
+  orangeLight: BRAND.orangeDeep,
+  orangeGlow: 'rgba(244,98,31,0.18)',
+  orangeBorder: 'rgba(244,98,31,0.40)',
+  green: '#10B981',
+  red: '#EF4444',
+};
+
+type BookTheme = {
+  dark: boolean;
+  bg: string;
+  card: string;
+  bdr: string;
+  txt: string;
+  sub: string;
+  inp: string;
+  inpB: string;
+  statusBar: 'light-content' | 'dark-content';
+  gradientBg: GradientStops;
+};
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 type Coords = { lat: number; lng: number };
@@ -84,7 +84,7 @@ function AddressAutocomplete({ label, placeholder, value, onChangeText, onSelect
   onChangeText:(t:string)=>void;
   onSelected:(p:{address:string;coords:Coords})=>void;
   apiKey:string; country?:string; zIndex?:number;
-  theme:ReturnType<typeof useT>; dotColor?:string;
+  theme: BookTheme; dotColor?: string;
 }) {
   const [open,setOpen]=useState(false);
   const [loading,setLoading]=useState(false);
@@ -229,7 +229,7 @@ function TimeModal({visible,initialTime,primaryColor,secondaryColor,onClose,onSe
 }
 
 // ─── Glass Card ──────────────────────────────────────────────────────────────
-function GlassCard({theme,children,style}:{theme:ReturnType<typeof useT>;children:React.ReactNode;style?:any}) {
+function GlassCard({ theme, children, style }: { theme: BookTheme; children: React.ReactNode; style?: any }) {
   return (
     <View style={[s.card,{backgroundColor:theme.card,borderColor:theme.bdr},style]}>
       <BlurView intensity={theme.dark?22:55} tint={theme.dark?'dark':'light'} style={StyleSheet.absoluteFillObject}/>
@@ -240,7 +240,60 @@ function GlassCard({theme,children,style}:{theme:ReturnType<typeof useT>;childre
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 export default function BookScreen() {
-  const theme=useT(); const dk=theme.dark;
+  const { colors, isDark } = useAppTheme();
+  const params = useLocalSearchParams<{
+    pickup?: string;
+    dropoff?: string;
+    pickupLat?: string;
+    pickupLng?: string;
+    dropoffLat?: string;
+    dropoffLng?: string;
+    distanceText?: string;
+    durationText?: string;
+    minContribution?: string;
+  }>();
+
+  const theme: BookTheme = {
+    dark: isDark,
+    bg: colors.bg,
+    card: isDark ? colors.glassBg : colors.bgCard,
+    bdr: colors.borderMid,
+    txt: colors.textPrimary,
+    sub: colors.textSecondary,
+    inp: colors.bgInput,
+    inpB: colors.borderMid,
+    statusBar: colors.statusBar,
+    gradientBg: asGradientStops(colors.gradientBg),
+  };
+
+  const dk = theme.dark;
+
+  useEffect(() => {
+    if (typeof params.pickup === 'string') setPickupLocation(params.pickup);
+    if (typeof params.dropoff === 'string') setDropoffLocation(params.dropoff);
+
+    const pickupLat = Number(params.pickupLat);
+    const pickupLng = Number(params.pickupLng);
+    const dropoffLat = Number(params.dropoffLat);
+    const dropoffLng = Number(params.dropoffLng);
+
+    if (!Number.isNaN(pickupLat) && !Number.isNaN(pickupLng)) {
+      setPickupCoords({ lat: pickupLat, lng: pickupLng });
+    }
+
+    if (!Number.isNaN(dropoffLat) && !Number.isNaN(dropoffLng)) {
+      setDropoffCoords({ lat: dropoffLat, lng: dropoffLng });
+    }
+
+    if (typeof params.distanceText === 'string') setDistanceText(params.distanceText);
+    if (typeof params.durationText === 'string') setDurationText(params.durationText);
+
+    const min = Number(params.minContribution);
+    if (!Number.isNaN(min) && min > 0) {
+      setMinContribution(min);
+      setContribution(String(min.toFixed(2)));
+    }
+  }, []);
 
   // ── State (ALL UNCHANGED) ──
   const [date,setDate]=useState('');
@@ -277,11 +330,76 @@ export default function BookScreen() {
       if(!checkCanRequestRide())return;
       const user=firebaseAuth.currentUser;if(!user){Alert.alert('Sign in required','Please sign in to book a ride.');router.push('/(auth)/sign-in');return;}
       if(!pickupLocation.trim()||!dropoffLocation.trim()){Alert.alert('Missing info','Please enter both pickup and dropoff locations.');return;}
+      if (!pickupCoords || !dropoffCoords) {
+        Alert.alert(
+          'Select locations',
+          'Please choose pickup and dropoff from the suggestions so we can place them on the map.'
+        );
+        return;
+      }
       const priceNum=(()=>{const n=Number(String(contribution).replace(/[^0-9.\-]/g,''));return isNaN(n)?null:n;})();
       if(minContribution!=null&&(priceNum==null||priceNum<minContribution)){Alert.alert('Contribution too low',`Minimum: $${minContribution.toFixed(2)}`);return;}
       if(!priceNum||priceNum<=0){Alert.alert('Invalid price','Please enter a valid price for the ride.');return;}
       const requestedTime=toRequestedDate(date||undefined,time||undefined);
-      const payload:any={userId:user.uid,riderId:user.uid,userEmail:user.email||null,riderEmail:user.email||null,pickup:pickupLocation||null,dropoff:dropoffLocation||null,date:date||null,time:time||null,distance:distanceText||null,requestedTime:requestedTime||null,passengers:1,estimatedFare:priceNum,contributionAmount:priceNum,notes:notes||null,status:'pending',createdAt:serverTimestamp(),updatedAt:serverTimestamp()};
+      const payload: any = {
+        userId: user.uid,
+        riderId: user.uid,
+        userEmail: user.email || null,
+        riderEmail: user.email || null,
+
+        // Keep legacy string fields so existing screens continue to work.
+        pickup: pickupLocation || null,
+        dropoff: dropoffLocation || null,
+
+        // New structured location fields for real maps.
+        pickupLocation: {
+          address: pickupLocation || null,
+          latitude: pickupCoords.lat,
+          longitude: pickupCoords.lng,
+          lat: pickupCoords.lat,
+          lng: pickupCoords.lng,
+        },
+        dropoffLocation: {
+          address: dropoffLocation || null,
+          latitude: dropoffCoords.lat,
+          longitude: dropoffCoords.lng,
+          lat: dropoffCoords.lat,
+          lng: dropoffCoords.lng,
+        },
+
+        // Optional flat coordinate fields for simpler querying/debugging.
+        pickupLat: pickupCoords.lat,
+        pickupLng: pickupCoords.lng,
+        dropoffLat: dropoffCoords.lat,
+        dropoffLng: dropoffCoords.lng,
+
+        date: date || null,
+        time: time || null,
+
+        distance: {
+          text: distanceText || null,
+          miles: distanceMiles,
+        },
+        duration: {
+          text: durationText || null,
+          minutes: durationMinutes,
+        },
+
+        // Keep compatibility fields.
+        distanceText: distanceText || null,
+        durationText: durationText || null,
+        distanceMiles,
+        durationMinutes,
+
+        requestedTime: requestedTime || null,
+        passengers: 1,
+        estimatedFare: priceNum,
+        contributionAmount: priceNum,
+        notes: notes || null,
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
       Object.keys(payload).forEach(k=>{if(payload[k]===undefined)payload[k]=null;});
       setPendingRideData(payload);setPaymentModalVisible(true);
     }catch(err:any){Alert.alert('Error',err?.message||'Please check your inputs');}
@@ -302,7 +420,7 @@ export default function BookScreen() {
       const result=await response.json();if(!response.ok)throw new Error(result.message||result.error||'Failed to create ride request');
       void logActivity({type:'ride_request_created',entityType:'rideRequest',entityId:result.requestId,metadata:{contribution:pendingRideData.contributionAmount??null,requestedTime:pendingRideData.requestedTime?new Date(pendingRideData.requestedTime).toISOString():null,paymentIntentId}});
       setDate('');setTime('');setPickupLocation('');setDropoffLocation('');setContribution('');setNotes('');setPendingRideData(null);setPaymentModalVisible(false);setTempRideId(`temp_${Date.now()}_${Math.random().toString(36).slice(2)}`);
-      Alert.alert('Request Posted!','Your ride request is live. Drivers will be able to find you.');router.push('/rider' as any);
+      Alert.alert('Request Posted!','Your ride request is live. Drivers will be able to find you.');router.push('/(rider)' as any);
     }catch(e:any){
       try{
         const user=firebaseAuth.currentUser;if(!user)throw e;
@@ -311,7 +429,7 @@ export default function BookScreen() {
         try{const pu=(pendingRideData.pickup||'').trim().toLowerCase().replace(/\s+/g,' ');const dr=(pendingRideData.dropoff||'').trim().toLowerCase().replace(/\s+/g,' ');if(pu&&dr){const rq=query(collection(firestore,'preferredRoutes'),where('userId','==',user.uid),where('origin','==',pu),where('destination','==',dr));const rs=await getDocs(rq);if(rs.empty)await addDoc(collection(firestore,'preferredRoutes'),{userId:user.uid,userType:'rider',origin:pu,destination:dr,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});}}catch{}
         void logActivity({type:'ride_request_created',entityType:'rideRequest',entityId:docRef.id,metadata:{contribution:pendingRideData.contributionAmount??null,requestedTime:pendingRideData.requestedTime?new Date(pendingRideData.requestedTime).toISOString():null,paymentIntentId}});
         setDate('');setTime('');setPickupLocation('');setDropoffLocation('');setContribution('');setNotes('');setPendingRideData(null);setTempRideId(`temp_${Date.now()}_${Math.random().toString(36).slice(2)}`);setPaymentModalVisible(false);
-        Alert.alert('Request Posted!','Your ride request is live. Drivers will be able to find you.');router.push('/rider' as any);
+        Alert.alert('Request Posted!','Your ride request is live. Drivers will be able to find you.');router.push('/(rider)' as any);
       }catch{Alert.alert('Submit failed','Could not submit your request. Please try again.');}
     }
   };
@@ -345,8 +463,8 @@ export default function BookScreen() {
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle={dk?'light-content':'dark-content'}/>
-      <LinearGradient colors={dk?[C.dkBg,C.dkBg2,C.dkBg3]:[C.ltBg,'#F2F5FA','#FFF']} style={StyleSheet.absoluteFillObject}/>
+      <StatusBar barStyle={theme.statusBar} />
+      <LinearGradient colors={theme.gradientBg} style={StyleSheet.absoluteFillObject} />
 
       <SafeAreaView style={s.safe} edges={['top']}>
         {/* ── Header ── */}
@@ -355,10 +473,10 @@ export default function BookScreen() {
             <Ionicons name="arrow-back" size={20} color={theme.txt}/>
           </TouchableOpacity>
           <View style={{flex:1,marginLeft:12}}>
-            <Text style={[s.hdrTitle,{color:theme.txt}]}>Book a Ride</Text>
-            <Text style={[s.hdrSub,{color:theme.sub}]}>Where would you like to go?</Text>
+            <Text style={[s.hdrTitle, { color: theme.txt }]}>Post a ride request</Text>
+            <Text style={[s.hdrSub, { color: theme.sub }]}>Set your route, time, and contribution</Text>
           </View>
-          <TouchableOpacity onPress={()=>router.push('/settings/ride-history')} style={[s.hdrRides,{backgroundColor:dk?'rgba(255,255,255,0.09)':'rgba(255,255,255,0.85)',borderColor:theme.bdr}]}>
+          <TouchableOpacity onPress={()=>router.push('/(rider)/requests' as any)} style={[s.hdrRides,{backgroundColor:dk?'rgba(255,255,255,0.09)':'rgba(255,255,255,0.85)',borderColor:theme.bdr}]}>
             <Ionicons name="time-outline" size={15} color={theme.txt}/>
             <Text style={[s.hdrRidesTxt,{color:theme.txt}]}>Your Rides</Text>
           </TouchableOpacity>
@@ -450,8 +568,8 @@ export default function BookScreen() {
                         </TouchableOpacity>
                       </View>
                     )}
-                    <CalendarModal visible={calendarOpen} month={calendarMonth} selectedDate={date} primaryColor={C.orange} secondaryColor={dk?C.dkText:C.ltText} onClose={()=>setCalendarOpen(false)} onSelect={ds=>{setDate(ds);setCalendarOpen(false);setCalendarMonth(new Date(ds));}}/>
-                    <TimeModal visible={timeOpen} initialTime={time} primaryColor={C.orange} secondaryColor={dk?C.dkText:C.ltText} onClose={()=>setTimeOpen(false)} onSelect={ts=>{setTime(ts);setTimeOpen(false);}}/>
+                    <CalendarModal visible={calendarOpen} month={calendarMonth} selectedDate={date} primaryColor={C.orange} secondaryColor={theme.txt} onClose={()=>setCalendarOpen(false)} onSelect={ds=>{setDate(ds);setCalendarOpen(false);setCalendarMonth(new Date(ds));}}/>
+                    <TimeModal visible={timeOpen} initialTime={time} primaryColor={C.orange} secondaryColor={theme.txt} onClose={()=>setTimeOpen(false)} onSelect={ts=>{setTime(ts);setTimeOpen(false);}}/>
                   </GlassCard>
 
                   {/* ── Payment Card ── */}

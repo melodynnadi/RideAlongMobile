@@ -1,5 +1,5 @@
 // RideAlongDriverMobile - Chat Detail Screen
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,13 +10,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Image,
   Alert,
+  StatusBar,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router, Stack, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { firestore, firebaseAuth } from '@/constants/services';
 import {
   collection,
   query,
@@ -28,7 +29,13 @@ import {
   getDoc,
   serverTimestamp,
 } from 'firebase/firestore';
-import { isTerminalStatus, canSendMessages, MESSAGING_DISABLED_MESSAGE } from '@/constants/rideStatusConstants';
+
+import { firestore, firebaseAuth } from '@/constants/services';
+import {
+  isTerminalStatus,
+  canSendMessages,
+  MESSAGING_DISABLED_MESSAGE,
+} from '@/constants/rideStatusConstants';
 import {
   addHiddenDeletedThreadIdForCurrentUser,
   deleteMessageThread,
@@ -36,6 +43,8 @@ import {
   getDeleteMessageThreadErrorMessage,
 } from '@/services/messageThreadsService';
 import { showErrorToast, showSuccessToast } from '@/src/utils/showToast';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import { AppColors, BRAND } from '@/constants/theme';
 
 interface Message {
   id: string;
@@ -45,18 +54,39 @@ interface Message {
   read: boolean;
 }
 
+type GradientStops = readonly [string, string, ...string[]];
+
+const asGradientStops = (stops: string[]): GradientStops => {
+  return stops as unknown as GradientStops;
+};
+
+const brandGradient: GradientStops = [BRAND.orange, BRAND.orangeDeep];
+
+const QUICK_REPLIES = [
+  "I'm on my way.",
+  'I just arrived.',
+  'Meet me at the pickup spot.',
+  'Thanks, see you soon.',
+];
+
 export default function ChatDetailScreen() {
   const { chatId } = useLocalSearchParams();
+  const { colors, isDark } = useAppTheme();
+  const themed = createStyles(colors, isDark);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageText, setMessageText] = useState('');
   const [loading, setLoading] = useState(true);
   const [recipientName, setRecipientName] = useState('Loading...');
   const [recipientId, setRecipientId] = useState<string | null>(null);
   const [rideInfo, setRideInfo] = useState('');
-  const [rideStatus, setRideStatus] = useState<string | null>(null); // Track ride status for messaging restrictions
+  const [rideStatus, setRideStatus] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
   const flatListRef = useRef<FlatList>(null);
+  const messagesUnsubRef = useRef<(() => void) | null>(null);
+  const rideUnsubRef = useRef<(() => void) | null>(null);
   const currentUser = firebaseAuth.currentUser;
 
   useEffect(() => {
@@ -66,71 +96,88 @@ export default function ChatDetailScreen() {
     }
 
     loadChatDetails();
-    loadMessages();
-  }, [currentUser, chatId]);
+    messagesUnsubRef.current = loadMessages();
 
-  // Reset unread count whenever the screen comes into focus
+    return () => {
+      if (messagesUnsubRef.current) messagesUnsubRef.current();
+      if (rideUnsubRef.current) rideUnsubRef.current();
+    };
+  }, [currentUser?.uid, chatId]);
+
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       if (!currentUser || !chatId) return;
-      
+
       const resetUnreadCount = async () => {
         try {
           const unreadField = `unreadCount_${currentUser.uid}`;
+
           await updateDoc(doc(firestore, 'chats', chatId as string), {
-            [unreadField]: 0
+            [unreadField]: 0,
           });
         } catch (error) {
           console.error('Error resetting unread count:', error);
         }
       };
-      
+
       resetUnreadCount();
-    }, [currentUser, chatId])
+    }, [currentUser?.uid, chatId])
   );
+
+  const truncateLocation = (location: string) => {
+    if (!location) return 'Unknown';
+    const maxLen = 30;
+    return location.length <= maxLen ? location : `${location.substring(0, maxLen)}...`;
+  };
 
   const loadChatDetails = async () => {
     try {
       const chatDoc = await getDoc(doc(firestore, 'chats', chatId as string));
+
       if (!chatDoc.exists()) {
         console.error('Chat not found');
+        setLoading(false);
         return;
       }
 
       const chatData = chatDoc.data();
-      const { riderId, driverId, rideId, participants } = chatData;
-
-      // For group chats, get all other participants
-      const otherParticipants = participants.filter((id: string) => id !== currentUser!.uid);
+      const { driverId, rideId, participants } = chatData;
+      const safeParticipants = Array.isArray(participants) ? participants : [];
+      const otherParticipants = safeParticipants.filter((id: string) => id !== currentUser!.uid);
       const isGroupChat = otherParticipants.length > 1;
-
-      // For backwards compatibility, still set recipientId (first other participant)
       const recId = otherParticipants[0];
+
       setRecipientId(recId);
 
-      // Fetch recipient name(s)
       let displayName = 'Unknown User';
+
       if (isGroupChat) {
-        // Group chat: fetch all participant names
         const names: string[] = [];
+
         for (const participantId of otherParticipants) {
           try {
             const isDriver = participantId === driverId;
             const userDoc = await getDoc(
               doc(firestore, isDriver ? 'drivers' : 'riders', participantId)
             );
+
             if (userDoc.exists()) {
               const userData = userDoc.data();
-              const name = userData.fullName || userData.name || userData.email?.split('@')[0] || 'User';
+              const name =
+                userData.fullName ||
+                userData.name ||
+                userData.email?.split('@')[0] ||
+                'User';
+
               names.push(name);
             }
           } catch (error) {
             console.error('Error fetching participant:', error);
           }
         }
+
         displayName = names.length > 0 ? names.join(', ') : 'Group Chat';
-      } else {
-        // 1-on-1 chat
+      } else if (recId) {
         const isRecipientDriver = recId === driverId;
         const recipientDoc = await getDoc(
           doc(firestore, isRecipientDriver ? 'drivers' : 'riders', recId)
@@ -138,46 +185,50 @@ export default function ChatDetailScreen() {
 
         if (recipientDoc.exists()) {
           const recipientData = recipientDoc.data();
-          displayName = recipientData.fullName || recipientData.name || recipientData.email || 'Unknown User';
+          displayName =
+            recipientData.fullName ||
+            recipientData.name ||
+            recipientData.email ||
+            'Unknown User';
         }
       }
 
       setRecipientName(displayName);
 
-      // Fetch ride info and set up real-time status listener
-      const rideDoc = await getDoc(doc(firestore, 'confirmedRides', rideId));
-      if (rideDoc.exists()) {
-        const rideData = rideDoc.data();
-        const pickup = truncateLocation(rideData.pickup || rideData.pickupAddress);
-        const dropoff = truncateLocation(rideData.dropoff || rideData.dropoffAddress);
-        const date = rideData.date || 'Date TBD';
-        setRideInfo(`${pickup} → ${dropoff} • ${date}`);
-        
-        // Set initial ride status
-        setRideStatus(rideData.status || null);
-        
-        // Set up real-time listener for ride status changes
-        const rideUnsubscribe = onSnapshot(
-          doc(firestore, 'confirmedRides', rideId),
+      if (rideId) {
+        const rideRef = doc(firestore, 'confirmedRides', rideId);
+        const rideDoc = await getDoc(rideRef);
+
+        if (rideDoc.exists()) {
+          const rideData = rideDoc.data();
+          const pickup = truncateLocation(rideData.pickup || rideData.pickupAddress);
+          const dropoff = truncateLocation(rideData.dropoff || rideData.dropoffAddress);
+          const date = rideData.date || 'Date TBD';
+
+          setRideInfo(`${pickup} -> ${dropoff} • ${date}`);
+          setRideStatus(rideData.status || null);
+        }
+
+        if (rideUnsubRef.current) rideUnsubRef.current();
+
+        rideUnsubRef.current = onSnapshot(
+          rideRef,
           (rideSnapshot) => {
-            if (rideSnapshot.exists()) {
-              const updatedRideData = rideSnapshot.data();
-              setRideStatus(updatedRideData.status || null);
-            }
+            if (!rideSnapshot.exists()) return;
+
+            const updatedRideData = rideSnapshot.data();
+            setRideStatus(updatedRideData.status || null);
           },
           (error) => {
             console.error('Error listening to ride status:', error);
           }
         );
-        
-        // Return cleanup function
-        return rideUnsubscribe;
       }
 
-      // Mark messages as read for current user
       const unreadField = `unreadCount_${currentUser!.uid}`;
+
       await updateDoc(doc(firestore, 'chats', chatId as string), {
-        [unreadField]: 0
+        [unreadField]: 0,
       });
     } catch (error) {
       console.error('Error loading chat details:', error);
@@ -197,6 +248,7 @@ export default function ChatDetailScreen() {
 
         snapshot.forEach((docSnap) => {
           const messageData = docSnap.data();
+
           messagesList.push({
             id: docSnap.id,
             senderId: messageData.senderId,
@@ -209,7 +261,6 @@ export default function ChatDetailScreen() {
         setMessages(messagesList);
         setLoading(false);
 
-        // Scroll to bottom
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: true });
         }, 100);
@@ -226,12 +277,9 @@ export default function ChatDetailScreen() {
   const sendMessage = async () => {
     const text = messageText.trim();
 
-    if (!text || !currentUser || sending || !recipientId) {
-      return;
-    }
-    
-    // Check if messaging is allowed for current ride status
-    if (isTerminalStatus(rideStatus)) {
+    if (!text || !currentUser || sending || !recipientId) return;
+
+    if (!canSendMessages(rideStatus) || isTerminalStatus(rideStatus)) {
       console.warn('Cannot send message: ride is in terminal status');
       return;
     }
@@ -239,27 +287,23 @@ export default function ChatDetailScreen() {
     setSending(true);
 
     try {
-      // Add message to subcollection
       await addDoc(collection(firestore, 'chats', chatId as string, 'messages'), {
         senderId: currentUser.uid,
-        text: text,
+        text,
         timestamp: serverTimestamp(),
         read: false,
       });
 
-      // Get current chat document to update unread counts for all other participants
       const chatDoc = await getDoc(doc(firestore, 'chats', chatId as string));
       const chatData = chatDoc.data();
       const participants = chatData?.participants || [];
-      
-      // Build update object with unread counts for all other participants
+
       const updateData: any = {
         lastMessage: text,
         lastMessageTimestamp: serverTimestamp(),
         lastMessageSenderId: currentUser.uid,
       };
-      
-      // Increment unread count for each participant except sender
+
       for (const participantId of participants) {
         if (participantId !== currentUser.uid) {
           const unreadField = `unreadCount_${participantId}`;
@@ -268,9 +312,7 @@ export default function ChatDetailScreen() {
         }
       }
 
-      // Update chat document
       await updateDoc(doc(firestore, 'chats', chatId as string), updateData);
-
       setMessageText('');
     } catch (error) {
       console.error('Error sending message:', error);
@@ -289,14 +331,14 @@ export default function ChatDetailScreen() {
       await deleteMessageThread(threadId);
       await addHiddenDeletedThreadIdForCurrentUser(threadId);
       showSuccessToast('Conversation deleted', 'This conversation was removed.');
-      router.replace('/driver/messages');
+      router.replace('/(driver)/messages' as any);
     } catch (error) {
       const statusCode = (error as DeleteMessageThreadError | undefined)?.statusCode;
 
       if (statusCode === 404) {
         await addHiddenDeletedThreadIdForCurrentUser(threadId);
         showSuccessToast('Conversation deleted', 'Conversation no longer exists.');
-        router.replace('/driver/messages');
+        router.replace('/(driver)/messages' as any);
         return;
       }
 
@@ -317,9 +359,7 @@ export default function ChatDetailScreen() {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => {
-            executeDeleteConversation();
-          },
+          onPress: executeDeleteConversation,
         },
       ]
     );
@@ -329,6 +369,7 @@ export default function ChatDetailScreen() {
     if (!timestamp || !timestamp.toDate) return '';
 
     const date = timestamp.toDate();
+
     return date.toLocaleTimeString('en-US', {
       hour: 'numeric',
       minute: '2-digit',
@@ -336,313 +377,517 @@ export default function ChatDetailScreen() {
     });
   };
 
-  const truncateLocation = (location: string) => {
-    if (!location) return 'Unknown';
-    const maxLen = 30;
-    if (location.length <= maxLen) return location;
-    return location.substring(0, maxLen) + '...';
-  };
-
   const renderMessage = ({ item }: { item: Message }) => {
     const isSent = item.senderId === currentUser?.uid;
 
     return (
-      <View style={[styles.messageBubble, isSent ? styles.sentBubble : styles.receivedBubble]}>
-        <View style={[styles.messageContent, isSent ? styles.sentContent : styles.receivedContent]}>
-          <Text style={[styles.messageText, isSent ? styles.sentText : styles.receivedText]}>
-            {item.text}
-          </Text>
-        </View>
-        <Text style={styles.messageTimestamp}>{formatMessageTime(item.timestamp)}</Text>
+      <View style={[styles.msgWrap, isSent ? styles.msgWrapSent : styles.msgWrapReceived]}>
+        {isSent ? (
+          <LinearGradient
+            colors={brandGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.msgBubbleSent}
+          >
+            <Text style={styles.msgTextSent}>{item.text}</Text>
+          </LinearGradient>
+        ) : (
+          <View style={themed.msgBubbleReceived}>
+            {isDark && (
+              <BlurView intensity={18} tint="dark" style={StyleSheet.absoluteFillObject} />
+            )}
+            <Text style={themed.msgTextReceived}>{item.text}</Text>
+          </View>
+        )}
+
+        <Text style={[themed.msgTime, isSent ? styles.alignRight : styles.alignLeft]}>
+          {formatMessageTime(item.timestamp)}
+        </Text>
       </View>
     );
   };
 
+  const messagingAllowed = canSendMessages(rideStatus) && !isTerminalStatus(rideStatus);
+  const statusLabel = rideStatus ? rideStatus.replace(/_/g, ' ') : 'Ride active';
+
   if (loading) {
     return (
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <Stack.Screen
-          options={{
-            headerShown: false,
-          }}
+      <View style={themed.root}>
+        <StatusBar barStyle={colors.statusBar} />
+        <LinearGradient
+          colors={asGradientStops(colors.gradientBg)}
+          style={StyleSheet.absoluteFillObject}
         />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#E05E1A" />
-        </View>
-      </SafeAreaView>
+
+        <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+          <Stack.Screen options={{ headerShown: false }} />
+
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={themed.loadingText}>Loading conversation...</Text>
+          </View>
+        </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <Stack.Screen
-        options={{
-          headerShown: false,
-        }}
+    <View style={themed.root}>
+      <StatusBar barStyle={colors.statusBar} />
+      <LinearGradient
+        colors={asGradientStops(colors.gradientBg)}
+        style={StyleSheet.absoluteFillObject}
       />
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        {/* Custom Header with Back Button and Name */}
-        <View style={styles.customHeader}>
-          <TouchableOpacity 
-            style={styles.backButton} 
-            onPress={() => router.back()}
-          >
-            <Ionicons name="arrow-back" size={24} color="#1f2937" />
-          </TouchableOpacity>
-          
-          <View style={styles.headerCenter}>
-            <View style={styles.headerTextContainer}>
-              <Text style={styles.headerName} numberOfLines={1}>
-                {recipientName}
-              </Text>
-              {rideInfo && (
-                <Text style={styles.headerRideInfo} numberOfLines={1}>
-                  {rideInfo}
+
+      <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+        <Stack.Screen options={{ headerShown: false }} />
+
+        <KeyboardAvoidingView
+          style={styles.keyboard}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={0}
+        >
+          <View style={themed.header}>
+            {isDark && (
+              <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
+            )}
+
+            <TouchableOpacity style={themed.backBtn} onPress={() => router.back()}>
+              <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
+            </TouchableOpacity>
+
+            <View style={styles.headerMid}>
+              <LinearGradient colors={brandGradient} style={styles.headerAvatar}>
+                <Text style={styles.headerAvatarInitial}>
+                  {recipientName?.[0]?.toUpperCase() || '?'}
                 </Text>
+              </LinearGradient>
+
+              <View style={styles.headerTextWrap}>
+                <Text style={themed.headerName} numberOfLines={1}>
+                  {recipientName}
+                </Text>
+
+                {rideInfo ? (
+                  <Text style={themed.headerRoute} numberOfLines={1}>
+                    {rideInfo}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[themed.deleteBtn, deleting && styles.disabledOpacity]}
+              onPress={confirmDeleteConversation}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <ActivityIndicator size="small" color={colors.redDeep} />
+              ) : (
+                <Ionicons name="trash-outline" size={19} color={colors.redDeep} />
               )}
+            </TouchableOpacity>
+          </View>
+
+          {rideInfo ? (
+            <View style={themed.rideStrip}>
+              <Ionicons name="navigate-outline" size={13} color={colors.primary} />
+              <Text style={themed.rideStripText} numberOfLines={1}>
+                {rideInfo}
+              </Text>
+            </View>
+          ) : null}
+
+          <View style={themed.safetyStrip}>
+            <View style={styles.safetyIconWrap}>
+              <Ionicons
+                name={messagingAllowed ? 'shield-checkmark-outline' : 'lock-closed-outline'}
+                size={15}
+                color={messagingAllowed ? colors.green : colors.textTertiary}
+              />
+            </View>
+
+            <View style={styles.safetyTextWrap}>
+              <Text style={themed.safetyTitle}>
+                {messagingAllowed ? 'Ride Safety Context' : 'Messaging Closed'}
+              </Text>
+              <Text style={themed.safetyText} numberOfLines={1}>
+                {messagingAllowed
+                  ? `Status: ${statusLabel}. Keep pickup details clear and visible.`
+                  : MESSAGING_DISABLED_MESSAGE}
+              </Text>
             </View>
           </View>
-          
-          <TouchableOpacity
-            style={[styles.headerDeleteButton, deleting && styles.headerDeleteButtonDisabled]}
-            onPress={confirmDeleteConversation}
-            disabled={deleting}
-            accessibilityLabel="Delete conversation"
-          >
-            {deleting ? (
-              <ActivityIndicator size="small" color="#EF4444" />
-            ) : (
-              <Ionicons name="trash-outline" size={20} color="#EF4444" />
-            )}
-          </TouchableOpacity>
-        </View>
 
-        {/* Messages List */}
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          renderItem={renderMessage}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.messagesContainer}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-        />
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            renderItem={renderMessage}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.msgList}
+            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+            showsVerticalScrollIndicator={false}
+          />
 
-        {/* Message Input */}
-        <View style={styles.inputContainer}>
-          {isTerminalStatus(rideStatus) ? (
-            // Show disabled messaging notice when ride is in terminal status
-            <View style={styles.disabledMessageContainer}>
-              <Text style={styles.disabledMessageText}>{MESSAGING_DISABLED_MESSAGE}</Text>
-            </View>
-          ) : (
-            // Show active input when messaging is allowed
-            <>
-              <TextInput
-                style={styles.input}
-                placeholder="Type your message..."
-                placeholderTextColor="#9ca3af"
-                value={messageText}
-                onChangeText={setMessageText}
-                multiline
-                maxLength={1000}
+          {messagingAllowed && messageText.trim().length === 0 ? (
+            <View style={themed.quickReplyWrap}>
+              <ScrollQuickReplies
+                colors={colors}
+                replies={QUICK_REPLIES}
+                onSelect={setMessageText}
               />
-              <TouchableOpacity
-                style={[styles.sendButton, (!messageText.trim() || sending) && styles.sendButtonDisabled]}
-                onPress={sendMessage}
-                disabled={!messageText.trim() || sending}
-              >
-                <Ionicons name="send" size={20} color="white" />
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+            </View>
+          ) : null}
+
+          <View style={themed.inputBar}>
+            {isDark && (
+              <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFillObject} />
+            )}
+
+            {!messagingAllowed ? (
+              <View style={themed.disabledNotice}>
+                <Ionicons name="lock-closed-outline" size={14} color={colors.textTertiary} />
+                <Text style={themed.disabledNoticeText}>{MESSAGING_DISABLED_MESSAGE}</Text>
+              </View>
+            ) : (
+              <>
+                <TextInput
+                  style={themed.input}
+                  placeholder="Message..."
+                  placeholderTextColor={colors.textTertiary}
+                  value={messageText}
+                  onChangeText={setMessageText}
+                  multiline
+                  maxLength={1000}
+                />
+
+                <TouchableOpacity
+                  style={[styles.sendBtn, (!messageText.trim() || sending) && styles.disabledOpacity]}
+                  onPress={sendMessage}
+                  disabled={!messageText.trim() || sending}
+                >
+                  <LinearGradient colors={brandGradient} style={styles.sendBtnGrad}>
+                    {sending ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Ionicons name="send" size={18} color="#FFFFFF" />
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
   );
 }
 
+function ScrollQuickReplies({
+  replies,
+  onSelect,
+  colors,
+}: {
+  replies: string[];
+  onSelect: (text: string) => void;
+  colors: AppColors;
+}) {
+  return (
+    <FlatList
+      horizontal
+      data={replies}
+      keyExtractor={(item) => item}
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.quickReplyList}
+      renderItem={({ item }) => (
+        <TouchableOpacity
+          style={[
+            styles.quickReplyChip,
+            {
+              backgroundColor: colors.primaryDim,
+              borderColor: colors.primaryBorder,
+            },
+          ]}
+          onPress={() => onSelect(item)}
+        >
+          <Text style={[styles.quickReplyText, { color: colors.primary }]}>{item}</Text>
+        </TouchableOpacity>
+      )}
+    />
+  );
+}
+
+const createStyles = (colors: AppColors, isDark: boolean) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.bg,
+    },
+    loadingText: {
+      color: colors.textSecondary,
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.divider,
+      overflow: 'hidden',
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+    },
+    backBtn: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(13,27,72,0.06)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 10,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+    },
+    headerName: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: colors.textPrimary,
+    },
+    headerRoute: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      marginTop: 1,
+      fontWeight: '500',
+    },
+    deleteBtn: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: colors.redDim,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginLeft: 6,
+      borderWidth: 1,
+      borderColor: colors.redBorder,
+    },
+    rideStrip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      backgroundColor: colors.primaryDim,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.primaryBorder,
+    },
+    rideStripText: {
+      flex: 1,
+      fontSize: 12,
+      color: colors.textSecondary,
+      fontWeight: '600',
+    },
+    safetyStrip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginHorizontal: 14,
+      marginTop: 10,
+      padding: 12,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+    },
+    safetyTitle: {
+      fontSize: 12,
+      fontWeight: '800',
+      color: colors.textPrimary,
+      marginBottom: 1,
+    },
+    safetyText: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      fontWeight: '500',
+    },
+    msgBubbleReceived: {
+      maxWidth: '72%',
+      paddingHorizontal: 16,
+      paddingVertical: 11,
+      borderRadius: 20,
+      borderBottomLeftRadius: 4,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+    },
+    msgTextReceived: {
+      fontSize: 15,
+      color: colors.textPrimary,
+      lineHeight: 21,
+    },
+    msgTime: {
+      fontSize: 11,
+      color: colors.textTertiary,
+      marginTop: 4,
+      marginHorizontal: 4,
+      fontWeight: '500',
+    },
+    quickReplyWrap: {
+      borderTopWidth: 1,
+      borderTopColor: colors.divider,
+      paddingVertical: 9,
+      backgroundColor: isDark ? 'rgba(5,12,30,0.55)' : 'rgba(247,249,255,0.75)',
+    },
+    inputBar: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      paddingBottom: 28,
+      borderTopWidth: 1,
+      borderTopColor: colors.divider,
+      gap: 10,
+      overflow: 'hidden',
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+    },
+    input: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      borderRadius: 22,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      fontSize: 15,
+      maxHeight: 100,
+      backgroundColor: colors.bgInput,
+      color: colors.textPrimary,
+    },
+    disabledNotice: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      backgroundColor: colors.bgInput,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+    },
+    disabledNoticeText: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      fontWeight: '500',
+    },
+  });
+
 const styles = StyleSheet.create({
-  safeArea: {
+  safe: {
     flex: 1,
-    backgroundColor: 'white',
   },
-  container: {
+  keyboard: {
     flex: 1,
-    backgroundColor: '#f9fafb',
   },
-  loadingContainer: {
+  loadingWrap: {
     flex: 1,
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f9fafb',
+    gap: 14,
   },
-  customHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  headerCenter: {
+  headerMid: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
   },
   headerAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    marginRight: 12,
-  },
-  headerAvatarPlaceholder: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#f3f4f6',
-    justifyContent: 'center',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
-    marginRight: 12,
+    justifyContent: 'center',
   },
-  headerTextContainer: {
+  headerAvatarInitial: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  headerTextWrap: {
     flex: 1,
   },
-  headerName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  headerRideInfo: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginTop: 2,
-  },
-  headerRight: {
-    width: 40,
-  },
-  headerDeleteButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerDeleteButtonDisabled: {
-    opacity: 0.7,
-  },
-  rideInfoHeader: {
-    flexDirection: 'row',
+  safetyIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    backgroundColor: '#e5e7eb',
-    gap: 6,
   },
-  rideInfoText: {
-    fontSize: 12,
-    color: '#6b7280',
+  safetyTextWrap: {
+    flex: 1,
   },
-  messagesContainer: {
+  msgList: {
     padding: 16,
+    paddingBottom: 8,
     flexGrow: 1,
   },
-  messageBubble: {
-    marginBottom: 12,
+  msgWrap: {
+    marginBottom: 14,
   },
-  sentBubble: {
+  msgWrapSent: {
     alignItems: 'flex-end',
   },
-  receivedBubble: {
+  msgWrapReceived: {
     alignItems: 'flex-start',
   },
-  messageContent: {
-    maxWidth: '70%',
+  msgBubbleSent: {
+    maxWidth: '72%',
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 16,
-  },
-  sentContent: {
-    backgroundColor: '#E05E1A',
+    paddingVertical: 11,
+    borderRadius: 20,
     borderBottomRightRadius: 4,
   },
-  receivedContent: {
-    backgroundColor: 'white',
-    borderBottomLeftRadius: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  messageText: {
+  msgTextSent: {
     fontSize: 15,
+    color: '#FFFFFF',
+    lineHeight: 21,
   },
-  sentText: {
-    color: 'white',
+  alignRight: {
+    textAlign: 'right',
   },
-  receivedText: {
-    color: '#1f2937',
+  alignLeft: {
+    textAlign: 'left',
   },
-  messageTimestamp: {
-    fontSize: 11,
-    color: '#9ca3af',
-    marginTop: 4,
-    marginHorizontal: 4,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    padding: 12,
-    paddingBottom: 24,
-    backgroundColor: 'white',
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
+  quickReplyList: {
+    paddingHorizontal: 14,
     gap: 8,
   },
-  disabledMessageContainer: {
-    flex: 1,
-    padding: 16,
-    backgroundColor: '#f3f4f6',
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  disabledMessageText: {
-    fontSize: 13,
-    color: '#6b7280',
-    textAlign: 'center',
-  },
-  input: {
-    flex: 1,
+  quickReplyChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    fontSize: 15,
-    maxHeight: 100,
-    backgroundColor: '#f9fafb',
+    marginRight: 8,
   },
-  sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#E05E1A',
-    justifyContent: 'center',
+  quickReplyText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  sendBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    overflow: 'hidden',
+  },
+  sendBtnGrad: {
+    width: 42,
+    height: 42,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  sendButtonDisabled: {
-    opacity: 0.5,
+  disabledOpacity: {
+    opacity: 0.45,
   },
 });

@@ -14,13 +14,13 @@ import {
 import { Star, X } from 'lucide-react-native';
 
 export type DriverRatingModalProps = {
-  visible: boolean;
-  riderName?: string | null;
-  onClose: () => void;
-  onSubmit: (args: { stars: number; comment?: string }) => Promise<void> | void;
-  submitting?: boolean;
-  errorText?: string | null;
-};
+  visible: boolean;               // ✅ visible={ratingModalVisible}
+  riderName?: string | null;      // ✅ riderName={ratingQueue[ratingIdx]?.riderName ...}
+  onClose: () => void;            // ✅ onClose={() => { setRatingModalVisible(false)... }}
+  onSubmit: (args: { stars: number; comment?: string }) => Promise<void> | void;  // ✅ matches
+  submitting?: boolean;           // ✅ submitting={ratingSubmitting}
+  errorText?: string | null;      // ✅ errorText={ratingError}
+};;
 
 export function DriverRatingModal({ visible, riderName, onClose, onSubmit, submitting, errorText }: DriverRatingModalProps) {
   // Start with no selection so stars render empty until user interacts

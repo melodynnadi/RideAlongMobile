@@ -5,7 +5,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmergencyButton } from '@/components/EmergencyButton';
-import { firebaseAuth, firestore, analytics as appAnalytics } from '@/constants/services';
+import { firebaseAuth, firestore } from '@/constants/services';
 import { logActivity } from '@/utils/activityLogger';
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
 
@@ -29,8 +29,8 @@ const REASONS = [
 export function FlagRideModal({ visible, onClose, rideId, onFlagged }: FlagRideModalProps) {
   const theme = useTheme();
   // prefer a light, neutral modal background to avoid the dark-blue card color
-  const modalContentStyle = [styles.modalContent, { backgroundColor: (theme?.colors?.background || '#FFFFFF') }];
-  const cardBodyStyle = [styles.body, { backgroundColor: (theme?.colors?.background || '#FFFFFF') }];
+ const modalContentStyle = [styles.modalContent, { backgroundColor: (theme?.colors?.bg || '#FFFFFF') }];
+  const cardBodyStyle = [styles.body, { backgroundColor: (theme?.colors?.bg || '#FFFFFF') }];
   const [reason, setReason] = useState<string>('');
   const [details, setDetails] = useState<string>('');
   const [severityHigh, setSeverityHigh] = useState(false);
@@ -82,35 +82,25 @@ export function FlagRideModal({ visible, onClose, rideId, onFlagged }: FlagRideM
     if (!rideId) { Alert.alert('Ride not found', 'No ride selected.'); return; }
     setSubmitting(true);
     try {
-      // Read ride
       const rideSnap = await getDoc(doc(firestore, 'confirmedRides', rideId));
-      if (!rideSnap.exists()) {
-        throw new Error('Ride not found');
-      }
+      if (!rideSnap.exists()) throw new Error('Ride not found');
       const ride = rideSnap.data() as any;
 
-      // Check if this is a group ride (has ridePostingId)
       const postingId = ride?.ridePostingId;
       let allRideIds = [rideId];
       let allRiderIds = [ride?.riderId ?? ride?.userId ?? null];
       let allRiderNames = [ride?.riderName ?? 'Passenger'];
-      
-      // If this is a group ride, flag ALL confirmed rides for this posting
+
       if (postingId) {
         try {
-          console.log(`🔍 Group ride detected. Querying all rides with postingId=${postingId}, driverId=${ride.driverId}`);
           const groupQuery = query(
             collection(firestore, 'confirmedRides'),
             where('ridePostingId', '==', postingId),
             where('driverId', '==', ride.driverId)
           );
           const groupSnap = await getDocs(groupQuery);
-          console.log(`📦 Found ${groupSnap.size} rides in group`);
-          allRideIds = [];
-          allRiderIds = [];
-          allRiderNames = [];
+          allRideIds = []; allRiderIds = []; allRiderNames = [];
           groupSnap.forEach((d) => {
-            console.log(`  - Ride ${d.id}: riderId=${d.data().riderId}, riderName=${d.data().riderName}, status=${d.data().status}`);
             allRideIds.push(d.id);
             const data = d.data();
             allRiderIds.push(data?.riderId ?? data?.userId ?? null);
@@ -121,148 +111,95 @@ export function FlagRideModal({ visible, onClose, rideId, onFlagged }: FlagRideM
         }
       }
 
-      // Create flags for all rides in the group
       for (let i = 0; i < allRideIds.length; i++) {
         const rid = allRideIds[i];
         const flagDocId = `${rid}_rider`;
-        
-        // Get this specific ride's data
         const thisRideSnap = await getDoc(doc(firestore, 'confirmedRides', rid));
         const thisRide = thisRideSnap.exists() ? thisRideSnap.data() : ride;
-
         const payload = {
-          rideId: rid,
-          ridePostingId: postingId ?? null,
-          isGroupRide: !!postingId,
+          rideId: rid, ridePostingId: postingId ?? null, isGroupRide: !!postingId,
           totalPassengers: allRideIds.length,
           riderId: thisRide?.riderId ?? thisRide?.userId ?? null,
           riderName: thisRide?.riderName ?? 'Passenger',
-          driverId: thisRide?.driverId ?? null,
-          driverName: thisRide?.driverName ?? 'Driver',
+          driverId: thisRide?.driverId ?? null, driverName: thisRide?.driverName ?? 'Driver',
           statusAtFlag: thisRide?.status ?? null,
-          pickup: thisRide?.pickup ?? null,
-          dropoff: thisRide?.dropoff ?? null,
-          date: thisRide?.date ?? null,
-          time: thisRide?.time ?? null,
-          reason,
-          details: details.trim(),
+          pickup: thisRide?.pickup ?? null, dropoff: thisRide?.dropoff ?? null,
+          date: thisRide?.date ?? null, time: thisRide?.time ?? null,
+          reason, details: details.trim(),
           severity: severityHigh ? 'high' : 'normal',
-          attachments: [],
-          flaggedByRole: 'rider',
-          reviewStatus: 'open',
-          updatedAt: serverTimestamp(),
-          createdAt: serverTimestamp(),
+          attachments: [], flaggedByRole: 'rider', reviewStatus: 'open',
+          updatedAt: serverTimestamp(), createdAt: serverTimestamp(),
         } as any;
-
         await setDoc(doc(firestore, 'rideFlags', flagDocId), payload, { merge: true });
-
-        // Update confirmed ride status to FLAGGED
-        console.log(`🚩 Flagging ride ${rid} (was ${thisRide?.status})`);
-        await updateDoc(doc(firestore, 'confirmedRides', rid), { 
-          status: 'FLAGGED', 
-          statusAtFlag: thisRide?.status ?? 'IN_PROGRESS',
-          updatedAt: serverTimestamp() 
+        await updateDoc(doc(firestore, 'confirmedRides', rid), {
+          status: 'FLAGGED', statusAtFlag: thisRide?.status ?? 'IN_PROGRESS', updatedAt: serverTimestamp(),
         });
-        console.log(`✅ Successfully flagged ride ${rid}`);
       }
 
-      // Send notification to driver
+      // Notify driver
       try {
-        const driverId = ride?.driverId;
-        if (driverId) {
+        if (ride?.driverId) {
           await addDoc(collection(firestore, 'notifications'), {
-            userId: driverId,
-            type: 'ride_flagged',
+            userId: ride.driverId, type: 'ride_flagged',
             title: postingId ? 'Group Ride Flagged' : 'Ride Flagged',
-            message: postingId 
+            message: postingId
               ? `Your group ride with ${allRiderNames.join(', ')} has been flagged and requires admin review.`
               : `Your ride with ${allRiderNames[0]} has been flagged and requires admin review.`,
-            rideId: allRideIds[0],
-            ridePostingId: postingId ?? null,
-            severity: 'high',
-            read: false,
-            createdAt: serverTimestamp(),
+            rideId: allRideIds[0], ridePostingId: postingId ?? null,
+            severity: 'high', read: false, createdAt: serverTimestamp(),
           });
         }
-      } catch (e) {
-        console.warn('Failed to send driver notification', e);
-      }
+      } catch (e) { console.warn('Failed to send driver notification', e); }
 
-      // Send notification to admin
+      // Notify admin
       try {
         await addDoc(collection(firestore, 'adminNotifications'), {
           type: 'ride_flag',
           title: postingId ? 'Group Ride Flagged' : 'Ride Flagged',
           message: `A ${postingId ? 'group ride' : 'ride'} has been flagged by rider. Reason: ${reason}`,
-          rideIds: allRideIds,
-          ridePostingId: postingId ?? null,
-          flaggedByRole: 'rider',
-          flaggedById: user.uid,
-          reason,
-          details: details.trim(),
-          driverId: ride?.driverId ?? null,
-          driverName: ride?.driverName ?? 'Driver',
-          riderIds: allRiderIds.filter(Boolean),
-          riderNames: allRiderNames,
-          severity: 'high',
-          status: 'pending',
-          read: false,
-          createdAt: serverTimestamp(),
+          rideIds: allRideIds, ridePostingId: postingId ?? null,
+          flaggedByRole: 'rider', flaggedById: user.uid,
+          reason, details: details.trim(),
+          driverId: ride?.driverId ?? null, driverName: ride?.driverName ?? 'Driver',
+          riderIds: allRiderIds.filter(Boolean), riderNames: allRiderNames,
+          severity: 'high', status: 'pending', read: false, createdAt: serverTimestamp(),
         });
-      } catch (e) {
-        console.warn('Failed to send admin notification', e);
-      }
+      } catch (e) { console.warn('Failed to send admin notification', e); }
 
-      // If other passengers exist in group ride, notify them
+      // Notify other passengers in group
       if (postingId && allRiderIds.length > 1) {
         for (let i = 0; i < allRiderIds.length; i++) {
           const riderId = allRiderIds[i];
-          if (!riderId || riderId === user.uid) continue; // Don't notify the rider who flagged
+          if (!riderId || riderId === user.uid) continue;
           try {
             await addDoc(collection(firestore, 'notifications'), {
-              userId: riderId,
-              type: 'ride_flagged',
-              title: 'Group Ride Flagged',
-              message: 'Your group ride has been flagged and requires admin review. No further actions can be taken until resolved.',
-              rideId: allRideIds[i],
-              ridePostingId: postingId,
-              severity: 'high',
-              read: false,
-              createdAt: serverTimestamp(),
+              userId: riderId, type: 'ride_flagged', title: 'Group Ride Flagged',
+              message: 'Your group ride has been flagged and requires admin review.',
+              rideId: allRideIds[i], ridePostingId: postingId,
+              severity: 'high', read: false, createdAt: serverTimestamp(),
             });
-          } catch (e) {
-            console.warn(`Failed to send notification to rider ${riderId}`, e);
-          }
+          } catch (e) { console.warn(`Failed to notify rider ${riderId}`, e); }
         }
       }
 
-      try { onFlagged && onFlagged(rideId); } catch {}
-      try { appAnalytics?.logEvent?.('flag_submitted', { rideId, reason, severity: severityHigh ? 'high' : 'normal', isGroupRide: !!postingId, flaggedRides: allRideIds.length }); } catch {}
+      try { onFlagged?.(rideId); } catch {}
+
       void logActivity({
-        type: 'ride_flagged',
-        entityType: 'ride',
-        entityId: rideId,
-        metadata: {
-          rideId,
-          reason,
-          severity: severityHigh ? 'high' : 'normal',
-          flaggedRides: allRideIds.length,
-          isGroupRide: !!postingId,
-        },
+        type: 'ride_flagged', entityType: 'ride', entityId: rideId,
+        metadata: { rideId, reason, severity: severityHigh ? 'high' : 'normal', flaggedRides: allRideIds.length, isGroupRide: !!postingId },
       });
 
-      // Show appropriate success message
       if (postingId) {
-        Alert.alert(
-          'Group Ride Flagged',
-          `All ${allRideIds.length} passengers in this group ride have been flagged. Admin will review this case. No further actions can be taken until resolved.`,
+        Alert.alert('Group Ride Flagged',
+          `All ${allRideIds.length} passengers have been flagged. Admin will review this case.`,
           [{ text: 'OK', onPress: () => onClose() }]
         );
       } else {
-        Alert.alert('Flag submitted', 'Thank you — the ride has been flagged for review.', [{ text: 'OK', onPress: () => onClose() }]);
+        Alert.alert('Flag submitted', 'Thank you — the ride has been flagged for review.',
+          [{ text: 'OK', onPress: () => onClose() }]
+        );
       }
     } catch (err: any) {
-      try { appAnalytics?.logEvent?.('flag_failed', { rideId: rideId ?? 'unknown', error: String(err?.message || err) }); } catch {}
       const msg = err?.message ?? 'Could not submit flag';
       Alert.alert('Error', msg);
       setSubmitting(false);

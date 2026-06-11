@@ -1,828 +1,1362 @@
-import { FlagRideModal } from '@/components/FlagRideModal';
-import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { View, ScrollView, StyleSheet, Text, TouchableOpacity, Modal, ActivityIndicator, Alert, Image, Share, Linking, Dimensions, RefreshControl, useColorScheme, Animated, Easing } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Linking,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  Share,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { X, MapPin, Clock, User, Star, DollarSign, Bell, Leaf, Gift, MessageSquare, Shield, Calendar, Megaphone, Flag, Phone, TrendingUp, MessageCircle, Share2 } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@/hooks/useTheme';
 import { router, useFocusEffect } from 'expo-router';
-import { usePromotions } from '@/hooks/usePromotions';
+import {
+  Flag,
+  MessageCircle,
+  Phone,
+  Share2,
+  Shield,
+  Star,
+  X,
+} from 'lucide-react-native';
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit as fsLimit,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  setDoc,
+  Timestamp,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
+import { getDownloadURL, ref as storageRef } from 'firebase/storage';
+
+import { AddressLink } from '@/components/AddressLink';
+import { Button } from '@/components/ui/Button';
+import { FlagRideModal } from '@/components/FlagRideModal';
 import PromotionCard from '@/components/PromotionCard';
 import PromotionDetailsModal from '@/components/PromotionDetailsModal';
-import { Promotion } from '@/types';
-import { firestore, firebaseAuth, storage, functions } from '@/constants/services';
-import { logActivity } from '@/utils/activityLogger';
-import { httpsCallable } from 'firebase/functions';
-import { Button } from '@/components/ui/Button';
-import { getDownloadURL, ref as storageRef } from 'firebase/storage';
-import { AddressLink } from '@/components/AddressLink';
-import {
-  collection, onSnapshot, query, where, getCountFromServer,
-  getDocs, doc, getDoc, Timestamp, limit as fsLimit,
-  updateDoc, setDoc, addDoc, serverTimestamp,
-} from 'firebase/firestore';
 import RatingModal from '@/components/RatingModal';
+import { RiderRouteSearchCard, type RiderRoutePayload } from '../../components/RiderRouteSearchCard';
 import StudentVerificationBanner from '@/components/StudentVerificationBanner';
+import { firebaseAuth, firestore, storage } from '@/constants/services';
+import { AppColors, BRAND } from '@/constants/theme';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import { usePromotions } from '@/hooks/usePromotions';
 import { fetchVerificationStatus, setupVerificationListener, cleanupVerificationListener } from '@/services/verification';
-import { showSuccessToast, showErrorToast, showInfoToast, rideToasts } from '@/src/utils/showToast';
+import { Promotion } from '@/types';
+import { logActivity } from '@/utils/activityLogger';
+import { submitRating } from '@/src/services/functions';
+import { showErrorToast, showSuccessToast } from '@/src/utils/showToast';
 
-// ─── Design Tokens ────────────────────────────────────────────────────────────
-const COLORS = {
-  orange:       '#F4621F',
-  orangeLight:  '#FF8C4A',
-  orangeGlow:   'rgba(244,98,31,0.15)',
-  orangeBorder: 'rgba(244,98,31,0.45)',
-  navy:         '#0D1B2A',
-  green:        '#10B981',
-  darkBg:       '#080E17',
-  darkCard:     'rgba(255,255,255,0.07)',
-  darkBorder:   'rgba(255,255,255,0.12)',
-  darkText:     '#F0F4FF',
-  darkSub:      '#7A8FA8',
-  lightBg:      '#F2F4F8',
-  lightCard:    'rgba(255,255,255,0.85)',
-  lightBorder:  'rgba(255,255,255,0.9)',
-  lightText:    '#0D1B2A',
-  lightSub:     '#5A6A7E',
-};
+type GradientStops = readonly [string, string, ...string[]];
+type RideStatus = 'posted' | 'offer' | 'confirmed' | 'in_progress' | 'completed' | 'flagged' | string;
 
-function useAppTheme() {
-  const dark = useColorScheme() === 'dark';
-  return {
-    dark,
-    bg:     dark ? COLORS.darkBg     : COLORS.lightBg,
-    card:   dark ? COLORS.darkCard   : COLORS.lightCard,
-    border: dark ? COLORS.darkBorder : COLORS.lightBorder,
-    text:   dark ? COLORS.darkText   : COLORS.lightText,
-    sub:    dark ? COLORS.darkSub    : COLORS.lightSub,
-  };
-}
-
-// ─── Types (unchanged) ────────────────────────────────────────────────────────
 type UpcomingRideCard = {
-  id: string; type: 'ride' | 'rideRequest' | 'confirmedRide'; status: string;
-  from: string; to: string; dateTime: Date | null; etaText?: string;
-  durationText?: string; priceText?: string; distanceText?: string;
-  driverName?: string; driverRating?: number | null; vehicleText?: string;
-  driverPhone?: string | null; rideRequestId?: string | null;
-  ridePostingId?: string | null; riderId?: string | null;
+  id: string;
+  type: 'ride' | 'rideRequest' | 'confirmedRide';
+  status: RideStatus;
+  from: string;
+  to: string;
+  dateTime: Date | null;
+  etaText?: string;
+  durationText?: string;
+  priceText?: string;
+  distanceText?: string;
+  driverName?: string;
+  driverRating?: number | null;
+  vehicleText?: string;
+  driverPhone?: string | null;
+  driverId?: string | null;
+  rideRequestId?: string | null;
+  ridePostingId?: string | null;
+  riderId?: string | null;
 };
 
 type OfferInfo = {
-  id: string; rideRequestId: string; status: string; priceText?: string;
-  priceNumber?: number; distanceText?: string; durationText?: string;
-  driverName?: string; driverId?: string; driverEmail?: string;
-  driverPhone?: string; ridePostingId?: string | null; createdAt?: Date | null;
+  id: string;
+  rideRequestId: string;
+  status: string;
+  priceText?: string;
+  priceNumber?: number;
+  distanceText?: string;
+  durationText?: string;
+  driverName?: string;
+  driverId?: string;
+  driverEmail?: string;
+  driverPhone?: string;
+  ridePostingId?: string | null;
+  createdAt?: Date | null;
 };
 
-// ─── Helper functions (ALL UNCHANGED) ─────────────────────────────────────────
+const RIDER_ROUTES = {
+  book: '/(rider)/book',
+  rides: '/(rider)/requests',
+  messages: '/(rider)/messages',
+  profile: '/(rider)/profile',
+  availableRides: '/(rider)/available-rides',
+  history: '/(rider)/requests',
+} as const;
+
+const asGradientStops = (stops: string[]): GradientStops => {
+  return stops as unknown as GradientStops;
+};
+
+const currency = (value?: number | null) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '$0';
+  return `$${Math.round(value)}`;
+};
+
 const extractAddress = (obj: any, type: 'pickup' | 'dropoff' | 'destination'): string | null => {
   if (!obj) return null;
-  if (type === 'pickup') {
-    const addr = obj.pickup || obj.pickupLocation || obj.pickupAddress || obj.from || obj.origin;
-    if (typeof addr === 'object' && addr !== null) return addr.address || addr.formatted_address || addr.description || addr.name || null;
-    return typeof addr === 'string' ? addr : null;
-  } else if (type === 'dropoff') {
-    const addr = obj.dropoff || obj.dropoffLocation || obj.dropoffAddress || obj.to || obj.destination;
-    if (typeof addr === 'object' && addr !== null) return addr.address || addr.formatted_address || addr.description || addr.name || null;
-    return typeof addr === 'string' ? addr : null;
-  } else {
-    const addr = obj.destination || obj.dropoff || obj.dropoffLocation || obj.to;
-    if (typeof addr === 'object' && addr !== null) return addr.address || addr.formatted_address || addr.description || addr.name || null;
-    return typeof addr === 'string' ? addr : null;
+
+  const raw =
+    type === 'pickup'
+      ? obj.pickup || obj.pickupLocation || obj.pickupAddress || obj.from || obj.origin
+      : obj.dropoff || obj.dropoffLocation || obj.dropoffAddress || obj.to || obj.destination;
+
+  if (typeof raw === 'object' && raw !== null) {
+    return raw.address || raw.formatted_address || raw.description || raw.name || null;
   }
+
+  return typeof raw === 'string' ? raw : null;
 };
 
 const extractDistance = (obj: any): string | undefined => {
   if (!obj) return undefined;
-  const dist = obj.distance || obj.estimatedDistance || obj.distanceText;
-  if (typeof dist === 'number') return `${dist.toFixed(1)} mi`;
-  if (typeof dist === 'string') return dist;
+  const distance = obj.distance || obj.estimatedDistance || obj.distanceText;
+  if (typeof distance === 'number') return `${distance.toFixed(1)} mi`;
+  if (typeof distance === 'string') return distance;
+  if (typeof distance?.text === 'string') return distance.text;
   return undefined;
 };
 
-const getRideDateTime = (obj: any): Date | null => {
-  if (!obj) return null;
-  if (obj.date || obj.time) { const dt = composeDateTime(obj.date, obj.time); if (dt) return dt; }
-  if (obj.pickupTime?.toDate) return obj.pickupTime.toDate();
-  if (obj.requestedTime?.toDate) return obj.requestedTime.toDate();
-  if (obj.scheduledTime?.toDate) return obj.scheduledTime.toDate();
-  if (obj.createdAt?.toDate) return obj.createdAt.toDate();
-  return null;
+const toDateField = (value: any): Date | null => {
+  try {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    if (value instanceof Timestamp) return value.toDate();
+    if (value?.toDate) return value.toDate();
+    if (typeof value === 'number') return new Date(value);
+    if (typeof value === 'string') {
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 };
 
 const composeDateTime = (dateField: any, timeField: any): Date | null => {
   try {
-    let dateStr = ''; let timeStr = '';
-    if (dateField) { if (dateField.toDate) dateStr = dateField.toDate().toISOString().split('T')[0]; else if (typeof dateField === 'string') dateStr = dateField; }
+    let dateStr = '';
+    let timeStr = '';
+
+    if (dateField) {
+      if (dateField.toDate) dateStr = dateField.toDate().toISOString().split('T')[0];
+      else if (typeof dateField === 'string') dateStr = dateField;
+    }
+
     if (timeField && typeof timeField === 'string') timeStr = timeField;
-    if (dateStr && timeStr) {
-      const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-      if (timeMatch) {
-        let hours = parseInt(timeMatch[1], 10); const minutes = parseInt(timeMatch[2], 10); const meridiem = timeMatch[3].toUpperCase();
-        if (meridiem === 'PM' && hours < 12) hours += 12; else if (meridiem === 'AM' && hours === 12) hours = 0;
-        const [year, month, day] = dateStr.split('-').map(Number);
-        return new Date(year, month - 1, day, hours, minutes, 0, 0);
+    if (!dateStr) return null;
+
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const date = new Date(year, (month || 1) - 1, day || 1);
+
+    if (timeStr) {
+      const match = timeStr.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+      if (match) {
+        let hours = Number(match[1]);
+        const minutes = Number(match[2] || 0);
+        const meridiem = match[3]?.toUpperCase();
+        if (meridiem === 'PM' && hours < 12) hours += 12;
+        if (meridiem === 'AM' && hours === 12) hours = 0;
+        date.setHours(hours, minutes, 0, 0);
       }
-      return new Date(`${dateStr}T${timeStr}`);
-    } else if (dateStr) { const [year, month, day] = dateStr.split('-').map(Number); return new Date(year, month - 1, day); }
-  } catch {}
-  return null;
+    }
+
+    return Number.isNaN(date.getTime()) ? null : date;
+  } catch {
+    return null;
+  }
 };
 
-// ─── Main Screen ──────────────────────────────────────────────────────────────
-export default function HomeScreen() {
-  const theme = useAppTheme();
-  const oldTheme = useTheme();
+const getRideDateTime = (obj: any): Date | null => {
+  if (!obj) return null;
+  if (obj.date || obj.time) {
+    const composed = composeDateTime(obj.date, obj.time);
+    if (composed) return composed;
+  }
+  return (
+    toDateField(obj.pickupTime) ||
+    toDateField(obj.requestedTime) ||
+    toDateField(obj.scheduledTime) ||
+    toDateField(obj.createdAt)
+  );
+};
+
+const formatDate = (date?: Date | null) => {
+  if (!date) return '';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+
+const formatTime = (date?: Date | null) => {
+  if (!date) return '';
+  return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+};
+
+const formatDateTime = (date?: Date | null) => {
+  if (!date) return 'Time pending';
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  return sameDay ? `Today, ${formatTime(date)}` : `${formatDate(date)}, ${formatTime(date)}`;
+};
+
+const prettyStatus = (status?: string) => {
+  const key = String(status || '').toLowerCase().replace(/[-\s]/g, '_');
+  const map: Record<string, string> = {
+    posted: 'Posted',
+    pending: 'Posted',
+    open: 'Posted',
+    offer: 'Offer Received',
+    offer_sent: 'Offer Sent',
+    accepted: 'Confirmed',
+    confirmed: 'Confirmed',
+    in_progress: 'In Progress',
+    driver_completed: 'In Progress',
+    rider_completed: 'In Progress',
+    completed: 'Completed',
+    flagged: 'Flagged',
+  };
+  return map[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
+const badgeForStatus = (status?: string) => {
+  const key = String(status || '').toLowerCase().replace(/[-\s]/g, '_');
+  if (key === 'flagged') return { label: 'Flagged', semantic: 'red' as const };
+  if (key === 'in_progress' || key === 'driver_completed' || key === 'rider_completed') {
+    return { label: 'In Progress', semantic: 'green' as const };
+  }
+  if (key === 'confirmed' || key === 'accepted') return { label: 'Confirmed', semantic: 'green' as const };
+  if (key.includes('offer')) return { label: 'Offer Received', semantic: 'orange' as const };
+  return { label: prettyStatus(status), semantic: 'blue' as const };
+};
+
+const mergeUpcoming = (prev: UpcomingRideCard[], incoming: UpcomingRideCard[]) => {
+  const map = new Map<string, UpcomingRideCard>();
+  const keyFor = (item: UpcomingRideCard) => {
+    if (item.type === 'confirmedRide') {
+      return item.rideRequestId ? `rr_${item.rideRequestId}` : `cr_${item.id}`;
+    }
+    if (item.type === 'rideRequest') return `rr_${item.id}`;
+    return `${item.type}_${item.id}`;
+  };
+
+  [...prev, ...incoming].forEach((item) => map.set(keyFor(item), item));
+  return [...map.values()].sort((a, b) => {
+    const at = a.dateTime ? a.dateTime.getTime() : Number.MAX_SAFE_INTEGER;
+    const bt = b.dateTime ? b.dateTime.getTime() : Number.MAX_SAFE_INTEGER;
+    return at - bt;
+  });
+};
+
+const deepClean = <T,>(obj: T): T => {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) return obj.map((value) => deepClean(value)) as T;
+  if (obj instanceof Date || obj instanceof Timestamp) return obj;
+  if (Object.prototype.toString.call(obj) !== '[object Object]') return obj;
+
+  const out: Record<string, any> = {};
+  Object.entries(obj as Record<string, any>).forEach(([key, value]) => {
+    if (value === undefined) out[key] = null;
+    else out[key] = deepClean(value);
+  });
+  return out as T;
+};
+
+export default function RiderHomeScreen() {
+  const { colors, isDark } = useAppTheme();
+  const themed = createStyles(colors, isDark);
+  const uid = firebaseAuth.currentUser?.uid ?? null;
+  const email = firebaseAuth.currentUser?.email ?? null;
+
   const [selectedRide, setSelectedRide] = useState<UpcomingRideCard | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [modalDriver, setModalDriver] = useState<{ name?: string; rating?: number | null; phone?: string | null; phoneFromProfile?: boolean; avatarUrl?: string | null; vehicleText?: string; driverId?: string; } | null>(null);
+  const [modalDriver, setModalDriver] = useState<{
+    name?: string;
+    rating?: number | null;
+    phone?: string | null;
+    phoneFromProfile?: boolean;
+    avatarUrl?: string | null;
+    vehicleText?: string;
+    driverId?: string | null;
+  } | null>(null);
   const [modalDistanceText, setModalDistanceText] = useState<string | undefined>(undefined);
   const [upcoming, setUpcoming] = useState<UpcomingRideCard[]>([]);
+  const [recent, setRecent] = useState<UpcomingRideCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [userName, setUserName] = useState<string | null>(null);
-  const [userPhoto, setUserPhoto] = useState<string | null>(null);
-  const [stats, setStats] = useState({ totalRides: 0, spent: 0, avgRating: null as number | null });
+  const [stats, setStats] = useState({ totalRides: 0, totalSpent: 0, avgRating: null as number | null });
+  const [userName, setUserName] = useState('Rider');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [offersByRideId, setOffersByRideId] = useState<Record<string, OfferInfo>>({});
-  const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [isScrolled, setIsScrolled] = useState(false);
-  const [currentPromotionIndex, setCurrentPromotionIndex] = useState(0);
-  const statsSourcesRef = useRef<{ hist: Map<string, { spent: number; rating?: number | null }>; conf: Map<string, { spent: number }>}>({ hist: new Map(), conf: new Map() });
-  const validRideIdsRef = useRef<Set<string>>(new Set());
-  const ratingsByRideIdRef = useRef<Map<string, { stars: number; createdAt?: number }>>(new Map());
-  const notifReadMapRef = useRef<Record<string, boolean>>({});
-  const confirmedIndexRef = useRef<Record<string, { docId: string; status: 'confirmed'|'in_progress'|'completed'|'flagged'; flags?: any }>>({});
-  const confirmedKeysRef = useRef<Set<string>>(new Set());
-  const [recent, setRecent] = useState<UpcomingRideCard[]>([]);
+  const [ratedRideIds, setRatedRideIds] = useState<Set<string>>(new Set());
   const [flagModalVisible, setFlagModalVisible] = useState(false);
   const [flaggingRideId, setFlaggingRideId] = useState<string | null>(null);
   const [ratingModalVisible, setRatingModalVisible] = useState(false);
   const [ratingTarget, setRatingTarget] = useState<{ rideId: string; driverName?: string } | null>(null);
   const [ratingSubmitting, setRatingSubmitting] = useState(false);
   const [ratingError, setRatingError] = useState<string | null>(null);
-  const [ratedRideIds, setRatedRideIds] = useState<Set<string>>(new Set());
-  const completedSeenRef = useRef<Set<string>>(new Set());
-  const confirmedFallbackSetupRef = useRef<boolean>(false);
-  const promotionsScrollRef = useRef<ScrollView>(null);
-
-  const { promotions, claimedPromotions, loading: promotionsLoading, error: promotionsError, refreshPromotions, claimPromotion, isPromotionClaimed } = usePromotions();
   const [selectedPromotion, setSelectedPromotion] = useState<Promotion | null>(null);
   const [promotionModalVisible, setPromotionModalVisible] = useState(false);
+  const [currentPromotionIndex, setCurrentPromotionIndex] = useState(0);
+
+  const promotionScrollRef = useRef<ScrollView>(null);
+  const confirmedKeysRef = useRef<Set<string>>(new Set());
+  const completedSeenRef = useRef<Set<string>>(new Set());
+  const confirmedIndexRef = useRef<Record<string, { docId: string; status: string }>>({});
+
+  const {
+    promotions,
+    loading: promotionsLoading,
+    refreshPromotions,
+    claimPromotion,
+    isPromotionClaimed,
+  } = usePromotions();
+
+  const displayUpcoming = useMemo(
+    () => upcoming.filter((ride) => !['completed', 'cancelled'].includes(String(ride.status).toLowerCase())).slice(0, 3),
+    [upcoming]
+  );
+
+  const nextRide = displayUpcoming[0];
+  const activeRideCount = displayUpcoming.length;
+  const firstName = userName.split(' ')[0] || 'there';
+
+  const statCards = useMemo(
+    () => [
+      { label: 'This month', value: currency(stats.totalSpent), color: colors.primary },
+      { label: 'Rides done', value: String(stats.totalRides || 0), color: colors.textPrimary },
+      { label: 'Rating', value: stats.avgRating ? `★${stats.avgRating.toFixed(2)}` : '★--', color: colors.textPrimary },
+    ],
+    [colors.primary, colors.textPrimary, stats.avgRating, stats.totalRides, stats.totalSpent]
+  );
+
+  const riderInsightText = useMemo(() => {
+    if (activeRideCount > 0) return `${activeRideCount} active ride${activeRideCount === 1 ? '' : 's'} in motion.`;
+    if (promotions.length > 0) return `${promotions.length} promotion${promotions.length === 1 ? '' : 's'} available today.`;
+    return 'Book earlier for smoother pickup windows around campus.';
+  }, [activeRideCount, promotions.length]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refreshPromotions?.();
+    setTimeout(() => setRefreshing(false), 450);
+  }, [refreshPromotions]);
 
   const shareReferral = useCallback(async () => {
-    const uid2 = firebaseAuth.currentUser?.uid; const email2 = firebaseAuth.currentUser?.email;
-    const code = uid2 || (email2 ? encodeURIComponent(email2) : 'guest');
-    const link = `https://ridealong.app/referral?r=${code}`;
-    try { await Share.share({ message: `Join me on RideAlong and earn ride credits: ${link}` }); } catch { Alert.alert('Unable to share right now'); }
+    try {
+      await Share.share({
+        message: 'Try RideAlong for campus rides: https://ridealongapp.com',
+      });
+    } catch {}
   }, []);
 
-  const handlePromotionPress = useCallback((promotion: Promotion) => { setSelectedPromotion(promotion); setPromotionModalVisible(true); }, []);
-  const handleClaimPromotion = useCallback(async (promotionId: string) => {
-    try { await claimPromotion(promotionId); showSuccessToast('Promotion Claimed', 'Offer added to your account'); setPromotionModalVisible(false); }
-    catch (error) { const message = error instanceof Error ? error.message : 'Failed to claim promotion'; showErrorToast('Claim Failed', message); }
-  }, [claimPromotion]);
-
-  const uid = firebaseAuth.currentUser?.uid ?? null;
-  const email = firebaseAuth.currentUser?.email ?? null;
-  const submitRating = useMemo(() => httpsCallable(functions, 'submitRating'), []);
-
-  const logicalRideKey = (r: any, docId: string) => { const rrid = r?.rideRequestId ?? r?.originalRideRequest?.id; return rrid ? `rr_${rrid}` : `cr_${docId}`; };
-  const uLogicalKey = (it: UpcomingRideCard) => {
-    if (it.type === 'confirmedRide') { const rrid = it.rideRequestId ?? (typeof it.id === 'string' ? it.id : undefined); return rrid ? `rr_${rrid}` : `cr_${it.id}`; }
-    if (it.type === 'rideRequest') return `rr_${it.id}`;
-    return `${it.type}_${it.id}`;
-  };
-
-  const prettyStatus = (status: string, type?: string) => {
-    const s = String(status || '').toLowerCase();
-    if (s === 'driver_completed' || s === 'driver-completed') return 'In Progress';
-    if (s === 'in_progress' || s === 'in-progress') return 'In Progress';
-    if (s === 'confirmed' || s === 'matched') return 'Confirmed';
-    if (s === 'pending') return 'Pending'; if (s === 'completed') return 'Completed';
-    if (s === 'cancelled' || s === 'canceled') return 'Cancelled'; if (s === 'flagged') return 'Flagged';
-    if (s === 'posted' || s === 'open') return 'Posted'; if (s === 'accepted') return 'Accepted';
-    if (s === 'rejected' || s === 'declined') return 'Rejected';
-    return s.charAt(0).toUpperCase() + s.slice(1);
-  };
-
-  const extractFlags = (r: any) => ({
-    driverPickupConfirmed: !!r?.driverPickupConfirmed, riderPickupConfirmed: !!r?.riderPickupConfirmed,
-    driverCompleteConfirmed: !!r?.driverCompleteConfirmed, riderCompleteConfirmed: !!r?.riderCompleteConfirmed,
-  });
-
-  const mapConfirmedSnapshot = (docs: any[]): UpcomingRideCard[] => {
-    const items: UpcomingRideCard[] = [];
-    docs.forEach((d) => {
+  const handleClaimPromotion = useCallback(
+    async (promotionId: string) => {
       try {
-        const r = d as any; const docId = r.id as string; const status = r?.status || 'CONFIRMED'; const statusLower = String(status).toLowerCase();
-        if (statusLower === 'completed') return;
-        if (statusLower === 'flagged' && String(r?.statusAtFlag || '').toUpperCase() === 'COMPLETED') return;
-        const from = extractAddress(r, 'pickup') || 'Pickup'; const to = extractAddress(r, 'dropoff') || 'Dropoff';
-        const dt = composeDateTime(r?.date, r?.time) || getRideDateTime(r);
-        const price = r?.contributionAmount; const priceText = typeof price === 'number' ? `$${price.toFixed(2)}` : (typeof price === 'string' ? price : undefined);
-        items.push({ id: docId, type: 'confirmedRide', status, from, to, dateTime: dt, priceText, driverName: r?.driverName, driverRating: typeof r?.driverRating === 'number' ? r.driverRating : null, vehicleText: r?.vehicleText || r?.vehicle, driverPhone: r?.driverPhone, rideRequestId: r?.rideRequestId ?? r?.originalRideRequest?.id ?? null, ridePostingId: r?.ridePostingId ?? null, riderId: r?.riderId ?? null });
-        const key = logicalRideKey(r, docId);
-        const statusForIndex = ['in-progress', 'in_progress', 'driver_completed'].includes(statusLower) ? 'in_progress' : ['rider_completed'].includes(statusLower) ? 'completed' : ['flagged'].includes(statusLower) ? 'flagged' : ['completed'].includes(statusLower) ? 'completed' : 'confirmed';
-        confirmedIndexRef.current[key] = { docId, status: statusForIndex as any, flags: extractFlags(r) };
-        confirmedKeysRef.current.add(key);
-      } catch {}
+        await claimPromotion(promotionId);
+        showSuccessToast('Promotion claimed', 'Offer added to your account');
+        setPromotionModalVisible(false);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to claim promotion';
+        showErrorToast('Claim failed', message);
+      }
+    },
+    [claimPromotion]
+  );
+
+  const openChatForRide = useCallback(async (ride: UpcomingRideCard) => {
+    try {
+      const user = firebaseAuth.currentUser;
+      if (!user) return;
+
+      const otherId = ride.driverId;
+      if (!otherId) {
+        Alert.alert('Chat unavailable', 'Driver information is not available yet.');
+        return;
+      }
+
+      const chatQuery = query(
+        collection(firestore, 'chats'),
+        where('participants', 'array-contains', user.uid)
+      );
+      const snap = await getDocs(chatQuery);
+      const existing = snap.docs.find((item) => {
+        const data = item.data() as any;
+        const participants = Array.isArray(data.participants) ? data.participants : [];
+        return participants.includes(otherId) && data.rideId === (ride.rideRequestId || ride.id);
+      });
+
+      if (existing) {
+        router.push(`/(rider)/messages/${existing.id}` as any);
+        return;
+      }
+
+      const docRef = await addDoc(collection(firestore, 'chats'), {
+        participants: [user.uid, otherId],
+        riderId: user.uid,
+        driverId: otherId,
+        rideId: ride.rideRequestId || ride.id,
+        lastMessage: '',
+        lastMessageTimestamp: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      });
+
+      router.push(`/(rider)/messages/${docRef.id}` as any);
+    } catch {
+      Alert.alert('Chat unavailable', 'Could not open this conversation.');
+    }
+  }, []);
+
+  const openRideDetails = useCallback(async (ride: UpcomingRideCard) => {
+    setSelectedRide(ride);
+    setModalDistanceText(ride.distanceText);
+    setModalDriver({
+      name: ride.driverName,
+      rating: ride.driverRating,
+      phone: ride.driverPhone,
+      vehicleText: ride.vehicleText,
+      driverId: ride.driverId,
     });
-    return items;
-  };
+    setModalVisible(true);
 
-  const mergeConfirmedIntoUpcoming = (mapped: UpcomingRideCard[]) => {
-    setUpcoming((prev) => {
-      const pruned = prev.filter((it) => { if (it.type !== 'confirmedRide') return true; const key = uLogicalKey(it); return confirmedKeysRef.current.has(key); });
-      return mergeUpcoming(pruned, mapped);
-    });
-  };
+    try {
+      const driverId = ride.driverId;
+      if (!driverId) return;
 
-  const recomputeStats = (_ratingsSumFromHist?: number, _ratingsCountFromHist?: number) => { return; };
+      const driverDoc = await getDoc(doc(firestore, 'drivers', driverId));
+      if (!driverDoc.exists()) return;
 
-  // ALL useEffects and handlers preserved exactly
+      const driver = driverDoc.data() as any;
+      let avatar: string | null = driver.avatarUrl || driver.photoURL || driver.profilePicture || null;
+
+      if (!avatar && driver.profilePicturePath) {
+        try {
+          avatar = await getDownloadURL(storageRef(storage, driver.profilePicturePath));
+        } catch {}
+      }
+
+      setModalDriver((prev) => ({
+        ...prev,
+        name:
+          driver.fullName ||
+          driver.name ||
+          [driver.firstName, driver.lastName].filter(Boolean).join(' ') ||
+          prev?.name,
+        rating: typeof driver.rating === 'number' ? driver.rating : prev?.rating,
+        phone: driver.phone || driver.phoneNumber || prev?.phone,
+        avatarUrl: avatar || prev?.avatarUrl,
+        vehicleText:
+          driver.vehicleText ||
+          [driver.vehicle?.color, driver.vehicle?.make, driver.vehicle?.model].filter(Boolean).join(' ') ||
+          prev?.vehicleText,
+        driverId,
+      }));
+    } catch {}
+  }, []);
+
+  const closeModal = useCallback(() => {
+    setModalVisible(false);
+    setSelectedRide(null);
+    setModalDriver(null);
+    setModalDistanceText(undefined);
+  }, []);
+
+  const openRatingForRide = useCallback((rideId: string, driverName?: string) => {
+    setRatingTarget({ rideId, driverName });
+    setRatingError(null);
+    setRatingModalVisible(true);
+  }, []);
+
   useEffect(() => {
-    if (!uid) { setUpcoming([]); setLoading(false); return; }
-    setLoading(true); notifReadMapRef.current = {}; setUnreadCount(0);
+    if (!uid) {
+      setUpcoming([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
     const unsubs: Array<() => void> = [];
-    (async () => {
+
+    const loadProfile = async () => {
       try {
         const userDoc = await getDoc(doc(firestore, 'riders', uid));
-        const data = userDoc.exists() ? (userDoc.data() as any) : null;
-        let firstName: string | undefined = getFirstNameFromProfile(data);
-        let profilePhoto: string | undefined;
-        if (data) profilePhoto = data.avatarUrl || data.photoURL || data.photoUrl;
-        if (!firstName && email) {
-          const q = query(collection(firestore, 'riders'), where('email', '==', email), fsLimit(1));
-          const snap = await getDocs(q); const docData = snap.docs[0]?.data();
-          firstName = getFirstNameFromProfile(docData);
-          if (!profilePhoto && docData) profilePhoto = docData.avatarUrl || docData.photoURL || docData.photoUrl;
-        }
-        if (!firstName) { const dn = firebaseAuth.currentUser?.displayName || undefined; firstName = dn ? dn.split(' ')[0] : undefined; }
-        if (!profilePhoto) { const authPhotoURL = firebaseAuth.currentUser?.photoURL; if (authPhotoURL) profilePhoto = authPhotoURL; }
-        if (profilePhoto && typeof profilePhoto === 'string') setUserPhoto(profilePhoto);
-        setUserName(firstName ?? (email ? email.split('@')[0] : null));
-      } catch { setUserName(email ? email.split('@')[0] : null); }
-    })();
-    fetchVerificationStatus().catch(() => {});
-    setupVerificationListener();
-
-    const reqUserIdQ = query(collection(firestore, 'rideRequests'), where('userId', '==', uid), where('status', 'in', ['pending', 'posted', 'open', 'offered']));
-    const unsubReqUserId = onSnapshot(reqUserIdQ, (snap) => {
-      const items: UpcomingRideCard[] = [];
-      snap.forEach((d) => {
-        const r = d.data() as any; const requestedTime: Date | null = getRideDateTime(r);
-        if (requestedTime) { const now = new Date(); const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000); if (requestedTime < oneDayAgo) return; }
-        const from = extractAddress(r, 'pickup') || 'Pickup'; const to = extractAddress(r, 'dropoff') || 'Dropoff';
-        const price = r?.contributionAmount ?? r?.estimatedFare?.total ?? r?.estimatedFare;
-        const statusKey = String(r?.status || '').toLowerCase();
-        if (['confirmed','in-progress','in_progress','completed','accepted','matched','rejected','declined','canceled','cancelled','expired'].includes(statusKey)) return;
-        items.push({ id: d.id, type: 'rideRequest', status: normalizeStatusForDisplay(r?.status), from, to, dateTime: requestedTime, durationText: typeof r?.duration === 'number' ? `${Math.round(r.duration)} min` : (typeof r?.duration === 'string' ? sanitizeDurationText(r.duration) : undefined), priceText: typeof price === 'number' ? `$${price.toFixed(2)}` : (typeof price === 'string' ? price : undefined), distanceText: extractDistance(r) });
-      });
-      setUpcoming((prev) => mergeUpcoming(prev, items));
-    }, () => setLoading(false));
-    unsubs.push(unsubReqUserId);
-
-    const rprQ = query(collection(firestore, 'ridePostingRequests'), where('riderId', '==', uid), where('status', 'in', ['pending', 'sent']));
-    const unsubRpr = onSnapshot(rprQ, async (snap) => {
-      const items: UpcomingRideCard[] = [];
-      for (const d of snap.docs) {
-        const r = d.data() as any; const requestedTime: Date | null = getRideDateTime(r);
-        if (requestedTime) { const now = new Date(); const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000); if (requestedTime < oneDayAgo) continue; }
-        const postingId = r?.ridePostingId || r?.rideId;
-        let pricePerSeat = null, pickupFromPosting = null, dropoffFromPosting = null, durationFromPosting = null, distanceFromPosting = null;
-        if (postingId) {
-          try {
-            const postingDoc = await getDoc(doc(firestore, 'ridePostings', postingId));
-            if (postingDoc.exists()) { const pd = postingDoc.data(); pricePerSeat = pd?.pricePerSeat ?? pd?.price; pickupFromPosting = pd?.pickupAddress || pd?.pickup || pd?.pickupLocation?.address || pd?.origin || pd?.from || null; dropoffFromPosting = pd?.dropoffAddress || pd?.dropoff || pd?.dropoffLocation?.address || pd?.destination || pd?.to || null; durationFromPosting = pd?.duration; distanceFromPosting = pd?.distance; }
-          } catch {}
-        }
-        const from = pickupFromPosting || extractAddress(r, 'pickup') || 'Pickup';
-        const to = dropoffFromPosting || extractAddress(r, 'dropoff') || extractAddress(r, 'destination') || 'Dropoff';
-        const price = pricePerSeat ?? r?.contributionAmount;
-        const statusKey = String(r?.status || r?.state || '').toLowerCase();
-        if (['confirmed','in-progress','in_progress','completed','accepted','matched','rejected','declined','canceled','cancelled','expired'].includes(statusKey)) continue;
-        items.push({ id: d.id, type: 'rideRequest', status: 'Offer Sent', from, to, dateTime: requestedTime, durationText: (typeof r?.duration === 'number' ? `${Math.round(r.duration)} min` : (typeof r?.duration === 'string' ? sanitizeDurationText(r.duration) : (typeof durationFromPosting === 'number' ? `${Math.round(durationFromPosting)} min` : (typeof durationFromPosting === 'string' ? sanitizeDurationText(durationFromPosting) : undefined)))), priceText: typeof price === 'number' ? `$${price.toFixed(2)}` : (typeof price === 'string' ? price : undefined), distanceText: extractDistance(r) || (typeof distanceFromPosting === 'number' ? `${distanceFromPosting.toFixed(1)} mi` : (typeof distanceFromPosting === 'string' ? distanceFromPosting : undefined)), ridePostingId: postingId || null });
-      }
-      setUpcoming((prev) => mergeUpcoming(prev, items));
-    }, () => setLoading(false));
-    unsubs.push(unsubRpr);
-
-    try {
-      const base = collection(firestore, 'notifications');
-      const qUserId = query(base, where('userId', '==', uid)); const qRecipientId = query(base, where('recipientId', '==', uid));
-      const qEmailUser = email ? query(base, where('userEmail', '==', email)) : null; const qRecipients = query(base, where('recipients', 'array-contains', uid));
-      const mergeAndSet = (snapshot: any) => {
-        const partial: Record<string, boolean> = {};
-        snapshot.docs.forEach((d: any) => { const data = d.data() || {}; const readBy: string[] = Array.isArray(data.readBy) ? data.readBy : []; partial[d.id] = data.read === true || data.unread === false || readBy.includes(uid!); });
-        notifReadMapRef.current = { ...notifReadMapRef.current, ...partial };
-        setUnreadCount(Object.values(notifReadMapRef.current).filter((r) => !r).length);
-      };
-      unsubs.push(onSnapshot(qUserId, mergeAndSet, () => {}), onSnapshot(qRecipientId, mergeAndSet, () => {}));
-      if (qEmailUser) unsubs.push(onSnapshot(qEmailUser, mergeAndSet, () => {}));
-      unsubs.push(onSnapshot(qRecipients, mergeAndSet, () => {}));
-    } catch {}
-
-    const offersBase = collection(firestore, 'rideOffers');
-    const mapOffer = (d: any): OfferInfo | null => {
-      try {
-        const data = d.data() || {}; const rideRequestId = data.rideRequestId || data.requestId || data.rideRequest?.id;
-        if (!rideRequestId) return null;
-        const status = String(data.status || data.state || 'pending'); const createdAt = toDateField(data.timestamp || data.createdAt || data.time);
-        const priceRaw = data.offerPrice ?? data.price ?? data.estimatedFare;
-        const priceText = typeof priceRaw === 'number' ? `$${priceRaw.toFixed(2)}` : (typeof priceRaw === 'string' ? priceRaw : undefined);
-        const priceNumber = typeof priceRaw === 'number' ? priceRaw : (typeof priceRaw === 'string' ? parseCurrency(priceRaw) : undefined);
-        let dist = data.distance?.text || data.distanceText; let dur = data.duration?.text || data.durationText;
-        if (!dist) dist = extractDistance(data) || extractDistance(data.route) || extractDistance(data.trip) || extractDistance(data.details) || undefined;
-        if (!dur) { const durVal = (typeof data.duration === 'number' ? data.duration : (typeof data.durationMinutes === 'number' ? data.durationMinutes : undefined)); if (typeof durVal === 'number' && isFinite(durVal)) dur = `${Math.round(durVal)} min`; }
-        return { id: d.id, rideRequestId, status, priceText, priceNumber, distanceText: typeof dist === 'string' ? dist : undefined, durationText: typeof dur === 'string' ? dur : (typeof data.duration === 'number' ? `${Math.round(data.duration)} min` : undefined), driverName: data.driverName || data.driver?.name, driverId: data.driverId || data.driverUID || data.senderId, driverEmail: data.driverEmail || data.driver?.email, driverPhone: data.driverPhone || data.driver?.phone, ridePostingId: data.ridePostingId || data.ridePostId || null, createdAt };
-      } catch { return null; }
-    };
-    const handleOfferSnap = (snap: any) => {
-      const incoming: Record<string, OfferInfo> = {};
-      snap.forEach((docu: any) => { const o = mapOffer(docu); if (!o) return; const existing = incoming[o.rideRequestId]; if (!existing || (o.createdAt && existing.createdAt && o.createdAt > existing.createdAt)) incoming[o.rideRequestId] = o; });
-      setOffersByRideId((prev) => ({ ...prev, ...incoming }));
-    };
-    unsubs.push(onSnapshot(query(offersBase, where('recipientId', '==', uid)), handleOfferSnap, () => {}), onSnapshot(query(offersBase, where('riderId', '==', uid)), handleOfferSnap, () => {}));
-
-    try {
-      const qConfDone = query(collection(firestore, 'confirmedRides'), where('riderId', '==', uid), where('status', '==', 'COMPLETED'));
-      unsubs.push(onSnapshot(qConfDone, (snap) => {
-        const confRideIds = new Set<string>(); let totalCount = 0; let totalSpent = 0;
-        snap.forEach((d) => {
-          const r: any = d.data() || {}; totalCount += 1;
-          const parseAmount = (ride: any) => { const v = ride?.contributionAmount ?? ride?.estimatedFare?.total ?? ride?.estimatedFare ?? ride?.price; if (typeof v === 'string') { const m = v.match(/([\d.]+)/); return m ? parseFloat(m[1]) || 0 : 0; } return Number(v) || 0; };
-          let amt = parseAmount(r); if (!amt && r.originalRideRequest) amt = parseAmount(r.originalRideRequest); if (!amt && r.originalRidePosting) amt = parseAmount(r.originalRidePosting);
-          totalSpent += amt; confRideIds.add(String(d.id));
-        });
-        validRideIdsRef.current = confRideIds; setStats((prev) => ({ ...prev, totalRides: totalCount, spent: totalSpent })); recomputeAvgRatingFromIntersection(); setLoading(false);
-      }, () => setLoading(false)));
-    } catch { setLoading(false); }
-
-    try {
-      unsubs.push(onSnapshot(query(collection(firestore, 'rideRatings'), where('rateeId', '==', uid)), (snap) => {
-        const map = new Map<string, { stars: number; createdAt?: number }>();
-        snap.forEach((d) => { const r: any = d.data() || {}; const rideId = r?.rideId as string | undefined; const stars = typeof r?.stars === 'number' ? r.stars : (typeof r?.rating === 'number' ? r.rating : undefined); if (!rideId || typeof stars !== 'number') return; let createdAt: number | undefined; const ca = r?.createdAt; if (ca && typeof ca?.toDate === 'function') { try { createdAt = ca.toDate().getTime(); } catch {} } else if (typeof ca === 'string') { const td = new Date(ca).getTime(); if (!isNaN(td)) createdAt = td; } const prev = map.get(rideId); if (!prev || (createdAt || 0) >= (prev.createdAt || 0)) map.set(rideId, { stars, createdAt }); });
-        ratingsByRideIdRef.current = map; recomputeAvgRatingFromIntersection();
-      }, () => {}));
-    } catch {}
-
-    const setupConfirmedFallbackListeners = () => {
-      if (confirmedFallbackSetupRef.current) return; confirmedFallbackSetupRef.current = true;
-      try {
-        const base = collection(firestore, 'confirmedRides'); const statuses = ['CONFIRMED', 'IN_PROGRESS', 'DRIVER_COMPLETED', 'FLAGGED', 'in-progress', 'in_progress', 'driver_completed', 'flagged', 'confirmed'];
-        const handler = (snap: any) => { const mapped = mapConfirmedSnapshot(snap.docs.map((d:any)=>({ id:d.id, ...(d.data()||{}) }))); mergeConfirmedIntoUpcoming(mapped); };
-        statuses.forEach((st) => { try { unsubs.push(onSnapshot(query(base, where('riderId', '==', uid), where('status', '==', st)), handler, () => {})); } catch {} });
+        const userData = userDoc.exists() ? (userDoc.data() as any) : null;
+        const fallbackName = firebaseAuth.currentUser?.displayName || firebaseAuth.currentUser?.email?.split('@')[0] || 'Rider';
+        setUserName(
+          userData?.fullName ||
+            userData?.name ||
+            [userData?.firstName, userData?.lastName].filter(Boolean).join(' ') ||
+            fallbackName
+        );
+        setAvatarUrl(userData?.avatarUrl || userData?.profilePicture || firebaseAuth.currentUser?.photoURL || null);
       } catch {}
     };
 
-    try {
-      const base = collection(firestore, 'confirmedRides'); const statusIn = ['CONFIRMED', 'confirmed', 'IN_PROGRESS', 'in_progress', 'in-progress', 'IN-PROGRESS', 'DRIVER_COMPLETED', 'driver_completed', 'FLAGGED', 'flagged'];
-      const created = new Set<string>();
-      for (const fld of ['riderId', 'riderUid', 'rider.id']) {
-        try {
-          unsubs.push(onSnapshot(query(base, where(fld as any, '==', uid), where('status', 'in', statusIn)), (snap) => { const ids = snap.docs.map((d:any) => d.id); if (!created.has(ids.join(','))) { created.add(ids.join(',')); } const mapped = mapConfirmedSnapshot(snap.docs.map((d:any)=>({ id:d.id, ...(d.data()||{}) }))); mergeConfirmedIntoUpcoming(mapped); }, () => {}));
-        } catch {}
-      }
-      try { unsubs.push(onSnapshot(query(base, where('riderId', '==', uid)), (snap) => { const ids = snap.docs.map((d:any) => d.id); if (!created.has(ids.join(','))) created.add(ids.join(',')); const mapped = mapConfirmedSnapshot(snap.docs.map((d:any)=>({ id:d.id, ...(d.data()||{}) }))); mergeConfirmedIntoUpcoming(mapped); }, () => {})); } catch {}
-    } catch { setupConfirmedFallbackListeners(); }
-
-    try {
-      unsubs.push(onSnapshot(query(collection(firestore, 'confirmedRides'), where('riderId', '==', uid), where('status', '==', 'COMPLETED')), (snap) => {
-        const doneKeys = new Set<string>(); const recents: UpcomingRideCard[] = []; const newlyCompleted: Array<{ id: string; driverName?: string; completedAt?: any; raw: any }> = [];
-        snap.docs.forEach((d:any) => {
-          const r:any = d.data() || {}; const key = logicalRideKey(r, d.id); doneKeys.add(key); confirmedIndexRef.current[key] = { docId: d.id, status: 'completed', flags: extractFlags(r) };
-          const from = extractAddress(r, 'pickup') || 'Pickup'; const to = extractAddress(r, 'dropoff') || 'Dropoff'; const dt = composeDateTime(r?.date, r?.time) || getRideDateTime(r); const price = r?.contributionAmount; const priceText = typeof price === 'number' ? `$${price.toFixed(2)}` : (typeof price === 'string' ? price : undefined);
-          recents.push({ id: d.id, type: 'confirmedRide', status: 'COMPLETED', from, to, dateTime: dt, priceText, rideRequestId: r?.rideRequestId ?? r?.originalRideRequest?.id ?? null });
-          if (!completedSeenRef.current.has(d.id)) newlyCompleted.push({ id: d.id, driverName: r?.driverName, completedAt: r?.completedAt || r?.updatedAt || r?.createdAt, raw: r });
-        });
-        setUpcoming((prev) => prev.filter((u) => { const key = uLogicalKey(u); return !doneKeys.has(key); }));
-        setRecent((prev) => { const merged = [...recents, ...prev]; const sorted = merged.sort((a, b) => { const at = a.dateTime ? a.dateTime.getTime() : 0; const bt = b.dateTime ? b.dateTime.getTime() : 0; return bt - at; }); const seen = new Set<string>(); const unique: UpcomingRideCard[] = []; sorted.forEach((c) => { const k = uLogicalKey(c); if (!seen.has(k)) { seen.add(k); unique.push(c); } }); return unique.slice(0, 3); });
-        if (newlyCompleted.length > 0) { newlyCompleted.forEach((n) => completedSeenRef.current.add(n.id)); const pickMostRecent = [...newlyCompleted].sort((a, b) => { const ad = toDateField(a.completedAt) || new Date(0); const bd = toDateField(b.completedAt) || new Date(0); return (bd.getTime() - ad.getTime()); })[0]; if (pickMostRecent) maybePromptRatingForRide(pickMostRecent.id, pickMostRecent.driverName); }
-      }, () => {}));
-    } catch {}
-
-    return () => { unsubs.forEach((u) => u()); cleanupVerificationListener(); };
-  }, [uid]);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await refreshPromotions(); await fetchVerificationStatus();
-      if (uid) { try { const userDoc = await getDoc(doc(firestore, 'riders', uid)); const data = userDoc.exists() ? (userDoc.data() as any) : null; const firstName = getFirstNameFromProfile(data); const profilePhoto = data?.avatarUrl || data?.photoURL || data?.photoUrl || firebaseAuth.currentUser?.photoURL; if (profilePhoto && typeof profilePhoto === 'string') setUserPhoto(profilePhoto); setUserName(firstName ?? (email ? email.split('@')[0] : null)); } catch {} }
-    } catch {} finally { setRefreshing(false); }
-  }, [uid, email, refreshPromotions]);
-
-  useFocusEffect(useCallback(() => {
-    if (!loading && !refreshing) {
-      (async () => {
-        try {
-          await refreshPromotions(); await fetchVerificationStatus();
-          if (uid) { try { const userDoc = await getDoc(doc(firestore, 'riders', uid)); const data = userDoc.exists() ? (userDoc.data() as any) : null; const firstName = getFirstNameFromProfile(data); const profilePhoto = data?.avatarUrl || data?.photoURL || data?.photoUrl || firebaseAuth.currentUser?.photoURL; if (profilePhoto && typeof profilePhoto === 'string') setUserPhoto(profilePhoto); setUserName(firstName ?? (email ? email.split('@')[0] : null)); } catch {} }
-        } catch {}
-      })();
-    }
-  }, [loading, refreshing, uid, email, refreshPromotions]));
-
-  const recomputeAvgRatingFromIntersection = () => {
-    try {
-      const valid = validRideIdsRef.current; const ratings = ratingsByRideIdRef.current;
-      if (!valid || !ratings) { setStats((prev) => ({ ...prev, avgRating: null })); return; }
-      let sum = 0; let count = 0;
-      ratings.forEach((val, rideId) => { if (valid.has(rideId) && typeof val?.stars === 'number' && isFinite(val.stars)) { sum += val.stars; count += 1; } });
-      setStats((prev) => ({ ...prev, avgRating: count ? (sum / count) : null }));
-    } catch {}
-  };
-
-  const sortedUpcoming = useMemo(() => sortByDate(upcoming), [upcoming]);
-  function sortByDate(arr: UpcomingRideCard[]) { return [...arr].sort((a, b) => { const at = a.dateTime ? a.dateTime.getTime() : 0; const bt = b.dateTime ? b.dateTime.getTime() : 0; return at - bt; }); }
-  const openRideDetails = (ride: UpcomingRideCard) => { setSelectedRide(ride); setModalDistanceText(ride.distanceText); setModalVisible(true); };
-
-  const acceptOffer = async (rideId: string) => {
-    try {
-      const offer = offersByRideId[rideId]; if (!offer) return;
-      await updateDoc(doc(firestore, 'rideOffers', offer.id), { status: 'accepted' });
-      const rrRef = doc(firestore, 'rideRequests', rideId); const rrSnap = await getDoc(rrRef); const r = rrSnap.exists() ? (rrSnap.data() as any) : {};
-      const dt = getRideDateTime(r); const dateOnly = dt ? formatDateOnly(dt) : (typeof r?.date === 'string' ? r.date : undefined); const timeStr = dt ? formatTime(dt) : (typeof r?.time === 'string' ? r.time : undefined);
-      const pickup = extractAddress(r, 'pickup'); const dropoff = extractAddress(r, 'dropoff'); const contributionAmount = (typeof offer.priceNumber === 'number' ? offer.priceNumber : undefined) ?? (typeof r?.estimatedFare === 'number' ? r.estimatedFare : parseCurrency(r?.estimatedFare)) ?? (typeof r?.price === 'number' ? r.price : parseCurrency(r?.price));
-      const riderEmail = email || r?.riderEmail || r?.email; const riderName = (r?.riderName || r?.riderFullName || r?.name || (typeof userName === 'string' ? userName : undefined) || (riderEmail ? riderEmail.split('@')[0] : undefined));
-      const passengers = Number(r?.passengers ?? r?.numPassengers ?? r?.seats ?? 1) || 1;
-      const confirmedPayload: any = { rideRequestId: rideId, ridePostingId: offer.ridePostingId ?? null, confirmedAt: serverTimestamp(), createdAt: serverTimestamp(), updatedAt: serverTimestamp(), status: 'confirmed', date: dateOnly, time: timeStr, pickup, dropoff, passengers, contributionAmount, driverId: offer.driverId || r?.driverId, driverName: offer.driverName || r?.driverName, driverEmail: offer.driverEmail || r?.driverEmail, driverPhone: offer.driverPhone || r?.driverPhone, riderId: uid, riderName, riderEmail, originalRidePosting: null, originalRideRequest: { id: rideId, requestedTime: r?.requestedTime ?? r?.pickupTime ?? r?.date, estimatedFare: r?.estimatedFare ?? r?.price, pickup, dropoff, riderId: r?.riderId || r?.userId, riderEmail: r?.riderEmail || r?.email, distance: r?.distance } };
-      const cleanedPayload = deepClean(confirmedPayload); const safeDriverId = (confirmedPayload.driverId ? String(confirmedPayload.driverId) : `offer_${offer.id}`); const crId = `${rideId}_${safeDriverId}`;
-      try { await setDoc(doc(firestore, 'confirmedRides', crId), cleanedPayload, { merge: true }); } catch { try { await addDoc(collection(firestore, 'confirmedRides'), cleanedPayload); } catch (err2) { Alert.alert('Save failed', 'Could not save to confirmed rides.'); throw err2; } }
-      await updateDoc(rrRef, { status: 'confirmed' }).catch(() => {});
-      setOffersByRideId((prev) => ({ ...prev, [rideId]: { ...prev[rideId], status: 'accepted' } })); setUpcoming((prev) => prev.map((u) => (u.id === rideId ? { ...u, status: 'confirmed' } : u)));
-      try { const rrSnap2 = await getDoc(doc(firestore, 'rideRequests', rideId)); const r2 = rrSnap2.exists() ? (rrSnap2.data() as any) : {}; rideToasts.rideConfirmed({ from: extractAddress(r2, 'pickup') || 'Pickup', to: extractAddress(r2, 'dropoff') || 'Dropoff' }); } catch { showSuccessToast('Offer Accepted', 'Ride confirmed'); }
-    } catch { showErrorToast('Accept Failed', 'Could not accept the offer'); }
-  };
-
-  const doRejectOffer = async (rideId: string) => {
-    try { const offer = offersByRideId[rideId]; if (!offer) return; await updateDoc(doc(firestore, 'rideOffers', offer.id), { status: 'rejected' }); setOffersByRideId((prev) => ({ ...prev, [rideId]: { ...prev[rideId], status: 'rejected' } })); showInfoToast('Offer Rejected', 'You declined this offer'); }
-    catch { showErrorToast('Reject Failed', 'Could not reject the offer'); Alert.alert('Error', 'Could not reject the offer. Please try again.'); }
-  };
-  const confirmRejectOffer = (rideId: string) => Alert.alert('Reject this offer?', "You won't be matched with this driver for this ride.", [{ text: 'Cancel', style: 'cancel' }, { text: 'Reject', style: 'destructive', onPress: () => { void doRejectOffer(rideId); } }]);
-
-  const doCancelOfferSent = async (ridePostingRequestId: string) => {
-    try { await updateDoc(doc(firestore, 'ridePostingRequests', ridePostingRequestId), { status: 'cancelled' }); setUpcoming((prev) => prev.map((u) => (u.id === ridePostingRequestId ? { ...u, status: 'cancelled' } : u))); showInfoToast('Offer Cancelled', 'Your offer was withdrawn'); }
-    catch { showErrorToast('Cancel Failed', 'Could not cancel the offer'); Alert.alert('Error', 'Could not cancel the offer.'); }
-  };
-  const confirmCancelOffer = (ridePostingRequestId: string) => Alert.alert('Cancel this offer?', 'This will withdraw your offer to the driver.', [{ text: 'Keep', style: 'cancel' }, { text: 'Cancel Offer', style: 'destructive', onPress: () => { void doCancelOfferSent(ridePostingRequestId); } }]);
-  const closeModal = () => { setModalVisible(false); setSelectedRide(null); setModalDriver(null); setModalDistanceText(undefined); };
-
-  async function hasUserRated(rideId: string, userId: string): Promise<boolean> { try { const snap = await getDoc(doc(firestore, 'rideRatings', `${rideId}_${userId}`)); return snap.exists(); } catch { return false; } }
-  function mapCallableRatingError(e: any): string { const code = String(e?.code || '').replace(/^functions\//, ''); const map: Record<string, string> = { 'already-exists': 'You already rated this ride.', 'permission-denied': 'Only participants can rate.', 'failed-precondition': 'Ride must be completed before rating.', 'out-of-range': 'Rating must be 1–5.', 'invalid-argument': 'Invalid rating.', 'unauthenticated': 'Sign in required.' }; return map[code] || 'Could not submit rating. Please try again.'; }
-  async function openRatingForRide(rideId: string, driverName?: string) { if (!uid) return; if (ratedRideIds.has(rideId)) return; const already = await hasUserRated(rideId, uid); if (already) { setRatedRideIds((prev) => new Set(prev).add(rideId)); Alert.alert('Rating', 'You already rated this ride.'); return; } setRatingError(null); setRatingTarget({ rideId, driverName }); setRatingModalVisible(true); }
-  async function maybePromptRatingForRide(rideId: string, driverName?: string) { if (!uid) return; const already = await hasUserRated(rideId, uid); if (!already) openRatingForRide(rideId, driverName); else setRatedRideIds((prev) => new Set(prev).add(rideId)); }
-
-  useEffect(() => { if (!uid) return; (async () => { try { const qDone = query(collection(firestore, 'confirmedRides'), where('riderId', '==', uid), where('status', '==', 'COMPLETED')); const snap = await getDocs(qDone); if (snap.empty) return; const docs = snap.docs.map((d) => ({ id: d.id, data: d.data() as any })).sort((a, b) => { const ad = toDateField(a.data.completedAt || a.data.updatedAt || a.data.createdAt) || new Date(0); const bd = toDateField(b.data.completedAt || b.data.updatedAt || b.data.createdAt) || new Date(0); return bd.getTime() - ad.getTime(); }); for (const row of docs) { const already = await hasUserRated(row.id, uid); if (!already) { await openRatingForRide(row.id, row.data?.driverName); break; } } } catch {} })(); }, [uid]);
-
-  useEffect(() => { let cancelled = false; const run = async () => { if (!uid || recent.length === 0) return; const pending = recent.map((r) => r.id).filter((id) => !ratedRideIds.has(id)); const results: string[] = []; for (const id of pending) { const ok = await hasUserRated(id, uid); if (ok) results.push(id); } if (!cancelled && results.length) setRatedRideIds((prev) => { const next = new Set(prev); results.forEach((id) => next.add(id)); return next; }); }; run(); return () => { cancelled = true; }; }, [recent, uid]);
-
-  useEffect(() => {
-    if (!promotions || promotions.length <= 1) return;
-    const interval = setInterval(() => { setCurrentPromotionIndex((prevIndex) => { const nextIndex = (prevIndex + 1) % promotions.length; const cardWidth = Dimensions.get('window').width - 24; promotionsScrollRef.current?.scrollTo({ x: nextIndex * cardWidth, animated: true }); return nextIndex; }); }, 5000);
-    return () => clearInterval(interval);
-  }, [promotions]);
-
-  const callUpdateRideStatus = useMemo(() => httpsCallable(functions, 'updateRideStatus'), []);
-
-  const openChatForRide = async (card: UpcomingRideCard) => {
-    const docId = await resolveConfirmedDocId(card); if (!docId || !uid) return;
-    try { const q = query(collection(firestore, 'chats'), where('rideId', '==', docId)); const snapshot = await getDocs(q); if (!snapshot.empty) router.push(`/messages/${snapshot.docs[0].id}`); else router.push('/rider/messages'); } catch { router.push('/rider/messages'); }
-  };
-
-  const renderConfirmedRideCTA = (card: UpcomingRideCard) => {
-    const key = uLogicalKey(card); const idx = confirmedIndexRef.current[key]; const status = (idx?.status || (card.status || '')).toString().toLowerCase(); const flags = idx?.flags || {};
-    if (status === 'flagged') return (<View style={s.flaggedBox}><Text style={s.flaggedTitle}>Ride Under Review</Text><Text style={s.flaggedText}>Your safety report has been submitted. Our team will review this ride.</Text></View>);
-    const riderPicked = !!flags.riderPickupConfirmed, driverPicked = !!flags.driverPickupConfirmed, riderCompleted = !!flags.riderCompleteConfirmed, driverCompleted = !!flags.driverCompleteConfirmed;
-    const onConfirmPickup = async () => { const docId = await resolveConfirmedDocId(card); if (!docId) { Alert.alert('Ride not found', 'We could not find this ride.'); return; } try { await callUpdateRideStatus({ rideId: docId, action: 'rider_pickup' }); } catch { Alert.alert('Error', 'Could not confirm pickup.'); } };
-    const onApproveCompletion = async () => { const docId = await resolveConfirmedDocId(card); if (!docId) { Alert.alert('Ride not found', 'We could not find this ride.'); return; } try { await callUpdateRideStatus({ rideId: docId, action: 'rider_complete' }); } catch { Alert.alert('Error', 'Could not approve completion.'); } };
-    const onCancelRide = async () => { const docId = await resolveConfirmedDocId(card); if (!docId) { Alert.alert('Ride not found', 'We could not find this ride.'); return; } const doCancel = async () => { try { await callUpdateRideStatus({ rideId: docId, action: 'rider_cancel' }); } catch { try { await updateDoc(doc(firestore, 'confirmedRides', docId), { status: 'cancelled', updatedAt: serverTimestamp() }); } catch {} if (card.rideRequestId) { try { await updateDoc(doc(firestore, 'rideRequests', card.rideRequestId), { status: 'cancelled' }); } catch {} } } setUpcoming((prev) => prev.map((u) => { if (u.type === 'confirmedRide' && u.id === card.id) return { ...u, status: 'cancelled' }; if (card.rideRequestId && u.id === card.rideRequestId) return { ...u, status: 'cancelled' }; return u; })); }; Alert.alert('Cancel this ride?', 'This will cancel your confirmed ride.', [{ text: 'Keep Ride', style: 'cancel' }, { text: 'Cancel Ride', style: 'destructive', onPress: () => { void doCancel(); } }]); };
-    const FlagBtn = () => (<TouchableOpacity onPress={async () => { const docId = await resolveConfirmedDocId(card); if (!docId) { Alert.alert('Ride not found', 'We could not find this ride to flag.'); return; } setFlaggingRideId(docId); setFlagModalVisible(true); }} style={s.iconActionBtn}><Flag size={16} color="#DC2626" /></TouchableOpacity>);
-    const ChatBtn = () => (<TouchableOpacity onPress={() => openChatForRide(card)} style={s.iconActionBtn}><MessageCircle size={16} color={COLORS.orange} /></TouchableOpacity>);
-    if (status === 'pending') return (<View style={s.ctaRow}><FlagBtn /><Button variant="outline" size="sm" onPress={onCancelRide}>Cancel</Button></View>);
-    if (['confirmed','confimed','matched'].includes(status)) return (<View style={s.ctaRow}><FlagBtn /><ChatBtn />{!riderPicked ? <><Button variant="outline" size="sm" onPress={onCancelRide}>Cancel</Button><Button variant="primary" size="sm" onPress={onConfirmPickup}>Confirm Pickup</Button></> : null}</View>);
-    if (['in_progress','in-progress','driver_completed'].includes(status)) { const shouldShowApprove = (driverCompleted || status === 'driver_completed') && !riderCompleted; if (shouldShowApprove) return (<View style={s.ctaRow}><FlagBtn /><ChatBtn /><Button variant="primary" size="sm" onPress={onApproveCompletion}>Approve Completion</Button></View>); if (riderCompleted && !driverCompleted && status !== 'driver_completed') return (<Text style={s.waitingText}>Waiting for driver to confirm completion</Text>); return (<View style={s.ctaRow}><FlagBtn /><ChatBtn /></View>); }
-    return null;
-  };
-
-  const resolveConfirmedDocId = async (card: UpcomingRideCard): Promise<string | null> => {
-    if (card.type === 'confirmedRide') return card.id;
-    const key = uLogicalKey(card); const cached = confirmedIndexRef.current[key]?.docId; if (cached) return cached;
-    const rrid = card.rideRequestId ?? (card.type === 'rideRequest' ? card.id : undefined); if (!rrid) return null;
-    try {
-      const qs = query(collection(firestore, 'confirmedRides'), where('rideRequestId', '==', rrid), fsLimit(1)); const snap = await getDocs(qs); const d = snap.docs[0];
-      if (!d) { const rp = card.ridePostingId; const rid = card.riderId; if (rp && rid) { for (const fld of ['riderId', 'riderUid', 'rider.id']) { try { const altQ = query(collection(firestore, 'confirmedRides'), where('ridePostingId', '==', rp), where(fld as any, '==', rid), fsLimit(1)); const altSnap = await getDocs(altQ); const altD = altSnap.docs[0]; if (altD) { confirmedIndexRef.current[key] = { docId: altD.id, status: (String((altD.data() as any)?.status || '') as any).toLowerCase() as any, flags: extractFlags(altD.data() as any) }; return altD.id; } } catch {} } } return null; }
-      confirmedIndexRef.current[key] = { docId: d.id, status: (String((d.data() as any)?.status || '') as any).toLowerCase() as any, flags: extractFlags(d.data() as any) }; return d.id;
-    } catch { return null; }
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
+    const hydrateStats = async () => {
       try {
-        if (!modalVisible || !selectedRide) { if (!cancelled) { setModalDriver(null); setModalDistanceText(undefined); } return; }
-        let distanceText: string | undefined = selectedRide.distanceText ?? undefined;
-        const considerDistance = (source: any) => { if (distanceText) return; const resolved = extractDistance(source); if (resolved) distanceText = resolved; };
-        considerDistance(selectedRide);
-        const offer = offersByRideId[selectedRide.id]; let driverId: any = offer?.driverId, driverEmail: any = offer?.driverEmail, name: string | undefined = offer?.driverName || selectedRide.driverName, phone: string | null | undefined = offer?.driverPhone || selectedRide.driverPhone, avatarRaw: any = undefined, rating: number | null | undefined = selectedRide.driverRating ?? null;
-        if (offer?.distanceText && !distanceText) distanceText = offer.distanceText;
-        if (selectedRide.status === 'Offer Sent' || selectedRide.status === 'offer_sent' || selectedRide.status === 'sent') { const postingId = selectedRide.ridePostingId; if (postingId) { try { const postingDoc = await getDoc(doc(firestore, 'ridePostings', postingId)); if (postingDoc.exists()) { const pd = postingDoc.data() as any; driverId = driverId || pd.driverId || pd.driverUID || pd.ownerId || pd.postedBy; driverEmail = driverEmail || pd.driverEmail || pd.ownerEmail || pd.email; name = name || pd.driverName || pd.driver?.name || pd.ownerName; phone = phone || pd.driverPhone || pd.phone; avatarRaw = avatarRaw || pd.driverAvatarUrl || pd.driver?.avatarUrl; rating = rating ?? (pd.driverRating ?? pd.rating ?? null); considerDistance(pd); } } catch {} } }
-        if (!driverId && selectedRide.type === 'confirmedRide') { try { const d = await getDoc(doc(firestore, 'confirmedRides', selectedRide.id)); const data = d.exists() ? (d.data() as any) : undefined; if (data) { driverId = driverId || data.driverId; driverEmail = driverEmail || data.driverEmail; name = name || data.driverName; phone = phone || data.driverPhone; avatarRaw = avatarRaw || data.driverAvatarUrl; rating = rating ?? (typeof data.driverRating === 'number' ? data.driverRating : null); considerDistance(data); } } catch {} }
-        if (!driverId) { try { const qs = query(collection(firestore, 'confirmedRides'), where('rideRequestId', '==', selectedRide.id), fsLimit(1)); const snap = await getDocs(qs); const data = snap.docs[0]?.data() as any | undefined; if (data) { driverId = driverId || data.driverId; driverEmail = driverEmail || data.driverEmail; name = name || data.driverName; phone = phone || data.driverPhone; avatarRaw = avatarRaw || data.driverAvatarUrl; rating = rating ?? (typeof data.driverRating === 'number' ? data.driverRating : null); considerDistance(data); } } catch {} }
-        if (!driverId || !name || !avatarRaw) { try { const rr = await getDoc(doc(firestore, 'rideRequests', selectedRide.id)); const r = rr.exists() ? (rr.data() as any) : undefined; if (r) { driverId = driverId || r.driverId; driverEmail = driverEmail || r.driverEmail; name = name || r.driverName; phone = phone || r.driverPhone; avatarRaw = avatarRaw || r.driverAvatarUrl; considerDistance(r); } } catch {} }
-        let prof: any = undefined;
-        if (driverId) { try { const d1 = await getDoc(doc(firestore, 'drivers', String(driverId))); prof = d1.exists() ? (d1.data() as any) : undefined; } catch {} }
-        if (!prof && driverEmail) { try { const q1 = query(collection(firestore, 'drivers'), where('email', '==', driverEmail), fsLimit(1)); const s1 = await getDocs(q1); prof = s1.docs[0]?.data() as any; } catch {} }
-        const nameFromProf = getNameFromProfile(prof); const ratingFromProf = typeof prof?.rating === 'number' ? prof.rating as number : (typeof prof?.avgRating === 'number' ? prof.avgRating as number : undefined); const rawAvatarFromProf = prof?.profilePicture || prof?.avatarUrl || prof?.photoURL || prof?.photoUrl; const phoneFromProf = prof?.phone || prof?.phoneNumber;
-        let avatarUrl: string | null | undefined = sanitizeAvatar(avatarRaw || rawAvatarFromProf);
-        if (avatarUrl && !/^https?:\/\//i.test(avatarUrl) && !avatarUrl.startsWith('data:')) { const s = avatarUrl.replace(/^gs:\/\/[^/]+\//, ''); try { avatarUrl = await getDownloadURL(storageRef(storage, s)); } catch {} }
-        const seedName = name || selectedRide.driverName; const finalName = (nameFromProf && nameFromProf.trim()) ? nameFromProf : (seedName && !isGenericName(seedName) ? seedName : (driverEmail ? String(driverEmail).split('@')[0] : undefined)); const finalRating = (selectedRide.driverRating ?? ratingFromProf ?? null) as number | null; const finalPhone = phone ?? (phoneFromProf ?? null); const finalPhoneFromProfile = !!phoneFromProf;
-        if (!cancelled) { setModalDriver({ name: finalName, rating: finalRating, phone: finalPhone, phoneFromProfile: finalPhoneFromProfile, avatarUrl: avatarUrl ?? null, vehicleText: selectedRide.vehicleText, driverId: driverId ? String(driverId) : undefined }); setModalDistanceText(distanceText ?? offer?.distanceText ?? selectedRide.distanceText ?? undefined); }
-      } catch { if (!cancelled) { setModalDriver(null); setModalDistanceText(selectedRide?.distanceText ?? undefined); } }
+        const completedQ = query(
+          collection(firestore, 'confirmedRides'),
+          where('riderId', '==', uid),
+          where('status', '==', 'COMPLETED')
+        );
+        const snap = await getDocs(completedQ);
+        let spent = 0;
+        snap.forEach((item) => {
+          const data = item.data() as any;
+          const raw = data.contributionAmount ?? data.price ?? data.fare;
+          const num = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw.replace(/[^0-9.-]/g, '')) : 0;
+          if (!Number.isNaN(num)) spent += num;
+        });
+
+        setStats((prev) => ({ ...prev, totalRides: snap.size, totalSpent: spent }));
+      } catch {}
+
+      try {
+        const ratingsQ = query(collection(firestore, 'ratings'), where('riderId', '==', uid));
+        const ratings = await getDocs(ratingsQ);
+        let sum = 0;
+        let count = 0;
+        ratings.forEach((item) => {
+          const value = (item.data() as any)?.stars ?? (item.data() as any)?.rating;
+          if (typeof value === 'number') {
+            sum += value;
+            count += 1;
+          }
+        });
+        if (count > 0) setStats((prev) => ({ ...prev, avgRating: sum / count }));
+      } catch {}
     };
-    run(); return () => { cancelled = true; };
-  }, [modalVisible, selectedRide, offersByRideId]);
 
-  // ─── RENDER ────────────────────────────────────────────────────────────────
-  const dark = theme.dark;
+    const mapRideRequest = (id: string, data: any): UpcomingRideCard => {
+      const price = data.contributionAmount ?? data.contribution ?? data.price;
+      const priceText =
+        typeof price === 'number' ? `$${price.toFixed(2)}` : typeof price === 'string' ? price : undefined;
 
-  const bgGradient: [string, string, string] = dark
-    ? ['#080E17', '#0D1620', '#111E2C']
-    : ['#EEF1F7', '#F2F5FA', '#FFFFFF'];
+      return {
+        id,
+        type: 'rideRequest',
+        status: data.status || 'posted',
+        from: extractAddress(data, 'pickup') || 'Pickup',
+        to: extractAddress(data, 'dropoff') || 'Dropoff',
+        dateTime: getRideDateTime(data),
+        priceText,
+        distanceText: extractDistance(data),
+        durationText: data.durationText || data.duration?.text || undefined,
+        rideRequestId: id,
+        driverId: data.driverId || data.assignedDriverId || null,
+        driverName: data.driverName || undefined,
+        driverPhone: data.driverPhone || undefined,
+      };
+    };
 
-  return (
-    <View style={s.root}>
-      <LinearGradient colors={bgGradient} style={StyleSheet.absoluteFillObject} />
+    const mapConfirmed = (id: string, data: any): UpcomingRideCard => {
+      const price = data.contributionAmount ?? data.price ?? data.fare;
+      const priceText =
+        typeof price === 'number' ? `$${price.toFixed(2)}` : typeof price === 'string' ? price : undefined;
 
-      <SafeAreaView style={s.safe} edges={['top']}>
-        <ScrollView
-          style={s.scroll}
-          contentContainerStyle={s.scrollContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.orange} colors={[COLORS.orange]} />}
-        >
+      return {
+        id,
+        type: 'confirmedRide',
+        status: data.status || 'confirmed',
+        from: extractAddress(data, 'pickup') || 'Pickup',
+        to: extractAddress(data, 'dropoff') || 'Dropoff',
+        dateTime: getRideDateTime(data),
+        priceText,
+        distanceText: extractDistance(data),
+        durationText: data.durationText || data.duration?.text || undefined,
+        driverId: data.driverId || data.driverUID || data.driverUid || null,
+        driverName: data.driverName || data.providerName || undefined,
+        driverPhone: data.driverPhone || data.phone || undefined,
+        driverRating: typeof data.driverRating === 'number' ? data.driverRating : null,
+        vehicleText: data.vehicleText || data.vehicle || undefined,
+        rideRequestId: data.rideRequestId || data.originalRideRequest?.id || null,
+        ridePostingId: data.ridePostingId || null,
+      };
+    };
 
-          {/* ── Hero Section ── */}
-          <View style={s.hero}>
-            {/* Top bar */}
-            <View style={s.topBar}>
-              <TouchableOpacity style={s.avatarWrap} onPress={() => router.push('/rider/profile')}>
-                {userPhoto
-                  ? <Image source={{ uri: userPhoto }} style={s.avatarImg} resizeMode="cover" onError={() => setUserPhoto(null)} />
-                  : <LinearGradient colors={[COLORS.orange, COLORS.orangeLight]} style={s.avatarGradient}><Text style={s.avatarInitial}>{userName ? userName[0].toUpperCase() : 'R'}</Text></LinearGradient>
-                }
-              </TouchableOpacity>
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={[s.greeting, { color: dark ? COLORS.darkSub : COLORS.lightSub }]}>Hey {userName ? capitalize(userName) : 'there'} 👋</Text>
-                <Text style={[s.heroTagline, { color: dark ? COLORS.darkText : COLORS.lightText }]}>Your ride,</Text>
-                <Text style={s.heroTaglineAccent}>your community.</Text>
-              </View>
-              <TouchableOpacity style={[s.notifBtn, { backgroundColor: dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.85)' }]} onPress={() => router.push('/rider/notifications')}>
-                <Ionicons name="notifications-outline" size={22} color={dark ? COLORS.darkText : COLORS.lightText} />
-                {unreadCount > 0 && (
-                  <View style={s.notifBadge}>
-                    <Text style={s.notifBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
-                  </View>
-                )}
+    const listenRequests = () => {
+      const requestQueries = [
+        query(collection(firestore, 'rideRequests'), where('userId', '==', uid)),
+        query(collection(firestore, 'rideRequests'), where('riderId', '==', uid)),
+      ];
+
+      if (email) {
+        requestQueries.push(query(collection(firestore, 'rideRequests'), where('userEmail', '==', email)));
+      }
+
+      requestQueries.forEach((qy) => {
+        try {
+          unsubs.push(
+            onSnapshot(
+              qy,
+              (snap) => {
+                const items: UpcomingRideCard[] = [];
+                snap.forEach((item) => {
+                  const data = item.data() as any;
+                  if (['completed', 'cancelled'].includes(String(data.status || '').toLowerCase())) return;
+                  items.push(mapRideRequest(item.id, data));
+                });
+                setUpcoming((prev) => mergeUpcoming(prev, items));
+                setLoading(false);
+              },
+              () => setLoading(false)
+            )
+          );
+        } catch {}
+      });
+    };
+
+    const listenConfirmed = () => {
+      const statuses = ['CONFIRMED', 'IN_PROGRESS', 'DRIVER_COMPLETED', 'FLAGGED', 'confirmed', 'in_progress', 'flagged'];
+      statuses.forEach((status) => {
+        try {
+          unsubs.push(
+            onSnapshot(
+              query(collection(firestore, 'confirmedRides'), where('riderId', '==', uid), where('status', '==', status)),
+              (snap) => {
+                const items: UpcomingRideCard[] = [];
+                snap.forEach((item) => {
+                  const data = item.data() as any;
+                  const mapped = mapConfirmed(item.id, data);
+                  const key = mapped.rideRequestId ? `rr_${mapped.rideRequestId}` : `cr_${item.id}`;
+                  confirmedKeysRef.current.add(key);
+                  confirmedIndexRef.current[key] = { docId: item.id, status: mapped.status };
+                  items.push(mapped);
+                });
+                setUpcoming((prev) => mergeUpcoming(prev, items));
+                setLoading(false);
+              },
+              () => setLoading(false)
+            )
+          );
+        } catch {}
+      });
+
+      try {
+        unsubs.push(
+          onSnapshot(
+            query(collection(firestore, 'confirmedRides'), where('riderId', '==', uid), where('status', '==', 'COMPLETED')),
+            (snap) => {
+              const recents: UpcomingRideCard[] = [];
+              const completedKeys = new Set<string>();
+
+              snap.forEach((item) => {
+                const data = item.data() as any;
+                const mapped = mapConfirmed(item.id, { ...data, status: 'COMPLETED' });
+                const key = mapped.rideRequestId ? `rr_${mapped.rideRequestId}` : `cr_${item.id}`;
+                completedKeys.add(key);
+                recents.push(mapped);
+                completedSeenRef.current.add(item.id);
+              });
+
+              setUpcoming((prev) =>
+                prev.filter((item) => {
+                  const key = item.type === 'confirmedRide' && item.rideRequestId ? `rr_${item.rideRequestId}` : `${item.type}_${item.id}`;
+                  return !completedKeys.has(key);
+                })
+              );
+              setRecent((prev) => mergeUpcoming(recents, prev).slice(0, 3));
+            }
+          )
+        );
+      } catch {}
+    };
+
+    const listenOffers = () => {
+      try {
+        unsubs.push(
+          onSnapshot(query(collection(firestore, 'rideOffers'), where('riderId', '==', uid)), (snap) => {
+            const next: Record<string, OfferInfo> = {};
+            snap.forEach((item) => {
+              const data = item.data() as any;
+              const rideRequestId = String(data.rideRequestId || '');
+              if (!rideRequestId) return;
+              next[rideRequestId] = {
+                id: item.id,
+                rideRequestId,
+                status: String(data.status || 'pending'),
+                priceText:
+                  typeof data.price === 'number'
+                    ? `$${data.price.toFixed(2)}`
+                    : typeof data.price === 'string'
+                    ? data.price
+                    : undefined,
+                priceNumber: typeof data.price === 'number' ? data.price : undefined,
+                distanceText: data.distanceText || data.distance?.text || undefined,
+                durationText: data.durationText || data.duration?.text || undefined,
+                driverName: data.driverName || undefined,
+                driverId: data.driverId || undefined,
+                driverEmail: data.driverEmail || undefined,
+                driverPhone: data.driverPhone || undefined,
+                ridePostingId: data.ridePostingId || null,
+                createdAt: toDateField(data.createdAt),
+              };
+            });
+            setOffersByRideId(next);
+          })
+        );
+      } catch {}
+    };
+
+    const listenNotifications = () => {
+      try {
+        const notifQueries = [
+          query(collection(firestore, 'notifications'), where('userId', '==', uid)),
+          query(collection(firestore, 'notifications'), where('recipientId', '==', uid)),
+          query(collection(firestore, 'notifications'), where('recipients', 'array-contains', uid)),
+        ];
+
+        notifQueries.forEach((qy) => {
+          unsubs.push(
+            onSnapshot(qy, (snap) => {
+              let unread = 0;
+              snap.forEach((item) => {
+                const data = item.data() as any;
+                const readBy = Array.isArray(data.readBy) ? data.readBy : [];
+                const read = data.read === true || data.unread === false || readBy.includes(uid);
+                if (!read) unread += 1;
+              });
+              setUnreadCount((prev) => Math.max(prev, unread));
+            })
+          );
+        });
+      } catch {}
+    };
+
+    const initVerification = async () => {
+      try {
+        await fetchVerificationStatus();
+        setupVerificationListener();
+      } catch {}
+    };
+
+    void loadProfile();
+    void hydrateStats();
+    void initVerification();
+    listenRequests();
+    listenConfirmed();
+    listenOffers();
+    listenNotifications();
+
+    return () => {
+      unsubs.forEach((unsubscribe) => unsubscribe());
+      cleanupVerificationListener();
+    };
+  }, [email, uid]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!uid) return undefined;
+
+      const checkRated = async () => {
+        try {
+          const qy = query(collection(firestore, 'ratings'), where('riderId', '==', uid), fsLimit(50));
+          const snap = await getDocs(qy);
+          const ids = new Set<string>();
+          snap.forEach((item) => {
+            const rideId = (item.data() as any)?.rideId;
+            if (rideId) ids.add(String(rideId));
+          });
+          setRatedRideIds(ids);
+        } catch {}
+      };
+
+      void checkRated();
+      return undefined;
+    }, [uid])
+  );
+
+  const acceptOffer = async (ride: UpcomingRideCard, offer: OfferInfo) => {
+    try {
+      await updateDoc(doc(firestore, 'rideOffers', offer.id), {
+        status: 'accepted',
+        acceptedAt: serverTimestamp(),
+      });
+
+      await setDoc(
+        doc(firestore, 'rideRequests', ride.rideRequestId || ride.id),
+        deepClean({
+          status: 'accepted',
+          driverId: offer.driverId || null,
+          driverName: offer.driverName || null,
+          driverPhone: offer.driverPhone || null,
+          acceptedOfferId: offer.id,
+          updatedAt: serverTimestamp(),
+        }),
+        { merge: true }
+      );
+
+      void logActivity({
+        type: 'ride_offer_accepted',
+        entityType: 'rideOffer',
+        entityId: offer.id,
+        metadata: { rideRequestId: ride.rideRequestId || ride.id },
+      });
+
+      showSuccessToast('Offer accepted', 'Your driver has been notified.');
+    } catch {
+      showErrorToast('Could not accept offer', 'Please try again.');
+    }
+  };
+
+  const cancelRide = async (ride: UpcomingRideCard) => {
+    Alert.alert('Cancel ride', 'Cancel this ride request?', [
+      { text: 'Keep ride', style: 'cancel' },
+      {
+        text: 'Cancel',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            const collectionName = ride.type === 'confirmedRide' ? 'confirmedRides' : 'rideRequests';
+            await updateDoc(doc(firestore, collectionName, ride.id), {
+              status: 'cancelled',
+              cancelledAt: serverTimestamp(),
+            });
+            setUpcoming((prev) => prev.filter((item) => item.id !== ride.id));
+          } catch {
+            Alert.alert('Could not cancel', 'Please try again.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const renderRideCard = (ride: UpcomingRideCard, compact = false) => {
+    const offer = offersByRideId[ride.rideRequestId || ride.id];
+    const badge = badgeForStatus(offer?.status || ride.status);
+    const badgeStyle =
+      badge.semantic === 'green'
+        ? themed.badgeGreen
+        : badge.semantic === 'red'
+        ? themed.badgeRed
+        : badge.semantic === 'orange'
+        ? themed.badgeOrange
+        : themed.badgeBlue;
+
+    return (
+      <TouchableOpacity
+        key={`${ride.type}-${ride.id}`}
+        style={themed.rideCard}
+        activeOpacity={0.88}
+        onPress={() => openRideDetails(ride)}
+      >
+        {isDark && <BlurView intensity={18} tint="dark" style={StyleSheet.absoluteFillObject} />}
+        <View style={styles.rideCardInner}>
+          <View style={styles.rideTopRow}>
+            <View style={[styles.statusBadge, badgeStyle]}>
+              <Text style={[styles.statusBadgeText, { color: badgeStyle.color }]}>{badge.label}</Text>
+            </View>
+            <Text style={themed.rideTime}>{formatDateTime(ride.dateTime)}</Text>
+          </View>
+
+          <View style={styles.routeBlock}>
+            <View style={styles.routeLineWrap}>
+              <View style={[styles.routeDot, { backgroundColor: colors.primary }]} />
+              <View style={[styles.routeLine, { backgroundColor: colors.primaryBorder }]} />
+              <View style={[styles.routeDot, { backgroundColor: colors.textTertiary }]} />
+            </View>
+            <View style={styles.routeTextWrap}>
+              <Text style={themed.routeFrom} numberOfLines={1}>
+                {ride.from}
+              </Text>
+              <Text style={themed.routeTo} numberOfLines={1}>
+                {ride.to}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.rideFooter}>
+            <Text style={themed.ridePrice}>{offer?.priceText || ride.priceText || '$--'}</Text>
+            <View style={styles.rideFooterActions}>
+              {(offer?.durationText || ride.durationText) && (
+                <Text style={themed.rideMeta}>{offer?.durationText || ride.durationText}</Text>
+              )}
+              {ride.driverId && (
+                <TouchableOpacity onPress={() => openChatForRide(ride)} style={themed.iconBtn}>
+                  <MessageCircle size={15} color={colors.primary} />
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={styles.detailsBtn} onPress={() => openRideDetails(ride)}>
+                <Text style={styles.detailsBtnText}>Details</Text>
+                <Ionicons name="chevron-forward" size={14} color={colors.primary} />
               </TouchableOpacity>
             </View>
+          </View>
 
-            {/* Student Verification Banner */}
-            <StudentVerificationBanner />
+          {!compact && offer && ['pending', 'sent', 'offer', 'received'].includes(String(offer.status).toLowerCase()) && (
+            <View style={styles.offerActionRow}>
+              <TouchableOpacity style={themed.declineBtn} onPress={() => cancelRide(ride)}>
+                <Text style={themed.declineBtnText}>Decline</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.acceptBtn} onPress={() => acceptOffer(ride, offer)}>
+                <LinearGradient
+                  colors={asGradientStops([BRAND.orange, BRAND.orangeDeep])}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.acceptBtnGrad}
+                >
+                  <Text style={styles.acceptBtnText}>Accept</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
-            {/* Where to */}
-            <TouchableOpacity style={s.searchBar} onPress={() => router.push('/rider/book')} activeOpacity={0.9}>
-              <BlurView intensity={dark ? 28 : 55} tint={dark ? 'dark' : 'light'} style={StyleSheet.absoluteFillObject} />
-              <View style={s.searchBarInner}>
-                <Ionicons name="location-outline" size={20} color={COLORS.orange} />
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={[s.searchTitle, { color: dark ? COLORS.darkText : COLORS.lightText }]}>Where are you going?</Text>
-                  <Text style={[s.searchSub, { color: dark ? COLORS.darkSub : COLORS.lightSub }]}>Book your next ride</Text>
+  return (
+    <View style={themed.root}>
+      <StatusBar barStyle={colors.statusBar} />
+      <LinearGradient colors={asGradientStops(colors.gradientBg)} style={StyleSheet.absoluteFillObject} />
+
+      <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+            />
+          }
+        >
+          <View style={styles.header}>
+            <TouchableOpacity
+              activeOpacity={0.86}
+              onPress={() => router.push(RIDER_ROUTES.profile as any)}
+              style={[styles.avatarRing, { borderColor: colors.primary }]}
+            >
+              {avatarUrl ? (
+                <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+              ) : (
+                <LinearGradient colors={asGradientStops([BRAND.orange, BRAND.orangeDeep])} style={styles.avatar}>
+                  <Text style={styles.avatarInitial}>{firstName[0]?.toUpperCase() || 'R'}</Text>
+                </LinearGradient>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.headerTextWrap}>
+              <Text style={themed.hdrSub}>Good to see you, {firstName}</Text>
+              <Text style={themed.hdrTitle}>
+                Your campus ride{'\n'}
+                <Text style={themed.hdrAccent}>is one tap away.</Text>
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={themed.notifBtn}
+              activeOpacity={0.86}
+              onPress={() => router.push(RIDER_ROUTES.messages as any)}
+            >
+              <Ionicons name="chatbubble-outline" size={20} color={colors.textPrimary} />
+              {unreadCount > 0 && (
+                <View style={styles.notifBadge}>
+                  <Text style={styles.notifBadgeText}>{Math.min(unreadCount, 9)}</Text>
                 </View>
-                <View style={s.searchArrow}>
-                  <Ionicons name="arrow-forward" size={18} color="white" />
-                </View>
-              </View>
+              )}
             </TouchableOpacity>
           </View>
 
-          {/* ── Stats Row ── */}
-          <View style={s.statsRow}>
-            {[
-              { label: 'Rides\nThis Month', value: String(stats.totalRides), icon: 'car-outline' as const, color: COLORS.orange },
-              { label: 'Total\nSpent', value: `$${stats.spent ? Math.round(stats.spent) : 0}`, icon: 'wallet-outline' as const, color: COLORS.green },
-              { label: 'Rider\nRating', value: typeof stats.avgRating === 'number' ? stats.avgRating.toFixed(1) : '—', icon: 'star-outline' as const, color: '#F59E0B' },
-            ].map((stat) => (
-              <View key={stat.label} style={[s.statCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                <BlurView intensity={dark ? 22 : 50} tint={dark ? 'dark' : 'light'} style={StyleSheet.absoluteFillObject} />
-                <View style={[s.statIcon, { backgroundColor: `${stat.color}20` }]}>
-                  <Ionicons name={stat.icon} size={16} color={stat.color} />
-                </View>
-                <Text style={[s.statValue, { color: stat.color }]}>{stat.value}</Text>
-                <Text style={[s.statLabel, { color: dark ? COLORS.darkSub : COLORS.lightSub }]}>{stat.label}</Text>
+          <StudentVerificationBanner />
+
+          <View style={styles.snapshotRow}>
+            {statCards.map((item) => (
+              <View key={item.label} style={themed.snapshotCard}>
+                <Text style={[styles.snapshotValue, { color: item.color }]} numberOfLines={1}>
+                  {item.value}
+                </Text>
+                <Text style={themed.snapshotLabel}>{item.label}</Text>
               </View>
             ))}
           </View>
 
-          {/* ── Quick Actions ── */}
-          <View style={s.section}>
-            <Text style={[s.sectionTitle, { color: theme.text }]}>Find a Ride</Text>
-            <View style={s.quickActions}>
-              {[
-                { label: 'Find a Ride', sub: 'Join a ride going your way', icon: 'people-outline' as const, route: '/rider/available-rides' },
-                { label: 'Book a Ride', sub: 'Request your own ride', icon: 'car-sport-outline' as const, route: '/rider/book' },
-                { label: 'Group Ride', sub: 'Ride together with friends', icon: 'person-add-outline' as const, route: '/rider/book' },
-              ].map((action) => (
-                <TouchableOpacity key={action.label} style={[s.quickCard, { backgroundColor: theme.card, borderColor: theme.border }]} onPress={() => router.push(action.route as any)} activeOpacity={0.8}>
-                  <BlurView intensity={dark ? 20 : 45} tint={dark ? 'dark' : 'light'} style={StyleSheet.absoluteFillObject} />
-                  <View style={[s.quickIcon, { backgroundColor: COLORS.orangeGlow }]}>
-                    <Ionicons name={action.icon} size={20} color={COLORS.orange} />
-                  </View>
-                  <Text style={[s.quickLabel, { color: theme.text }]}>{action.label}</Text>
-                  <Text style={[s.quickSub, { color: dark ? COLORS.darkSub : COLORS.lightSub }]}>{action.sub}</Text>
+          <RiderRouteSearchCard
+            onContinue={(route: RiderRoutePayload) => {
+              router.push({
+                pathname: RIDER_ROUTES.book,
+                params: {
+                  pickup: route.pickup,
+                  dropoff: route.dropoff,
+                  pickupLat: String(route.pickupCoords.lat),
+                  pickupLng: String(route.pickupCoords.lng),
+                  dropoffLat: String(route.dropoffCoords.lat),
+                  dropoffLng: String(route.dropoffCoords.lng),
+                  distanceText: route.distanceText,
+                  durationText: route.durationText,
+                  minContribution: route.minContribution ? String(route.minContribution) : '',
+                },
+              } as any);
+            }}
+          />
+
+          {nextRide && (
+            <View style={themed.nextRideCard}>
+              <View style={styles.nextTop}>
+                <Text style={styles.nextEyebrow}>NEXT RIDE</Text>
+                <Text style={styles.nextPrice}>{nextRide.priceText || '$--'}</Text>
+              </View>
+              <Text style={styles.nextTitle} numberOfLines={1}>
+                {nextRide.from} → {nextRide.to}
+              </Text>
+              <Text style={styles.nextSub}>
+                {formatDateTime(nextRide.dateTime)}
+                {nextRide.driverName ? ` · ${nextRide.driverName}` : ''}
+              </Text>
+              <View style={styles.nextActions}>
+                <TouchableOpacity style={styles.nextGhostBtn} onPress={() => openRideDetails(nextRide)}>
+                  <Text style={styles.nextGhostText}>View ride</Text>
                 </TouchableOpacity>
+                <TouchableOpacity style={styles.nextPrimaryBtn} onPress={() => openChatForRide(nextRide)}>
+                  <Text style={styles.nextPrimaryText}>Message</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          <View style={styles.quickActions}>
+            <TouchableOpacity
+              style={themed.quickAction}
+              onPress={() => router.push(RIDER_ROUTES.availableRides as any)}
+              activeOpacity={0.86}
+            >
+              <Ionicons name="search" size={18} color={colors.primary} />
+              <Text style={themed.quickActionText}>Find Rides</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionPrimary}
+              onPress={() => router.push(RIDER_ROUTES.book as any)}
+              activeOpacity={0.88}
+            >
+              <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.quickActionPrimaryText}>Book Ride</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={themed.quickAction}
+              onPress={() => router.push(RIDER_ROUTES.messages as any)}
+              activeOpacity={0.86}
+            >
+              <Ionicons name="chatbubble-outline" size={18} color={colors.primary} />
+              <Text style={themed.quickActionText}>Messages</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={themed.insightStrip}>
+            <View style={themed.insightIcon}>
+              <Shield size={16} color={colors.primary} />
+            </View>
+            <View style={styles.insightTextWrap}>
+              <Text style={themed.insightTitle}>RideAlong Pulse</Text>
+              <Text style={themed.insightText}>{riderInsightText}</Text>
+            </View>
+          </View>
+
+          {(promotions.length > 0 || promotionsLoading) && (
+            <View style={styles.section}>
+              <Text style={themed.sectionTitle}>Promotions</Text>
+              {promotionsLoading && promotions.length === 0 ? (
+                <ActivityIndicator color={colors.primary} style={styles.sectionLoader} />
+              ) : (
+                <>
+                  <ScrollView
+                    ref={promotionScrollRef}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    snapToInterval={320}
+                    decelerationRate="fast"
+                    onScroll={(event) => {
+                      const index = Math.round(event.nativeEvent.contentOffset.x / 320);
+                      setCurrentPromotionIndex(Math.max(0, Math.min(index, promotions.length - 1)));
+                    }}
+                    scrollEventThrottle={16}
+                  >
+                    {promotions.map((promotion) => (
+                      <TouchableOpacity
+                        key={promotion.id}
+                        activeOpacity={0.9}
+                        onPress={() => {
+                          setSelectedPromotion(promotion);
+                          setPromotionModalVisible(true);
+                        }}
+                        style={styles.promotionShell}
+                      >
+                        <PromotionCard promotion={promotion} onPress={() => {}} />
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+
+                  {promotions.length > 1 && (
+                    <View style={styles.dotsRow}>
+                      {promotions.map((_, index) => (
+                        <View key={index} style={[styles.dot, index === currentPromotionIndex && styles.dotActive]} />
+                      ))}
+                    </View>
+                  )}
+                </>
+              )}
+            </View>
+          )}
+
+          <View style={styles.section}>
+            <View style={styles.sectionHdrRow}>
+              <Text style={themed.sectionTitle}>Upcoming Rides</Text>
+              <TouchableOpacity onPress={() => router.push(RIDER_ROUTES.rides as any)}>
+                <Text style={themed.viewAll}>View All</Text>
+              </TouchableOpacity>
+            </View>
+
+            {loading && <ActivityIndicator color={colors.primary} style={styles.sectionLoader} />}
+
+            {!loading && displayUpcoming.length === 0 && (
+              <View style={themed.emptyBox}>
+                <View style={themed.emptyIconWrap}>
+                  <Ionicons name="car-outline" size={28} color={colors.primary} />
+                </View>
+                <Text style={themed.emptyTitle}>No active rides</Text>
+                <Text style={themed.emptyText}>Search your route to get matched with a driver.</Text>
+              </View>
+            )}
+
+            {!loading && displayUpcoming.map((ride) => renderRideCard(ride))}
+          </View>
+
+          <View style={styles.section}>
+            <View style={styles.sectionHdrRow}>
+              <Text style={themed.sectionTitle}>Campus Insights</Text>
+              <View style={themed.liveBadge}>
+                <View style={[styles.liveDot, { backgroundColor: colors.green }]} />
+                <Text style={[styles.liveText, { color: colors.green }]}>Active now</Text>
+              </View>
+            </View>
+
+            <View style={themed.insightsCard}>
+              {[
+                { icon: 'time-outline', text: 'Evening windows usually convert faster near housing and dining.', label: 'Pattern' },
+                { icon: 'wallet-outline', text: 'Clear pickup notes help drivers accept sooner.', label: 'Tip' },
+                { icon: 'school-outline', text: 'Verified student rides help keep the marketplace trusted.', label: 'Trust' },
+                { icon: 'flash-outline', text: 'Book earlier when campus events create demand spikes.', label: 'Now' },
+              ].map((item, index) => (
+                <View key={item.text} style={[styles.insightRow, index > 0 && themed.insightRowBorder]}>
+                  <View style={themed.smallInsightIcon}>
+                    <Ionicons name={item.icon as any} size={15} color={colors.primary} />
+                  </View>
+                  <Text style={themed.smallInsightText}>{item.text}</Text>
+                  <Text style={themed.smallInsightLabel}>{item.label}</Text>
+                </View>
               ))}
             </View>
           </View>
 
-          {/* ── Promotions ── */}
-          <View style={s.section}>
-            <View style={s.sectionHeader}>
-              <Text style={[s.sectionTitle, { color: theme.text }]}>🔥 Promotions</Text>
-              {promotionsError && <TouchableOpacity onPress={refreshPromotions}><Text style={s.viewAll}>Retry</Text></TouchableOpacity>}
+          <View style={styles.section}>
+            <View style={styles.sectionHdrRow}>
+              <Text style={themed.sectionTitle}>Recent Rides</Text>
+              <TouchableOpacity onPress={() => router.push(RIDER_ROUTES.rides as any)}>
+                <Text style={themed.viewAll}>View All</Text>
+              </TouchableOpacity>
             </View>
-            {promotionsLoading && promotions.length === 0
-              ? <View style={s.loadingRow}><ActivityIndicator size="small" color={COLORS.orange} /><Text style={[s.loadingText, { color: theme.sub }]}>Loading offers…</Text></View>
-              : promotions.length > 0
-                ? <>
-                    <ScrollView ref={promotionsScrollRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 0 }} pagingEnabled={false} decelerationRate="fast" snapToInterval={Dimensions.get('window').width - 48} snapToAlignment="start" onScroll={(e) => { const idx = Math.round(e.nativeEvent.contentOffset.x / (Dimensions.get('window').width - 24)); setCurrentPromotionIndex(idx); }} scrollEventThrottle={16}>
-                      {promotions.map((promotion) => <PromotionCard key={promotion.id} promotion={promotion} onPress={handlePromotionPress} isLoading={false} isClaimed={isPromotionClaimed(promotion.id)} />)}
-                    </ScrollView>
-                    {promotions.length > 1 && (
-                      <View style={s.dotsRow}>
-                        {promotions.map((_, i) => <View key={i} style={[s.dot, currentPromotionIndex === i && s.dotActive]} />)}
-                      </View>
-                    )}
-                  </>
-                : <View style={s.emptyBox}><Ionicons name="gift-outline" size={32} color={dark ? COLORS.darkSub : '#CBD5E1'} /><Text style={[s.emptyText, { color: dark ? COLORS.darkSub : COLORS.lightSub }]}>{promotionsError ? 'Failed to load offers' : 'No promotions available'}</Text></View>
-            }
-          </View>
 
-          {/* ── Upcoming Rides ── */}
-          <View style={s.section}>
-            <View style={s.sectionHeader}>
-              <Text style={[s.sectionTitle, { color: theme.text }]}>Upcoming Ride</Text>
-              <TouchableOpacity onPress={() => router.push('/settings/ride-history')}><Text style={s.viewAll}>View all</Text></TouchableOpacity>
-            </View>
-            {loading
-              ? <View style={s.loadingRow}><ActivityIndicator color={COLORS.orange} /></View>
-              : (() => {
-                  const visible = sortedUpcoming.filter((r) => !['rejected','declined','canceled','cancelled','expired'].includes((r.status || '').toLowerCase()));
-                  if (visible.length === 0) return <View style={s.emptyBox}><Ionicons name="calendar-outline" size={32} color={dark ? COLORS.darkSub : '#CBD5E1'} /><Text style={[s.emptyText, { color: dark ? COLORS.darkSub : COLORS.lightSub }]}>No upcoming rides found</Text></View>;
-                  return visible.map((r) => {
-                    const statusKey = (r.status || '').toLowerCase();
-                    if (['rejected','declined','canceled','cancelled','expired'].includes(statusKey)) return null;
-                    const offer = offersByRideId[r.id]; const offerStatus = (offer?.status || '').toLowerCase();
-                    const hasPendingOffer = !!offer && ['pending','sent','offer','offer_sent','received','offer_received'].includes(offerStatus);
-                    const isAcceptedOffer = ['accepted','confirmed'].includes(offerStatus);
-                    const isOfferSent = statusKey === 'offer sent' || statusKey === 'offer_sent' || statusKey === 'sent';
-                    const isConfirmed = r.type === 'confirmedRide' || isAcceptedOffer || ['confirmed','matched','driver-arriving','in-progress','accepted'].includes(statusKey);
-                    const dateText = r.dateTime && r.dateTime instanceof Date && !isNaN(r.dateTime.getTime()) ? r.dateTime.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
-                    const timeText = r.dateTime && r.dateTime instanceof Date && !isNaN(r.dateTime.getTime()) ? r.dateTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : '';
-                    const badgeStyle = statusKey === 'flagged' ? s.badgeFlagged : isOfferSent ? s.badgeBlue : hasPendingOffer ? s.badgeAmber : isConfirmed ? s.badgeGreen : s.badgeGray;
-                    const badgeTextStyle = statusKey === 'flagged' ? s.badgeTextRed : isOfferSent ? s.badgeTextBlue : hasPendingOffer ? s.badgeTextAmber : isConfirmed ? s.badgeTextGreen : s.badgeTextGray;
-                    const badgeLabel = statusKey === 'flagged' ? 'Flagged' : isOfferSent ? 'Offer Sent' : hasPendingOffer ? 'Offer Received' : r.type === 'confirmedRide' ? prettyStatus(r.status, r.type) : isConfirmed ? 'Confirmed' : prettyStatus(r.status, r.type);
-                    return (
-                      <View key={`${r.type}-${r.id}`} style={[s.rideCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                        <BlurView intensity={dark ? 18 : 50} tint={dark ? 'dark' : 'light'} style={StyleSheet.absoluteFillObject} />
-                        <View style={s.rideCardInner}>
-                          <View style={s.rideCardTop}>
-                            <View style={[s.badge, badgeStyle]}><Text style={[s.badgeText, badgeTextStyle]}>{badgeLabel}</Text></View>
-                            {(dateText || timeText) && <Text style={[s.rideDateTime, { color: dark ? COLORS.darkSub : COLORS.lightSub }]}>{dateText}{dateText && timeText ? ' · ' : ''}{timeText}</Text>}
-                          </View>
-                          <View style={s.routeWrap}>
-                            <View style={s.routeRow}>
-                              <View style={s.orangeDot} />
-                              <Text style={[s.routeFrom, { color: theme.text }]} numberOfLines={1}>{r.from}</Text>
-                            </View>
-                            <View style={s.routeLine} />
-                            <View style={s.routeRow}>
-                              <View style={s.grayDot} />
-                              <Text style={[s.routeTo, { color: dark ? COLORS.darkSub : COLORS.lightSub }]} numberOfLines={1}>{r.to}</Text>
-                            </View>
-                          </View>
-                          <View style={s.rideCardFooter}>
-                            {(offer?.priceText ?? r.priceText) ? <Text style={s.ridePrice}>{offer?.priceText ?? r.priceText}</Text> : <View />}
-                            <View style={s.rideFooterRight}>
-                              {(offer?.durationText ?? r.durationText) ? <Text style={[s.rideMeta, { color: dark ? COLORS.darkSub : COLORS.lightSub }]}>{offer?.durationText ?? r.durationText}</Text> : null}
-                              {r.type === 'rideRequest' && <TouchableOpacity onPress={() => Share.share({ message: `Looking for a ride on RideAlong!\nhttps://ridealongapp.com/request/${r.id}` }).catch(() => {})} style={{ marginLeft: 8 }}><Ionicons name="share-outline" size={16} color={COLORS.orange} /></TouchableOpacity>}
-                              <TouchableOpacity onPress={() => openRideDetails(r)} style={s.detailsBtn}><Text style={s.detailsBtnText}>Details</Text><Ionicons name="chevron-forward" size={14} color={COLORS.orange} /></TouchableOpacity>
-                            </View>
-                          </View>
-                          {(['confirmed','in-progress','in_progress','driver_completed','pending'].includes(statusKey)) && <View style={s.ctaWrap}>{renderConfirmedRideCTA(r)}</View>}
-                          {hasPendingOffer && <View style={s.ctaWrap}><Button variant="outline" size="sm" onPress={() => confirmRejectOffer(r.id)}>Reject Offer</Button><Button variant="primary" size="sm" onPress={() => acceptOffer(r.id)}>Accept Offer</Button></View>}
-                          {r.type === 'rideRequest' && ['posted','pending','open'].includes(statusKey) && !hasPendingOffer && <View style={s.ctaWrap}><Button variant="outline" size="sm" onPress={() => { Alert.alert('Cancel Ride Request', 'Are you sure?', [{ text: 'No', style: 'cancel' }, { text: 'Yes, Cancel', style: 'destructive', onPress: async () => { try { const { getApiBaseUrl } = require('@/constants/services'); await fetch(`${getApiBaseUrl()}/api/rides/${r.id}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ collection: 'rideRequests', cancelledBy: 'rider', reason: 'Cancelled by rider' }) }); showSuccessToast('Request Cancelled', 'Your ride request was cancelled'); } catch { showErrorToast('Cancel Failed', 'Failed to cancel ride request'); } } }]); }}>Cancel Request</Button></View>}
-                          {isOfferSent && <View style={s.ctaWrap}><Button variant="outline" size="sm" onPress={() => confirmCancelOffer(r.id)}>Cancel Offer</Button></View>}
-                        </View>
-                      </View>
-                    );
-                  });
-                })()
-            }
-          </View>
-
-          {/* ── Recent Rides ── */}
-          <View style={s.section}>
-            <View style={s.sectionHeader}>
-              <Text style={[s.sectionTitle, { color: theme.text }]}>Recent Rides</Text>
-              <TouchableOpacity onPress={() => router.push('/settings/ride-history')}><Text style={s.viewAll}>View all</Text></TouchableOpacity>
-            </View>
-            {recent.length === 0
-              ? <View style={s.emptyBox}><Ionicons name="time-outline" size={32} color={dark ? COLORS.darkSub : '#CBD5E1'} /><Text style={[s.emptyText, { color: dark ? COLORS.darkSub : COLORS.lightSub }]}>No recent rides.</Text></View>
-              : recent.map((r) => (
-                  <View key={`recent-${r.id}`} style={[s.rideCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                    <BlurView intensity={dark ? 18 : 50} tint={dark ? 'dark' : 'light'} style={StyleSheet.absoluteFillObject} />
-                    <View style={s.rideCardInner}>
-                      <View style={s.rideCardTop}>
-                        <View style={[s.badge, s.badgeGray]}><Text style={[s.badgeText, s.badgeTextGray]}>Completed</Text></View>
-                        <Text style={[s.rideDateTime, { color: dark ? COLORS.darkSub : COLORS.lightSub }]}>{r.dateTime ? formatDate(r.dateTime) : ''}</Text>
-                      </View>
-                      <View style={s.routeWrap}>
-                        <View style={s.routeRow}><View style={s.orangeDot} /><AddressLink address={r.from} textStyle={{ ...s.routeFrom, color: theme.text }} /></View>
-                        <View style={s.routeLine} />
-                        <View style={s.routeRow}><View style={s.grayDot} /><AddressLink address={r.to} textStyle={{ ...s.routeTo, color: dark ? COLORS.darkSub : COLORS.lightSub }} /></View>
-                      </View>
-                      <View style={s.rideCardFooter}>
-                        {r.priceText ? <Text style={s.ridePrice}>{r.priceText}</Text> : <View />}
-                        <View style={s.rideFooterRight}>
-                          {(() => { const now = new Date(); const completedAt = r.dateTime as Date | undefined; const showFlag = completedAt && ((now.getTime() - completedAt.getTime()) <= 24 * 60 * 60 * 1000); if (!showFlag) return null; return (<TouchableOpacity onPress={async () => { const docId = await resolveConfirmedDocId(r); if (!docId) { Alert.alert('Ride not found', 'We could not find this confirmed ride to flag.'); return; } setFlaggingRideId(docId); setFlagModalVisible(true); }} style={s.iconActionBtn}><Flag size={16} color="#DC2626" /></TouchableOpacity>); })()}
-                          {!ratedRideIds.has(r.id) && <TouchableOpacity style={s.rateBtn} onPress={() => openRatingForRide(r.id)}><Text style={s.rateBtnText}>Rate</Text></TouchableOpacity>}
-                          <TouchableOpacity onPress={() => router.push('/settings/ride-history')} style={s.detailsBtn}><Text style={s.detailsBtnText}>History</Text><Ionicons name="chevron-forward" size={14} color={COLORS.orange} /></TouchableOpacity>
-                        </View>
-                      </View>
+            {recent.length === 0 ? (
+              <View style={themed.emptyBoxCompact}>
+                <Text style={themed.emptyTitle}>No recent rides yet</Text>
+                <Text style={themed.emptyText}>Completed trips will appear here.</Text>
+              </View>
+            ) : (
+              recent.map((ride) => (
+                <View key={`recent-${ride.id}`} style={themed.recentCard}>
+                  <View style={styles.recentTop}>
+                    <View style={themed.completedPill}>
+                      <Text style={themed.completedText}>Completed</Text>
+                    </View>
+                    <Text style={themed.recentDate}>{formatDateTime(ride.dateTime)}</Text>
+                  </View>
+                  <View style={styles.recentRoute}>
+                    <View style={[styles.routeDotSmall, { backgroundColor: colors.primary }]} />
+                    <Text style={themed.recentRouteText} numberOfLines={1}>
+                      {ride.from}
+                    </Text>
+                  </View>
+                  <View style={styles.recentRoute}>
+                    <View style={[styles.routeDotSmall, { backgroundColor: colors.textTertiary }]} />
+                    <Text style={themed.recentRouteText} numberOfLines={1}>
+                      {ride.to}
+                    </Text>
+                  </View>
+                  <View style={styles.recentFooter}>
+                    <Text style={themed.recentPrice}>{ride.priceText || '$--'}</Text>
+                    <View style={styles.recentActions}>
+                      {!ratedRideIds.has(ride.id) && (
+                        <TouchableOpacity style={themed.rateBtn} onPress={() => openRatingForRide(ride.id, ride.driverName)}>
+                          <Text style={themed.rateBtnText}>Rate</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity onPress={() => openRideDetails(ride)} style={styles.detailsBtn}>
+                        <Text style={styles.detailsBtnText}>History</Text>
+                        <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+                      </TouchableOpacity>
                     </View>
                   </View>
-                ))
-            }
+                </View>
+              ))
+            )}
           </View>
-
-          <View style={{ height: 40 }} />
         </ScrollView>
       </SafeAreaView>
 
-      {/* ── Ride Details Modal ── */}
       {modalVisible && (
         <Modal animationType="slide" transparent visible={modalVisible} onRequestClose={closeModal}>
-          <View style={s.modalOverlay}>
-            <View style={[s.modalSheet, { backgroundColor: theme.dark ? '#0F1923' : '#FFFFFF' }]}>
-              <BlurView intensity={dark ? 40 : 70} tint={dark ? 'dark' : 'light'} style={StyleSheet.absoluteFillObject} />
-              <View style={[s.modalHandle, { backgroundColor: dark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)' }]} />
-              <View style={s.modalHeader}>
-                <Text style={[s.modalTitle, { color: theme.text }]}>Ride Details</Text>
-                <TouchableOpacity onPress={closeModal} style={[s.modalCloseBtn, { backgroundColor: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}><Ionicons name="close" size={20} color={theme.text} /></TouchableOpacity>
+          <View style={styles.modalOverlay}>
+            <View style={themed.modalSheet}>
+              {isDark && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFillObject} />}
+              <View style={themed.modalHandle} />
+              <View style={styles.modalHeader}>
+                <Text style={themed.modalTitle}>Ride Details</Text>
+                <TouchableOpacity onPress={closeModal} style={themed.modalCloseBtn}>
+                  <X size={20} color={colors.textPrimary} />
+                </TouchableOpacity>
               </View>
+
               {selectedRide && (
-                <ScrollView style={s.modalBody} showsVerticalScrollIndicator={false}>
+                <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
                   {(modalDriver?.name || selectedRide.driverName) && (
-                    <View style={s.modalSection}>
-                      <Text style={[s.modalSectionTitle, { color: theme.text }]}>Driver</Text>
-                      <TouchableOpacity style={[s.driverRow, { backgroundColor: dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)' }]} activeOpacity={0.9} onPress={() => { const id = modalDriver?.driverId; if (!id) return; closeModal(); setTimeout(() => { try { router.push(`/driver/${id}`); } catch {} }, 0); }}>
-                        {modalDriver?.avatarUrl ? <Image source={{ uri: modalDriver.avatarUrl }} style={s.driverAvatar} /> : <View style={[s.driverAvatarPlaceholder, { backgroundColor: COLORS.orangeGlow }]}><Ionicons name="person" size={24} color={COLORS.orange} /></View>}
-                        <View style={{ flex: 1, marginLeft: 12 }}>
-                          <Text style={[s.driverName, { color: theme.text }]}>{modalDriver?.name ?? selectedRide.driverName ?? '—'}</Text>
-                          {typeof (modalDriver?.rating ?? selectedRide.driverRating) === 'number' && <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}><Ionicons name="star" size={13} color="#F59E0B" /><Text style={[s.driverRating, { color: dark ? COLORS.darkSub : COLORS.lightSub }]}> {(modalDriver?.rating ?? selectedRide.driverRating)?.toFixed(1)}</Text></View>}
-                          {selectedRide.vehicleText && <Text style={[s.driverVehicle, { color: dark ? COLORS.darkSub : COLORS.lightSub }]}>{selectedRide.vehicleText}</Text>}
+                    <View style={styles.modalSection}>
+                      <Text style={themed.modalSectionTitle}>Driver</Text>
+                      <TouchableOpacity
+                        style={themed.driverRow}
+                        activeOpacity={0.9}
+                        onPress={() => {
+                          if (!modalDriver?.driverId) return;
+                          closeModal();
+                          router.push(`/(rider)/driver/${modalDriver.driverId}` as any);
+                        }}
+                      >
+                        {modalDriver?.avatarUrl ? (
+                          <Image source={{ uri: modalDriver.avatarUrl }} style={styles.driverAvatar} />
+                        ) : (
+                          <View style={themed.driverAvatarPlaceholder}>
+                            <Ionicons name="person" size={24} color={colors.primary} />
+                          </View>
+                        )}
+                        <View style={styles.driverInfo}>
+                          <Text style={themed.driverName}>{modalDriver?.name || selectedRide.driverName || 'Driver'}</Text>
+                          {typeof (modalDriver?.rating ?? selectedRide.driverRating) === 'number' && (
+                            <View style={styles.driverRatingRow}>
+                              <Star size={13} color={colors.amber} fill={colors.amber} />
+                              <Text style={themed.driverRating}>
+                                {(modalDriver?.rating ?? selectedRide.driverRating)?.toFixed(1)}
+                              </Text>
+                            </View>
+                          )}
+                          {!!(modalDriver?.vehicleText || selectedRide.vehicleText) && (
+                            <Text style={themed.driverVehicle}>{modalDriver?.vehicleText || selectedRide.vehicleText}</Text>
+                          )}
                         </View>
-                        {(() => { const phoneNumber = (modalDriver?.phone ?? selectedRide.driverPhone) as string | null | undefined; const enabled = !!phoneNumber; return (<TouchableOpacity style={[s.callBtn, { backgroundColor: enabled ? COLORS.orange : (dark ? 'rgba(255,255,255,0.06)' : '#F1F5F9') }]} onPress={() => { if (!enabled) return; Linking.openURL(`tel:${phoneNumber}`).catch(() => {}); }} disabled={!enabled}><Ionicons name="call" size={18} color={enabled ? 'white' : (dark ? COLORS.darkSub : '#94A3B8')} /></TouchableOpacity>); })()}
+                        <TouchableOpacity
+                          style={[
+                            styles.callBtn,
+                            { backgroundColor: modalDriver?.phone ? colors.primary : colors.bgInput },
+                          ]}
+                          disabled={!modalDriver?.phone}
+                          onPress={() => {
+                            if (modalDriver?.phone) Linking.openURL(`tel:${modalDriver.phone}`).catch(() => {});
+                          }}
+                        >
+                          <Phone size={18} color={modalDriver?.phone ? '#FFFFFF' : colors.textTertiary} />
+                        </TouchableOpacity>
                       </TouchableOpacity>
                     </View>
                   )}
-                  <View style={s.modalSection}>
-                    <Text style={[s.modalSectionTitle, { color: theme.text }]}>Route</Text>
-                    <View style={[s.routeCard, { backgroundColor: dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.025)', borderColor: theme.border }]}>
-                      <View style={s.routeRow}><View style={s.orangeDot} /><AddressLink address={selectedRide.from} textStyle={{ ...s.routeFrom, color: theme.text }} /></View>
-<View style={s.routeLine} />
-<View style={s.routeRow}><View style={s.grayDot} /><AddressLink address={selectedRide.to} textStyle={{ ...s.routeTo, color: dark ? COLORS.darkSub : COLORS.lightSub }} /></View>
+
+                  <View style={styles.modalSection}>
+                    <Text style={themed.modalSectionTitle}>Route</Text>
+                    <View style={themed.modalRouteCard}>
+                      <View style={styles.modalRouteRow}>
+                        <View style={[styles.routeDotSmall, { backgroundColor: colors.primary }]} />
+                        <AddressLink address={selectedRide.from} textStyle={themed.modalRouteText} />
+                      </View>
+                      <View style={[styles.modalRouteLine, { backgroundColor: colors.primaryBorder }]} />
+                      <View style={styles.modalRouteRow}>
+                        <View style={[styles.routeDotSmall, { backgroundColor: colors.textTertiary }]} />
+                        <AddressLink address={selectedRide.to} textStyle={themed.modalRouteText} />
+                      </View>
                     </View>
                   </View>
-                  <View style={s.modalSection}>
-                    <Text style={[s.modalSectionTitle, { color: theme.text }]}>Trip Info</Text>
-                    <View style={s.infoGrid}>
+
+                  <View style={styles.modalSection}>
+                    <Text style={themed.modalSectionTitle}>Trip Info</Text>
+                    <View style={styles.infoGrid}>
                       {[
-                        { label: 'Price', value: selectedRide.priceText ?? '—', color: COLORS.green },
-                        { label: 'Date', value: selectedRide.dateTime ? selectedRide.dateTime.toLocaleDateString() : '—', color: theme.text },
-                        { label: 'Time', value: selectedRide.dateTime ? formatTime(selectedRide.dateTime) : '—', color: theme.text },
-                        { label: 'Distance', value: modalDistanceText ?? selectedRide.distanceText ?? '—', color: theme.text },
-                      ].map(({ label, value, color }) => (
-                        <View key={label} style={[s.infoCell, { backgroundColor: dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.025)', borderColor: theme.border }]}>
-                          <Text style={[s.infoCellLabel, { color: dark ? COLORS.darkSub : COLORS.lightSub }]}>{label}</Text>
-                          <Text style={[s.infoCellValue, { color }]}>{value}</Text>
+                        { label: 'Date', value: formatDate(selectedRide.dateTime) || '--' },
+                        { label: 'Time', value: formatTime(selectedRide.dateTime) || '--' },
+                        { label: 'Distance', value: modalDistanceText || selectedRide.distanceText || '--' },
+                        { label: 'Price', value: selectedRide.priceText || '--' },
+                      ].map((item) => (
+                        <View key={item.label} style={themed.infoCell}>
+                          <Text style={themed.infoLabel}>{item.label}</Text>
+                          <Text style={themed.infoValue}>{item.value}</Text>
                         </View>
                       ))}
                     </View>
+                  </View>
+
+                  <View style={styles.modalActions}>
+                    {!!selectedRide.driverId && (
+                      <TouchableOpacity style={themed.modalActionBtn} onPress={() => openChatForRide(selectedRide)}>
+                        <MessageCircle size={16} color={colors.primary} />
+                        <Text style={themed.modalActionText}>Message</Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                      style={themed.modalActionBtn}
+                      onPress={() => {
+                        setFlaggingRideId(selectedRide.id);
+                        setFlagModalVisible(true);
+                      }}
+                    >
+                      <Flag size={16} color="#EF4444" />
+                      <Text style={themed.modalActionText}>Report</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={themed.modalActionBtn}
+                      onPress={() => Share.share({ message: `${selectedRide.from} to ${selectedRide.to}` }).catch(() => {})}
+                    >
+                      <Share2 size={16} color={colors.primary} />
+                      <Text style={themed.modalActionText}>Share</Text>
+                    </TouchableOpacity>
                   </View>
                 </ScrollView>
               )}
@@ -831,176 +1365,912 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* Rating Modal */}
-      {ratingModalVisible && <RatingModal visible={ratingModalVisible} onClose={() => { if (!ratingSubmitting) { setRatingModalVisible(false); setRatingTarget(null); setRatingError(null); } }} onSubmit={async (stars, comment) => { if (!ratingTarget) return; try { setRatingSubmitting(true); setRatingError(null); await submitRating({ rideId: ratingTarget.rideId, stars, comment }); setRatingModalVisible(false); setRatingTarget(null); setRatedRideIds((prev) => new Set(prev).add(ratingTarget.rideId)); showSuccessToast('Thanks!', 'Your rating was submitted'); } catch (e: any) { const msg = mapCallableRatingError(e); setRatingError(msg); showErrorToast('Rating Failed', msg); } finally { setRatingSubmitting(false); } }} title="Rate your driver" subtitle={ratingTarget?.driverName ? `How was your ride with ${ratingTarget.driverName}?` : undefined} submitting={ratingSubmitting} errorText={ratingError} />}
+      {ratingModalVisible && (
+        <RatingModal
+          visible={ratingModalVisible}
+          onClose={() => {
+            if (!ratingSubmitting) {
+              setRatingModalVisible(false);
+              setRatingTarget(null);
+              setRatingError(null);
+            }
+          }}
+          onSubmit={async (stars, comment) => {
+            if (!ratingTarget) return;
+            try {
+              setRatingSubmitting(true);
+              setRatingError(null);
+              await submitRating({ rideId: ratingTarget.rideId, stars, comment });
+              setRatedRideIds((prev) => new Set(prev).add(ratingTarget.rideId));
+              setRatingModalVisible(false);
+              setRatingTarget(null);
+              showSuccessToast('Thanks', 'Your rating was submitted.');
+            } catch (error: any) {
+              const message = error?.message || 'Failed to submit rating.';
+              setRatingError(message);
+              showErrorToast('Rating failed', message);
+            } finally {
+              setRatingSubmitting(false);
+            }
+          }}
+          title="Rate your driver"
+          subtitle={ratingTarget?.driverName ? `How was your ride with ${ratingTarget.driverName}?` : undefined}
+          submitting={ratingSubmitting}
+          errorText={ratingError}
+        />
+      )}
 
-      {/* Flag Modal */}
-      <FlagRideModal visible={flagModalVisible} rideId={flaggingRideId} onClose={() => { setFlagModalVisible(false); setFlaggingRideId(null); }} onFlagged={(rid) => { try { setUpcoming((prev) => prev.map((u) => { if (u.type === 'confirmedRide' && u.id === rid) return { ...u, status: 'flagged' }; return u; })); try { const entry = Object.entries(confirmedIndexRef.current).find(([, v]) => v?.docId === rid); if (entry) { const [key, val] = entry as [string, { docId: string; status: any; flags?: any }]; confirmedIndexRef.current[key] = { ...val, status: 'flagged' } as any; } } catch {} showSuccessToast('Ride Flagged', 'Thanks for your report'); } catch {} }} />
+      <FlagRideModal
+        visible={flagModalVisible}
+        rideId={flaggingRideId}
+        onClose={() => {
+          setFlagModalVisible(false);
+          setFlaggingRideId(null);
+        }}
+        onFlagged={(rideId) => {
+          setUpcoming((prev) => prev.map((ride) => (ride.id === rideId ? { ...ride, status: 'flagged' } : ride)));
+          showSuccessToast('Ride reported', 'Thanks for your report.');
+        }}
+      />
 
-      {/* Promotion Details Modal */}
-      <PromotionDetailsModal visible={promotionModalVisible} promotion={selectedPromotion} onClose={() => { setPromotionModalVisible(false); setSelectedPromotion(null); }} onClaim={handleClaimPromotion} isClaimed={selectedPromotion ? isPromotionClaimed(selectedPromotion.id) : false} isLoading={false} />
+      <PromotionDetailsModal
+        visible={promotionModalVisible}
+        promotion={selectedPromotion}
+        onClose={() => {
+          setPromotionModalVisible(false);
+          setSelectedPromotion(null);
+        }}
+        onClaim={handleClaimPromotion}
+        isClaimed={selectedPromotion ? isPromotionClaimed(selectedPromotion.id) : false}
+        isLoading={false}
+      />
     </View>
   );
 }
 
-// ─── Utility functions (ALL UNCHANGED) ───────────────────────────────────────
-function formatDate(d: Date | null | undefined) { try { if (!d || !(d instanceof Date) || isNaN(d.getTime())) return ''; return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${formatTime(d)}`; } catch { return ''; } }
-function formatTime(d: Date) { try { return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } }
-function sanitizeDurationText(v: string): string | undefined { try { if (!v) return undefined; let out = String(v); out = out.replace(/(\d+\.\d+)\s*(m|min)\b/g, (_match, num) => `${Math.round(Number(num))} min`); out = out.replace(/(\d+h)\s+(\d+\.\d+)\s*m\b/g, (_match, hours, num) => `${hours} ${Math.round(Number(num))}m`); out = out.replace(/\b(\d+)\s*m\b/g, '$1 min'); return out.replace(/\s+/g, ' ').trim(); } catch { return v; } }
-function formatDateOnly(d: Date) { try { const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const day = String(d.getDate()).padStart(2, '0'); return `${y}-${m}-${day}`; } catch { return ''; } }
-function capitalize(s: string) { if (!s) return s; return s.charAt(0).toUpperCase() + s.slice(1); }
-function toDateField(v: any): Date | null { try { if (!v) return null; if (v instanceof Date) return v; if (v instanceof Timestamp) return v.toDate(); if (typeof v === 'number') return new Date(v); if (typeof v === 'string') { const d = new Date(v); return isNaN(d.getTime()) ? null : d; } return null; } catch { return null; } }
-function parseCurrency(v: any): number | undefined { if (typeof v === 'number') return v; if (typeof v === 'string') { const num = Number(v.replace(/[^0-9.\-]/g, '')); return isNaN(num) ? undefined : num; } return undefined; }
-function deepClean<T = any>(obj: T): T { if (obj === null || obj === undefined) return obj as any; if (Array.isArray(obj)) return obj.map((v) => deepClean(v)) as any; if (obj instanceof Date || obj instanceof Timestamp) return obj as any; const isPlain = Object.prototype.toString.call(obj) === '[object Object]'; if (isPlain) { const out: any = {}; Object.entries(obj as any).forEach(([k, v]) => { if (v === undefined) out[k] = null; else if (Array.isArray(v)) out[k] = v.map((item) => (item === undefined ? null : deepClean(item))); else if (v instanceof Date || v instanceof Timestamp) out[k] = v; else if (Object.prototype.toString.call(v) === '[object Object]') out[k] = deepClean(v); else out[k] = v as any; }); return out; } return obj as any; }
-function mergeUpcoming(prev: UpcomingRideCard[], incoming: UpcomingRideCard[]) {
-  const map = new Map<string, UpcomingRideCard>();
-  const logicalKey = (it: UpcomingRideCard) => { if (it.type === 'confirmedRide') { const rrid = it.rideRequestId ?? (typeof it.id === 'string' ? it.id : undefined); return rrid ? `rr_${rrid}` : `cr_${it.id}`; } if (it.type === 'rideRequest') return `rr_${it.id}`; return `${it.type}_${it.id}`; };
-  const statusRank = (s: string) => { const key = (s || '').toLowerCase(); if (key === 'flagged') return 4; if (key === 'in-progress' || key === 'in_progress') return 3; if (key === 'confirmed' || key === 'accepted' || key === 'matched') return 2; return 1; };
-  const consider = (it: UpcomingRideCard) => { const k = logicalKey(it); const exist = map.get(k); if (!exist) { map.set(k, it); return; } const typeRank = (x: UpcomingRideCard) => (x.type === 'confirmedRide' ? 2 : (x.type === 'rideRequest' ? 1 : 0)); if (typeRank(it) > typeRank(exist)) { map.set(k, it); return; } if (typeRank(it) === typeRank(exist) && statusRank(it.status) >= statusRank(exist.status)) map.set(k, it); };
-  [...prev, ...incoming].forEach(consider);
-  return [...map.values()].sort((a, b) => { const at = a.dateTime ? a.dateTime.getTime() : 0; const bt = b.dateTime ? b.dateTime.getTime() : 0; return at - bt; });
-}
-function normalizeStatusForDisplay(s?: string) { const key = (s || '').toLowerCase(); if (key === 'pending' || key === 'open' || key === '') return 'posted'; return key; }
-function getFirstNameFromProfile(data: any | undefined): string | undefined { if (!data) return undefined; const direct = data.firstName || data.firstname || data.givenName || data.given_name; if (typeof direct === 'string' && direct.trim()) return direct.trim(); const name = data.name || data.fullName || data.full_name; if (typeof name === 'string' && name.trim()) return name.trim().split(' ')[0]; return undefined; }
-function getNameFromProfile(data: any | undefined): string | undefined { if (!data) return undefined; const full = data.name || data.fullName || data.full_name || data.displayName || data.driverName; if (typeof full === 'string' && full.trim()) return full.trim(); const first = data.firstName || data.firstname || data.personalInfo?.firstName; const last = data.lastName || data.lastname || data.personalInfo?.lastName; if (first && last) return `${first} ${last}`.trim(); if (first) return String(first); return undefined; }
-function sanitizeAvatar(v: any): string | undefined | null { if (!v || typeof v !== 'string') return undefined; const val = v.trim(); if (!val) return undefined; return val; }
-function isGenericName(v: any): boolean { if (typeof v !== 'string') return false; const s = v.trim().toLowerCase(); return s === 'driver' || s === 'owner' || s === 'user' || s === 'provider'; }
+const createStyles = (colors: AppColors, isDark: boolean) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.bg,
+    },
+    hdrSub: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      fontWeight: '600',
+      marginBottom: 2,
+    },
+    hdrTitle: {
+      color: colors.textPrimary,
+      fontSize: 25,
+      lineHeight: 29,
+      fontWeight: '800',
+      letterSpacing: 0,
+    },
+    hdrAccent: {
+      color: colors.primary,
+      fontWeight: '800',
+    },
+    notifBtn: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      shadowColor: BRAND.navyText,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: isDark ? 0.14 : 0.08,
+      shadowRadius: 12,
+      elevation: 2,
+    },
+    snapshotCard: {
+      flex: 1,
+      minHeight: 88,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+      padding: 14,
+      justifyContent: 'center',
+    },
+    snapshotLabel: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '600',
+      marginTop: 4,
+    },
+    nextRideCard: {
+      marginHorizontal: 18,
+      marginBottom: 18,
+      borderRadius: 22,
+      backgroundColor: BRAND.navyText,
+      padding: 18,
+      overflow: 'hidden',
+    },
+    quickAction: {
+      flex: 1,
+      minHeight: 54,
+      borderRadius: 15,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 5,
+    },
+    quickActionText: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      fontWeight: '800',
+    },
+    insightStrip: {
+      marginHorizontal: 18,
+      marginBottom: 20,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+      padding: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    insightIcon: {
+      width: 38,
+      height: 38,
+      borderRadius: 13,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primaryDim,
+      borderWidth: 1,
+      borderColor: colors.primaryBorder,
+    },
+    insightTitle: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: '800',
+      marginBottom: 2,
+    },
+    insightText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: '600',
+    },
+    sectionTitle: {
+      color: colors.textPrimary,
+      fontSize: 18,
+      fontWeight: '800',
+      letterSpacing: 0,
+    },
+    viewAll: {
+      color: colors.primary,
+      fontSize: 12,
+      fontWeight: '800',
+      textTransform: 'uppercase',
+      letterSpacing: 0.8,
+    },
+    rideCard: {
+      marginTop: 12,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+      overflow: 'hidden',
+      shadowColor: BRAND.navyText,
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: isDark ? 0.12 : 0.05,
+      shadowRadius: 12,
+      elevation: 2,
+    },
+    badgeGreen: {
+      backgroundColor: colors.greenDim,
+      borderColor: colors.greenBorder,
+      color: colors.green,
+    },
+    badgeRed: {
+      backgroundColor: 'rgba(239,68,68,0.13)',
+      borderColor: 'rgba(239,68,68,0.28)',
+      color: '#EF4444',
+    },
+    badgeOrange: {
+      backgroundColor: colors.primaryDim,
+      borderColor: colors.primaryBorder,
+      color: colors.primary,
+    },
+    badgeBlue: {
+      backgroundColor: colors.blueDim,
+      borderColor: colors.blueBorder,
+      color: colors.blue,
+    },
+    rideTime: {
+      color: colors.textTertiary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    routeFrom: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '800',
+      marginBottom: 10,
+    },
+    routeTo: {
+      color: colors.textSecondary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    ridePrice: {
+      color: colors.primary,
+      fontSize: 16,
+      fontWeight: '800',
+    },
+    rideMeta: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    iconBtn: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primaryDim,
+      borderWidth: 1,
+      borderColor: colors.primaryBorder,
+    },
+    declineBtn: {
+      flex: 1,
+      borderRadius: 15,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      minHeight: 42,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#FFFFFF',
+    },
+    declineBtnText: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '800',
+    },
+    emptyBox: {
+      marginTop: 14,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+      alignItems: 'center',
+      padding: 24,
+    },
+    emptyBoxCompact: {
+      marginTop: 12,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+      padding: 18,
+    },
+    emptyIconWrap: {
+      width: 58,
+      height: 58,
+      borderRadius: 19,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primaryDim,
+      borderWidth: 1,
+      borderColor: colors.primaryBorder,
+      marginBottom: 12,
+    },
+    emptyTitle: {
+      color: colors.textPrimary,
+      fontSize: 16,
+      fontWeight: '800',
+      marginBottom: 5,
+      textAlign: 'center',
+    },
+    emptyText: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+    liveBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: colors.greenDim,
+      borderWidth: 1,
+      borderColor: colors.greenBorder,
+      paddingHorizontal: 9,
+      paddingVertical: 5,
+      borderRadius: 12,
+    },
+    insightsCard: {
+      marginTop: 12,
+      borderRadius: 20,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+    },
+    insightRowBorder: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+    },
+    smallInsightIcon: {
+      width: 34,
+      height: 34,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primaryDim,
+    },
+    smallInsightText: {
+      flex: 1,
+      color: colors.textSecondary,
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: '700',
+    },
+    smallInsightLabel: {
+      color: colors.textTertiary,
+      fontSize: 10,
+      fontWeight: '800',
+    },
+    recentCard: {
+      marginTop: 12,
+      padding: 16,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+    },
+    completedPill: {
+      backgroundColor: colors.bgInput,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
+    completedText: {
+      color: colors.textTertiary,
+      fontSize: 11,
+      fontWeight: '800',
+    },
+    recentDate: {
+      color: colors.textTertiary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    recentRouteText: {
+      flex: 1,
+      color: colors.textSecondary,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    recentPrice: {
+      color: colors.primary,
+      fontSize: 14,
+      fontWeight: '800',
+    },
+    rateBtn: {
+      borderRadius: 13,
+      backgroundColor: colors.primaryDim,
+      borderWidth: 1,
+      borderColor: colors.primaryBorder,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+    },
+    rateBtnText: {
+      color: colors.primary,
+      fontSize: 12,
+      fontWeight: '800',
+    },
+    modalSheet: {
+      maxHeight: '90%',
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+      overflow: 'hidden',
+      paddingBottom: 40,
+      backgroundColor: isDark ? colors.bgCard : '#FFFFFF',
+    },
+    modalHandle: {
+      width: 42,
+      height: 4,
+      borderRadius: 2,
+      alignSelf: 'center',
+      marginTop: 12,
+      marginBottom: 4,
+      backgroundColor: colors.borderMid,
+    },
+    modalTitle: {
+      color: colors.textPrimary,
+      fontSize: 18,
+      fontWeight: '800',
+    },
+    modalCloseBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.bgInput,
+    },
+    modalSectionTitle: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      fontWeight: '800',
+      textTransform: 'uppercase',
+      letterSpacing: 0.8,
+      marginBottom: 10,
+    },
+    driverRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: colors.bgInput,
+      padding: 12,
+    },
+    driverAvatarPlaceholder: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primaryDim,
+    },
+    driverName: {
+      color: colors.textPrimary,
+      fontSize: 15,
+      fontWeight: '800',
+    },
+    driverRating: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '700',
+      marginLeft: 4,
+    },
+    driverVehicle: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '600',
+      marginTop: 2,
+    },
+    modalRouteCard: {
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: colors.bgInput,
+      padding: 14,
+    },
+    modalRouteText: {
+      flex: 1,
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    infoCell: {
+      flex: 1,
+      minWidth: '47%',
+      borderRadius: 15,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: colors.bgInput,
+      padding: 13,
+    },
+    infoLabel: {
+      color: colors.textTertiary,
+      fontSize: 10,
+      fontWeight: '800',
+      textTransform: 'uppercase',
+      letterSpacing: 0.7,
+      marginBottom: 5,
+    },
+    infoValue: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '800',
+    },
+    modalActionBtn: {
+      flex: 1,
+      minHeight: 42,
+      borderRadius: 15,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: colors.bgInput,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+      gap: 7,
+    },
+    modalActionText: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      fontWeight: '800',
+    },
+  });
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-const s = StyleSheet.create({
-  root: { flex: 1 },
-  safe: { flex: 1 },
-  scroll: { flex: 1 },
-  scrollContent: { paddingBottom: 40 },
-
-  // Hero
-  hero: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16 },
-  topBar: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  avatarWrap: { width: 46, height: 46, borderRadius: 23, overflow: 'hidden' },
-  avatarImg: { width: 46, height: 46, borderRadius: 23 },
-  avatarGradient: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
-  avatarInitial: { fontSize: 20, fontWeight: '800', color: 'white' },
-  greeting: { fontSize: 14, fontWeight: '500' },
-  heroTagline: { fontSize: 26, fontWeight: '800', letterSpacing: -0.8, lineHeight: 32 },
-  heroTaglineAccent: { fontSize: 26, fontWeight: '800', letterSpacing: -0.8, color: COLORS.orange },
-  notifBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  notifBadge: { position: 'absolute', top: -2, right: -2, backgroundColor: '#EF4444', minWidth: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
-  notifBadgeText: { color: 'white', fontSize: 10, fontWeight: '700' },
-
-  // Search
-  searchBar: { borderRadius: 18, borderWidth: 1.5, borderColor: 'rgba(244,98,31,0.25)', overflow: 'hidden', marginTop: 8 },
-  searchBarInner: { flexDirection: 'row', alignItems: 'center', padding: 16 },
-  searchTitle: { fontSize: 16, fontWeight: '700' },
-  searchSub: { fontSize: 13, fontWeight: '400', marginTop: 1 },
-  searchArrow: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.orange, alignItems: 'center', justifyContent: 'center' },
-
-  // Stats
-  statsRow: { flexDirection: 'row', gap: 12, paddingHorizontal: 20, marginBottom: 24 },
-  statCard: { flex: 1, borderRadius: 18, borderWidth: 1.5, overflow: 'hidden', padding: 14, alignItems: 'center' },
-  statIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  statValue: { fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
-  statLabel: { fontSize: 11, fontWeight: '500', textAlign: 'center', marginTop: 2, lineHeight: 15 },
-
-  // Section
-  section: { paddingHorizontal: 20, marginBottom: 24 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  sectionTitle: { fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
-  viewAll: { fontSize: 14, color: COLORS.orange, fontWeight: '600' },
-
-  // Quick Actions
-  quickActions: { flexDirection: 'row', gap: 10 },
-  quickCard: { flex: 1, borderRadius: 16, borderWidth: 1.5, overflow: 'hidden', padding: 14 },
-  quickIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  quickLabel: { fontSize: 13, fontWeight: '700', marginBottom: 2 },
-  quickSub: { fontSize: 11, fontWeight: '400', lineHeight: 15 },
-
-  // Loading / Empty
-  loadingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 24, gap: 8 },
-  loadingText: { fontSize: 14, fontWeight: '400' },
-  emptyBox: { alignItems: 'center', paddingVertical: 32, gap: 8 },
-  emptyText: { fontSize: 14, fontWeight: '400', textAlign: 'center' },
-
-  // Dots
-  dotsRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 12, gap: 6 },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(150,170,190,0.3)' },
-  dotActive: { backgroundColor: COLORS.orange, width: 20, borderRadius: 3 },
-
-  // Ride Card
-  rideCard: { borderRadius: 20, borderWidth: 1.5, overflow: 'hidden', marginBottom: 14 },
-  rideCardInner: { padding: 18 },
-  rideCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  rideDateTime: { fontSize: 12, fontWeight: '500' },
-
-  // Badge
-  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 50 },
-  badgeText: { fontSize: 12, fontWeight: '600' },
-  badgeGreen: { backgroundColor: 'rgba(16,185,129,0.12)' },
-  badgeTextGreen: { color: '#10B981' },
-  badgeAmber: { backgroundColor: 'rgba(245,158,11,0.12)' },
-  badgeTextAmber: { color: '#F59E0B' },
-  badgeBlue: { backgroundColor: 'rgba(59,130,246,0.12)' },
-  badgeTextBlue: { color: '#3B82F6' },
-  badgeGray: { backgroundColor: 'rgba(150,170,190,0.12)' },
-  badgeTextGray: { color: '#7A8FA8' },
-  badgeFlagged: { backgroundColor: 'rgba(239,68,68,0.12)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.25)' },
-  badgeTextRed: { color: '#EF4444' },
-
-  // Route
-  routeWrap: { marginBottom: 14 },
-  routeRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-  routeLine: { width: 2, height: 12, backgroundColor: 'rgba(150,170,190,0.3)', marginLeft: 3, marginBottom: 6 },
-  orangeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.orange, marginRight: 12, flexShrink: 0 },
-  grayDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#94A3B8', marginRight: 12, flexShrink: 0 },
-  routeFrom: { fontSize: 14, fontWeight: '600', flex: 1 },
-  routeTo: { fontSize: 14, fontWeight: '400', flex: 1 },
-
-  // Ride Footer
-  rideCardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  ridePrice: { fontSize: 15, fontWeight: '700', color: COLORS.orange },
-  rideFooterRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  rideMeta: { fontSize: 12, fontWeight: '400' },
-  detailsBtn: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  detailsBtnText: { fontSize: 13, color: COLORS.orange, fontWeight: '600' },
-
-  // CTA
-  ctaWrap: { marginTop: 14, flexDirection: 'row', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' },
-  ctaRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  iconActionBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(150,170,190,0.12)' },
-  waitingText: { fontSize: 12, color: '#7A8FA8', textAlign: 'right', marginTop: 10 },
-  flaggedBox: { backgroundColor: 'rgba(239,68,68,0.08)', borderRadius: 10, padding: 12, marginTop: 10, borderWidth: 1, borderColor: 'rgba(239,68,68,0.2)' },
-  flaggedTitle: { fontSize: 13, color: '#EF4444', fontWeight: '700', marginBottom: 4 },
-  flaggedText: { fontSize: 12, color: '#7F1D1D', lineHeight: 18 },
-
-  // Rate
-  rateBtn: { backgroundColor: COLORS.navy, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 50 },
-  rateBtnText: { color: 'white', fontSize: 12, fontWeight: '600' },
-
-  // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  modalSheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: '90%', overflow: 'hidden', paddingBottom: 40 },
-  modalHandle: { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 16 },
-  modalTitle: { fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
-  modalCloseBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  modalBody: { paddingHorizontal: 24 },
-  modalSection: { marginBottom: 20 },
-  modalSectionTitle: { fontSize: 13, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 10 },
-
-  // Driver row
-  driverRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, padding: 14 },
-  driverAvatar: { width: 48, height: 48, borderRadius: 24 },
-  driverAvatarPlaceholder: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-  driverName: { fontSize: 16, fontWeight: '700' },
-  driverRating: { fontSize: 13, fontWeight: '500' },
-  driverVehicle: { fontSize: 13, marginTop: 2 },
-  callBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-
-  // Route card in modal
-  routeCard: { borderRadius: 14, borderWidth: 1, padding: 16 },
-
-  // Info grid
-  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  infoCell: { flex: 1, minWidth: '44%', borderRadius: 12, borderWidth: 1, padding: 12, alignItems: 'center' },
-  infoCellLabel: { fontSize: 11, fontWeight: '600', letterSpacing: 0.3, textTransform: 'uppercase', marginBottom: 4 },
-  infoCellValue: { fontSize: 15, fontWeight: '700' },
+const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 100,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  avatarRing: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    borderWidth: 2,
+    padding: 2,
+    marginRight: 12,
+  },
+  avatar: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInitial: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '900',
+  },
+  headerTextWrap: {
+    flex: 1,
+  },
+  notifBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -1,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  notifBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  snapshotRow: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 18,
+    marginBottom: 16,
+  },
+  snapshotValue: {
+    fontSize: 27,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  nextTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  nextEyebrow: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 2,
+  },
+  nextPrice: {
+    color: BRAND.orange,
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  nextTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  nextSub: {
+    color: 'rgba(255,255,255,0.65)',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 18,
+  },
+  nextActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  nextGhostBtn: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.26)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nextGhostText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  nextPrimaryBtn: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: BRAND.orange,
+  },
+  nextPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  quickActions: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 18,
+    marginBottom: 18,
+  },
+  quickActionPrimary: {
+    flex: 1.25,
+    minHeight: 54,
+    borderRadius: 15,
+    backgroundColor: BRAND.orange,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    shadowColor: BRAND.orange,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.22,
+    shadowRadius: 15,
+    elevation: 3,
+  },
+  quickActionPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  insightTextWrap: {
+    flex: 1,
+  },
+  section: {
+    marginBottom: 24,
+    paddingHorizontal: 18,
+  },
+  sectionHdrRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionLoader: {
+    marginTop: 16,
+  },
+  promotionShell: {
+    width: 318,
+    marginTop: 12,
+    marginRight: 12,
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 10,
+  },
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: 'rgba(148,163,184,0.35)',
+  },
+  dotActive: {
+    width: 22,
+    backgroundColor: BRAND.orange,
+  },
+  rideCardInner: {
+    padding: 16,
+  },
+  rideTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  statusBadge: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  statusBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  routeBlock: {
+    flexDirection: 'row',
+    marginBottom: 13,
+  },
+  routeLineWrap: {
+    width: 14,
+    alignItems: 'center',
+    paddingVertical: 3,
+    marginRight: 10,
+  },
+  routeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  routeLine: {
+    width: 2,
+    flex: 1,
+    marginVertical: 4,
+  },
+  routeTextWrap: {
+    flex: 1,
+  },
+  rideFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  rideFooterActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  detailsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingVertical: 6,
+  },
+  detailsBtnText: {
+    color: BRAND.orange,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  offerActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(148,163,184,0.35)',
+  },
+  acceptBtn: {
+    flex: 1,
+    borderRadius: 15,
+    overflow: 'hidden',
+  },
+  acceptBtnGrad: {
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  acceptBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  liveText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  insightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    padding: 14,
+  },
+  recentTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 13,
+  },
+  recentRoute: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 9,
+  },
+  routeDotSmall: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+  },
+  recentFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  recentActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 22,
+    paddingVertical: 16,
+  },
+  modalBody: {
+    paddingHorizontal: 22,
+  },
+  modalSection: {
+    marginBottom: 20,
+  },
+  driverAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  driverInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  driverRatingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 3,
+  },
+  callBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalRouteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  modalRouteLine: {
+    width: 2,
+    height: 18,
+    marginLeft: 3,
+    marginVertical: 4,
+  },
+  infoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 9,
+    marginBottom: 24,
+  },
 });

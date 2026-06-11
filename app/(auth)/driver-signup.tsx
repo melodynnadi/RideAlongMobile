@@ -8,12 +8,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams} from 'expo-router';
+import { useAuthStore } from '@/stores/authStore';
 import * as ImagePicker from 'expo-image-picker';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { createUserWithEmailAndPassword, updateProfile, sendEmailVerification } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { firebaseAuth, firestore, storage } from '@/constants/services';
+import { firestore, storage } from '@/constants/services';
 import { UniversitySearch } from '@/components/ui/UniversitySearch';
 
 const { width, height } = Dimensions.get('window');
@@ -268,6 +268,10 @@ export default function DriverSignupScreen() {
   const fadeCard = useRef(new Animated.Value(0)).current;
   const slideCard= useRef(new Animated.Value(40)).current;
 
+  const params = useLocalSearchParams<{ role?: string }>();
+  const signupRole = params.role === 'both' ? 'both' : 'driver';
+  const signUp = useAuthStore((state) => state.signUp);
+
   useEffect(() => {
     fadeTop.setValue(0); slideTop.setValue(30);
     fadeCard.setValue(0); slideCard.setValue(40);
@@ -367,19 +371,24 @@ export default function DriverSignupScreen() {
     }
     try {
       setLoading(true);
-      const cred = await createUserWithEmailAndPassword(firebaseAuth, email.trim().toLowerCase(), password);
-      const { user } = cred;
-      await updateProfile(user, { displayName: `${firstName} ${lastName}` });
-      await sendEmailVerification(user);
+      const uid = await signUp({
+        email: email.trim().toLowerCase(),
+        password,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        role: signupRole,
+        university: universityData?.name || university,
+        phone: phone.trim(),
+      });
 
       // Upload files
       const [licenseFrontUrl, licenseBackUrl, insDocUrl] = await Promise.all([
-        licenseFront ? uploadFile(licenseFront, `drivers/${user.uid}/license_front`) : Promise.resolve(''),
-        licenseBack  ? uploadFile(licenseBack,  `drivers/${user.uid}/license_back`)  : Promise.resolve(''),
-        insDoc       ? uploadFile(insDoc,        `drivers/${user.uid}/insurance`)     : Promise.resolve(''),
+       licenseFront ? uploadFile(licenseFront, `drivers/${uid}/license_front`) : Promise.resolve(''),
+        licenseBack  ? uploadFile(licenseBack,  `drivers/${uid}/license_back`)  : Promise.resolve(''),
+        insDoc       ? uploadFile(insDoc,        `drivers/${uid}/insurance`)     : Promise.resolve(''),
       ]);
 
-      await setDoc(doc(firestore, 'drivers', user.uid), {
+      await setDoc(doc(firestore, 'drivers', uid), {
         firstName: firstName.trim(),
         lastName:  lastName.trim(),
         email:     email.trim().toLowerCase(),
@@ -394,7 +403,8 @@ export default function DriverSignupScreen() {
         isVerified: false,
         emailVerified: false,
         createdAt: serverTimestamp(),
-      });
+        updatedAt: serverTimestamp(),
+        }, { merge: true });
 
       Alert.alert(
         '✅ Application Submitted!',

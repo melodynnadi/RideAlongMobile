@@ -1,50 +1,116 @@
+// RideAlongDriverMobile - Driver Profile Screen
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Image, ActivityIndicator, Alert } from 'react-native';
-// Image picking/upload handled by src/services/profilePhoto
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  Image,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  StatusBar,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Settings, Camera, Star, Edit2, User as UserIcon, Mail, Phone, Calendar, GraduationCap, BookOpen, Car, Palette, Hash, Users } from 'lucide-react-native';
-import { Card } from '@/components/ui/Card';
-import { useTheme } from '@/hooks/useTheme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
+import { Ionicons } from '@expo/vector-icons';
+import {
+  Settings, Camera, Star, Edit2,
+  User as UserIcon, Mail, Phone, Calendar,
+  GraduationCap, BookOpen, Car, Palette, Hash, Users,
+} from 'lucide-react-native';
 import { router } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, getDoc, getDocs, getCountFromServer, limit, onSnapshot, query, updateDoc, where, setDoc, documentId } from 'firebase/firestore';
+import {
+  collection, doc, getDoc, getCountFromServer,
+  query, updateDoc, where, setDoc,
+} from 'firebase/firestore';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
-import { computeFilteredAverageRating } from '@/src/services/ratings';
-import { pickAndUploadProfilePhoto, removeProfilePhoto } from '@/src/services/profilePhoto';
-import { logActivity } from '@/src/services/activity';
+import { pickAndUploadProfilePhoto } from '@/src/services/profilePhoto';
 import { useVerificationStore } from '@/stores/verificationStore';
+import { useAuthStore } from '@/stores/authStore';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import { iconPalette, SemanticColor, AppColors, BRAND } from '@/constants/theme';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types (unchanged)
+// ─────────────────────────────────────────────────────────────────────────────
 
 type DocumentActivityState = {
   uploadedToken?: string;
   approvedToken?: string;
   approved?: boolean;
 };
+type GradientStops = readonly [string, string, ...string[]];
+
+const asGradientStops = (stops: string[]): GradientStops => {
+  return stops as unknown as GradientStops;
+};
+
+type InfoRow =
+  | {
+      icon: any;
+      semantic: SemanticColor;
+      label: string;
+      value: string;
+    }
+  | null;
+// ─────────────────────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function ProfileScreen() {
-  const theme = useTheme();
+  const { colors, isDark } = useAppTheme();
+  const themed = createStyles(colors, isDark);
   const { isVerified, verificationStatus } = useVerificationStore();
-  const [user, setUser] = useState<any>(null);
-  const [profile, setProfile] = useState<any>(null);
-  const [driver, setDriver] = useState<any>(null);
-  const [headerName, setHeaderName] = useState<string>('');
+  const {
+  role,
+  activeRole,
+  switchRole,
+  becomeRider,
+} = useAuthStore();
+
+const [roleActionLoading, setRoleActionLoading] = useState(false);
+  const [user, setUser]                       = useState<any>(null);
+  const [profile, setProfile]                 = useState<any>(null);
+  const [driver, setDriver]                   = useState<any>(null);
+  const [headerName, setHeaderName]           = useState<string>('');
   const [driverAvatarUrl, setDriverAvatarUrl] = useState<string | null>(null);
-  const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({ totalRides: 0, totalEarnings: 0 });
-  const [avgRating, setAvgRating] = useState<number | null>(null);
-  const [vehicleInfo, setVehicleInfo] = useState<any>(null);
+  const [userPhotoUrl, setUserPhotoUrl]       = useState<string | null>(null);
+  const [loading, setLoading]                 = useState(true);
+  const [stats, setStats]                     = useState({ totalRides: 0, totalEarnings: 0 });
+  const [avgRating, setAvgRating]             = useState<number | null>(null);
+  const [vehicleInfo, setVehicleInfo]         = useState<any>(null);
   const documentActivityRef = useRef<Record<string, DocumentActivityState>>({});
 
+  // ── Animations ─────────────────────────────────────────────────────────────
+  const glowAnim   = useRef(new Animated.Value(0.6)).current;
+  const avatarGlow = useRef(new Animated.Value(0.4)).current;
+
+  useEffect(() => {
+    const g1 = Animated.loop(Animated.sequence([
+      Animated.timing(glowAnim,   { toValue: 1,   duration: 2400, useNativeDriver: true }),
+      Animated.timing(glowAnim,   { toValue: 0.4, duration: 2400, useNativeDriver: true }),
+    ]));
+    const g2 = Animated.loop(Animated.sequence([
+      Animated.timing(avatarGlow, { toValue: 1,   duration: 1800, useNativeDriver: true }),
+      Animated.timing(avatarGlow, { toValue: 0.3, duration: 1800, useNativeDriver: true }),
+    ]));
+    g1.start(); g2.start();
+    return () => { g1.stop(); g2.stop(); };
+  }, []);
+
+  // ── Auth + data fetching (unchanged) ──────────────────────────────────────
   useEffect(() => {
     const unsub = onAuthStateChanged(firebaseAuth, async (u) => {
       setUser(u);
       if (u) {
-        // Fast initial render from auth
         setUserPhotoUrl(u.photoURL || null);
         setHeaderName(u.displayName || u.email?.split('@')[0] || 'Driver');
-        setLoading(false); // Render immediately
+        setLoading(false);
 
-        // Fetch all data in parallel (non-blocking)
         const fetchAllData = async () => {
           try {
             const [userSnap, driverSnap, ridesCount] = await Promise.all([
@@ -54,19 +120,15 @@ export default function ProfileScreen() {
                 collection(firestore, 'confirmedRides'),
                 where('driverId', '==', u.uid),
                 where('status', '==', 'COMPLETED')
-              ))
+              )),
             ]);
 
-            // Process user data
             const userData = userSnap.exists() ? (userSnap.data() as any) : null;
             setProfile(userData);
 
-            // Hydrate verification store from Firestore as a fallback
             if (userData) {
               const vs = useVerificationStore.getState();
-              if (typeof userData.isVerified === 'boolean') {
-                vs.setIsVerified(userData.isVerified);
-              }
+              if (typeof userData.isVerified === 'boolean') vs.setIsVerified(userData.isVerified);
               vs.setVerificationStatus(userData.verificationStatus || null);
               const deadlineField = userData.verificationDeadline;
               if (deadlineField) {
@@ -80,44 +142,31 @@ export default function ProfileScreen() {
             }
             setUserPhotoUrl((userData?.photoURL as string) || (userData?.avatarUrl as string) || u.photoURL || null);
 
-            // Process driver data
             const driverData = driverSnap.exists() ? (driverSnap.data() as any) : null;
             setDriver(driverData);
             if (driverData) {
               const pi = driverData?.personalInfo || driverData?.profile || {};
               const fn = String(pi?.firstName || pi?.firstname || pi?.first_name || pi?.first || '');
-              const ln = String(pi?.lastName || pi?.lastname || pi?.last_name || pi?.last || '');
+              const ln = String(pi?.lastName  || pi?.lastname  || pi?.last_name  || pi?.last  || '');
               const combined = `${fn.trim()} ${ln.trim()}`.trim();
               const drvAvatar = driverData?.avatarUrl || pi?.avatarUrl || null;
               setDriverAvatarUrl(typeof drvAvatar === 'string' && drvAvatar ? drvAvatar : null);
               const fallback = (userData?.fullName || userData?.fullname || userData?.name || u.displayName || (u.email ? u.email.split('@')[0] : 'Driver')) as string;
               setHeaderName((driverData?.fullName && String(driverData.fullName).trim()) || combined || fallback);
-              
-              // Vehicle info
+
               let vehicleData = driverData?.vehicleInfo;
               if ((!vehicleData || Object.keys(vehicleData).length === 0) && driverData?.applicationId) {
                 try {
-                  const appRef = doc(firestore, 'driverApplications', driverData.applicationId);
-                  const appSnap = await getDoc(appRef);
-                  if (appSnap.exists()) {
-                    vehicleData = appSnap.data()?.vehicleInfo;
-                  }
-                } catch (err) {
-                  console.warn('Could not fetch vehicle info:', err);
-                }
+                  const appSnap = await getDoc(doc(firestore, 'driverApplications', driverData.applicationId));
+                  if (appSnap.exists()) vehicleData = appSnap.data()?.vehicleInfo;
+                } catch (err) { console.warn('Could not fetch vehicle info:', err); }
               }
               setVehicleInfo(vehicleData || null);
-              
-              // Use cached rating from driver doc if available
-              if (typeof driverData?.rating === 'number') {
-                setAvgRating(driverData.rating);
-              }
+              if (typeof driverData?.rating === 'number') setAvgRating(driverData.rating);
             }
 
-            // Process rides count
             setStats((prev) => ({ ...prev, totalRides: ridesCount.data().count }));
 
-            // Fetch earnings (lowest priority - can be slow)
             try {
               const token = await u.getIdToken();
               const apiUrl = getApiBaseUrl();
@@ -128,35 +177,31 @@ export default function ProfileScreen() {
                 const data = await res.json();
                 setStats((prev) => ({ ...prev, totalEarnings: data.lifetime || 0 }));
               }
-            } catch (err) {
-              console.warn('[Profile] Failed to fetch earnings:', err);
-            }
-          } catch (err) {
-            console.error('[Profile] Data fetch error:', err);
-          }
+            } catch (err) { console.warn('[Profile] Failed to fetch earnings:', err); }
+          } catch (err) { console.error('[Profile] Data fetch error:', err); }
         };
 
         fetchAllData();
       } else {
-        setProfile(null);
-        setDriver(null);
-        setHeaderName('');
-        setAvgRating(null);
-        setDriverAvatarUrl(null);
-        setLoading(false);
+        setProfile(null); setDriver(null); setHeaderName('');
+        setAvgRating(null); setDriverAvatarUrl(null); setLoading(false);
       }
     });
     return unsub;
   }, []);
 
+  // ── Avatar upload (unchanged) ──────────────────────────────────────────────
   const onChangeAvatar = async () => {
     if (!user?.uid) return;
     try {
       const res = await pickAndUploadProfilePhoto();
       if (res.canceled) return;
       const { photoURL } = res;
-      // Mirror to drivers collection avatarUrl for compatibility
-      try { await updateDoc(doc(firestore, 'drivers', user.uid), { avatarUrl: photoURL }); } catch { await setDoc(doc(firestore, 'drivers', user.uid), { avatarUrl: photoURL }, { merge: true } as any); }
+      try {
+        await updateDoc(doc(firestore, 'drivers', user.uid), { avatarUrl: photoURL });
+      } catch {
+        await setDoc(doc(firestore, 'drivers', user.uid), { avatarUrl: photoURL }, { merge: true } as any);
+      }
       setDriverAvatarUrl(photoURL);
       setUserPhotoUrl(photoURL);
       setProfile((prev: any) => ({ ...(prev || {}), avatarUrl: photoURL, photoURL }));
@@ -165,641 +210,629 @@ export default function ProfileScreen() {
     }
   };
 
+  // ── Derived display values ─────────────────────────────────────────────────
+  const displayName = headerName
+    || profile?.fullName || profile?.fullname || profile?.name
+    || user?.displayName || (user?.email ? user.email.split('@')[0] : 'Driver');
+
+  const displayAvatar = driverAvatarUrl || userPhotoUrl || profile?.avatarUrl;
+  const canSwitchToRider = activeRole === 'driver' && role !== 'rider';
+
+  const handleSwitchToRider = async () => {
+    if (!canSwitchToRider || roleActionLoading) return;
+
+    setRoleActionLoading(true);
+
+    try {
+      if (role === 'both') {
+        await switchRole('rider');
+      } else {
+        await becomeRider({
+          firstName:
+            driver?.firstName ||
+            driver?.personalInfo?.firstName ||
+            profile?.firstName ||
+            '',
+          lastName:
+            driver?.lastName ||
+            driver?.personalInfo?.lastName ||
+            profile?.lastName ||
+            '',
+          university:
+            driver?.university ||
+            driver?.personalInfo?.university ||
+            profile?.university ||
+            '',
+          phone:
+            driver?.phone ||
+            driver?.personalInfo?.phone ||
+            profile?.phone ||
+            '',
+        });
+      }
+
+      router.replace('/(rider)' as any);
+    } catch (error: any) {
+      Alert.alert(
+        'Could not switch',
+        error?.message || 'Please try again.'
+      );
+    } finally {
+      setRoleActionLoading(false);
+    }
+  };
+
+  const ratingDisplay = typeof avgRating === 'number'
+    ? avgRating.toFixed(1)
+    : typeof (driver?.rating ?? profile?.rating) === 'number'
+      ? (driver?.rating ?? profile?.rating).toFixed(1)
+      : '—';
+
+  // ── Info rows ──────────────────────────────────────────────────────────────
+  const personalInfoRows: InfoRow[] = [
+    {
+      icon: UserIcon,
+      semantic: 'blue',
+      label: 'Full Name',
+      value:
+        driver?.fullName ||
+        [driver?.personalInfo?.firstName, driver?.personalInfo?.lastName].filter(Boolean).join(' ') ||
+        profile?.fullName ||
+        profile?.fullname ||
+        profile?.name ||
+        user?.displayName ||
+        'Not provided',
+    },
+    {
+      icon: Mail,
+      semantic: 'green',
+      label: 'Email',
+      value: driver?.email || driver?.personalInfo?.email || user?.email || 'Not provided',
+    },
+    {
+      icon: Phone,
+      semantic: 'amber',
+      label: 'Phone Number',
+      value:
+        driver?.personalInfo?.phone ||
+        profile?.phone ||
+        profile?.phoneNumber ||
+        profile?.phonenumber ||
+        'Not provided',
+    },
+    {
+      icon: Calendar,
+      semantic: 'muted',
+      label: 'Date of Birth',
+      value:
+        driver?.personalInfo?.dateOfBirth ||
+        driver?.personalInfo?.dob ||
+        profile?.dateOfBirth ||
+        profile?.dob ||
+        'Not provided',
+    },
+    null,
+    {
+      icon: GraduationCap,
+      semantic: 'orange',
+      label: 'University',
+      value: driver?.personalInfo?.university || profile?.university || 'Not provided',
+    },
+    {
+      icon: BookOpen,
+      semantic: 'purple',
+      label: 'Major',
+      value: driver?.personalInfo?.major || profile?.major || 'Not provided',
+    },
+  ];
+
+  const vehicleRows: InfoRow[] = [
+    {
+      icon: Car,
+      semantic: 'orange',
+      label: 'Vehicle',
+      value:
+        vehicleInfo?.year && vehicleInfo?.make && vehicleInfo?.model
+          ? `${vehicleInfo.year} ${vehicleInfo.make} ${vehicleInfo.model}`
+          : 'Not specified',
+    },
+    {
+      icon: Palette,
+      semantic: 'orange',
+      label: 'Color',
+      value: vehicleInfo?.color || vehicleInfo?.colour || 'Not specified',
+    },
+    null,
+    {
+      icon: Hash,
+      semantic: 'muted',
+      label: 'License Plate',
+      value: vehicleInfo?.licensePlate || vehicleInfo?.license || 'Not specified',
+    },
+    {
+      icon: Users,
+      semantic: 'purple',
+      label: 'Passenger Seats',
+      value: vehicleInfo?.seats ? String(vehicleInfo.seats) : 'Not specified',
+    },
+  ];
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────────────
+
+  if (loading) {
+    return (
+      <View style={themed.root}>
+        <StatusBar barStyle={colors.statusBar} />
+        <LinearGradient
+          colors={asGradientStops(colors.gradientBg)}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <SafeAreaView style={themed.loadingWrap} edges={['top']}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={themed.loadingText}>Loading profile...</Text>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: '#F8FAFC' }]} edges={['top', 'left', 'right']}>
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.colors.primary} />
-          <Text style={styles.loadingText}>Loading profile...</Text>
-        </View>
-      ) : (
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Profile Header */}
-          <View style={[styles.profileCard, { backgroundColor: theme.colors.primary }]}>
-          <TouchableOpacity 
-            style={styles.settingsButton}
-            onPress={() => router.push('/settings')}
-          >
-            <Settings size={24} color="white" />
-          </TouchableOpacity>
-          
-          <View style={styles.profileInfo}>
-            <View style={styles.avatarContainer}>
-              { (driverAvatarUrl || userPhotoUrl || profile?.avatarUrl) ? (
-                <Image source={{ uri: (driverAvatarUrl || userPhotoUrl || profile?.avatarUrl) as string }} style={styles.avatarImg} />
+    <View style={themed.root}>
+      <StatusBar barStyle={colors.statusBar} />
+      <LinearGradient
+        colors={asGradientStops(colors.gradientBg)}
+        style={StyleSheet.absoluteFillObject}
+      />
+
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
+
+          {/* ══ PROFILE HERO ══ */}
+          <View style={themed.hero}>
+            <LinearGradient
+              colors={asGradientStops(colors.gradientHero)}
+              style={StyleSheet.absoluteFillObject}
+            />
+            {/* Decorative glow */}
+            <Animated.View style={[themed.heroGlow, { opacity: glowAnim }]} />
+
+            {/* Settings button */}
+            <TouchableOpacity style={themed.settingsBtn} onPress={() => router.push('/settings')}>
+              {isDark && <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />}
+              <Settings size={20} color={colors.textPrimary} />
+            </TouchableOpacity>
+
+            {/* Avatar */}
+            <View style={styles.avatarWrap}>
+              <Animated.View style={[styles.avatarRing, { opacity: avatarGlow }]} />
+              {displayAvatar ? (
+                <Image source={{ uri: displayAvatar }} style={styles.avatarImg} />
               ) : (
-                <View style={styles.avatar}>
-                  <UserIcon size={32} color="white" />
-                </View>
+                <LinearGradient colors={[BRAND.orange, BRAND.orangeDeep]} style={styles.avatarImg}>
+                  <UserIcon size={34} color="white" />
+                </LinearGradient>
               )}
-              <TouchableOpacity style={styles.cameraButton} onPress={onChangeAvatar} accessibilityRole="button" accessibilityLabel="Change profile picture">
-                <Camera size={16} color={theme.colors.primary} />
+              <TouchableOpacity style={styles.cameraBtn} onPress={onChangeAvatar}>
+                <LinearGradient colors={[BRAND.orange, BRAND.orangeDeep]} style={styles.cameraBtnGrad}>
+                  <Camera size={14} color="white" />
+                </LinearGradient>
               </TouchableOpacity>
             </View>
-            
-            <Text style={styles.profileName}>
-              {headerName || profile?.fullName || profile?.fullname || profile?.name || user?.displayName || (user?.email ? user.email.split('@')[0] : 'Driver')}
-            </Text>
-            <Text style={styles.profileEmail}>{user?.email ?? 'no-email'}</Text>
-            
-            <View style={styles.verificationContainer}>
-              {isVerified || verificationStatus==='approved'? (
-                <View style={styles.verifiedBadge}> 
-                  <Text style={styles.verifiedText}>✓ Verified Student</Text>
+
+            {/* Name + email */}
+            <Text style={themed.heroName}>{displayName}</Text>
+            <Text style={themed.heroEmail}>{user?.email ?? ''}</Text>
+
+            {/* Badges row */}
+            <View style={styles.heroBadgesRow}>
+              {/* Verification badge */}
+              {(isVerified || verificationStatus === 'approved') ? (
+                <View style={[styles.heroBadge, { backgroundColor: 'rgba(16,185,129,0.2)', borderColor: 'rgba(16,185,129,0.4)' }]}>
+                  <Ionicons name="checkmark-circle" size={13} color="#10B981" />
+                  <Text style={[styles.heroBadgeText, { color: '#10B981' }]}>Verified Student</Text>
                 </View>
-              ) : (verificationStatus === 'pending' || verificationStatus === 'manual-review') ? (
-                <View style={[styles.verifiedBadge, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
-                  <Text style={[styles.verifiedText, { opacity: 0.75 }]}>Pending Verification</Text>
+              ) : verificationStatus === 'pending' || verificationStatus === 'manual-review' ? (
+                <View style={[styles.heroBadge, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.35)' }]}>
+                  <Ionicons name="time-outline" size={13} color="#F59E0B" />
+                  <Text style={[styles.heroBadgeText, { color: '#F59E0B' }]}>Pending Verification</Text>
                 </View>
               ) : verificationStatus === 'rejected' ? (
-                <View style={[styles.verifiedBadge, { backgroundColor: 'rgba(255, 255, 255, 0.2)' }]}>
-                  <Text style={styles.verifiedText}>❌ Not Verified</Text>
+                <View style={[styles.heroBadge, { backgroundColor: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.35)' }]}>
+                  <Ionicons name="close-circle" size={13} color="#EF4444" />
+                  <Text style={[styles.heroBadgeText, { color: '#EF4444' }]}>Not Verified</Text>
                 </View>
               ) : null}
-              <View style={styles.ratingContainer}>
-                <Star size={16} color="#F59E0B" fill="#F59E0B" />
-                <Text style={styles.ratingText}>
-                  {typeof avgRating === 'number'
-                    ? avgRating.toFixed(1)
-                    : (typeof (driver?.rating ?? profile?.rating) === 'number' ? (driver?.rating ?? profile?.rating).toFixed(1) : '—')}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </View>
 
-        {/* Stats */}
-        <View style={styles.statsContainer}>
-          <Card style={styles.statCard}>
-            <Text style={[styles.statNumber, { color: theme.colors.secondary }]}>{stats.totalRides}</Text>
-            <Text style={styles.statLabel}>Total Rides</Text>
-          </Card>
-          <Card style={styles.statCard}>
-            <Text style={[styles.statNumber, { color: '#10B981' }]}>${stats.totalEarnings.toFixed(1)}</Text>
-            <Text style={styles.statLabel}>Total Earned</Text>
-          </Card>
-        </View>
-
-        {/* Personal Information */}
-        <Card style={styles.infoCard}>
-          <View style={styles.infoHeader}>
-            <Text style={[styles.infoTitle, { color: theme.colors.secondary }]}>
-              Personal Information
-            </Text>
-            <TouchableOpacity 
-              style={styles.editButton} 
-              onPress={() => router.push('/settings/account-settings')}
-            >
-              <Edit2 size={16} color={theme.colors.primary} />
-              <Text style={[styles.editText, { color: theme.colors.primary }]}>Edit</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.infoSection}>
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#F0F9FF' }]}>
-                <UserIcon size={20} color="#3B82F6" />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Full Name</Text>
-                <Text style={[styles.infoValue, { color: theme.colors.secondary }]}>
-                  {driver?.fullName || [driver?.personalInfo?.firstName, driver?.personalInfo?.lastName].filter(Boolean).join(' ') || profile?.fullName || profile?.fullname || profile?.name || user?.displayName || 'Not provided'}
-                </Text>
+              {/* Rating badge */}
+              <View style={[styles.heroBadge, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.35)' }]}>
+                <Star size={13} color="#F59E0B" fill="#F59E0B" />
+                <Text style={[styles.heroBadgeText, { color: '#F59E0B' }]}>{ratingDisplay}</Text>
               </View>
             </View>
 
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#F0FDF4' }]}>
-                <Mail size={20} color="#10B981" />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Email</Text>
-                <Text style={[styles.infoValue, { color: theme.colors.secondary }]}>
-                  {driver?.email || driver?.personalInfo?.email || user?.email || 'Not provided'}
-                </Text>
-              </View>
-            </View>
+            {canSwitchToRider && (
+              <TouchableOpacity
+                onPress={handleSwitchToRider}
+                disabled={roleActionLoading}
+                activeOpacity={0.86}
+                style={styles.roleSwitchBtn}
+              >
+                <LinearGradient
+                  colors={asGradientStops([BRAND.orange, BRAND.orangeDeep])}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.roleSwitchBtnGrad}
+                >
+                  {roleActionLoading ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="swap-horizontal" size={16} color="#FFFFFF" />
+                      <Text style={styles.roleSwitchText}>
+                        {role === 'both' ? 'Switch to Rider Mode' : 'Add Rider Mode'}
+                      </Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
 
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#FFFBEB' }]}>
-                <Phone size={20} color="#F59E0B" />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Phone Number</Text>
-                <Text style={[styles.infoValue, { color: '#64748B' }]}>
-                  {driver?.personalInfo?.phone || profile?.phone || profile?.phoneNumber || profile?.phonenumber || 'Not provided'}
-                </Text>
-              </View>
-            </View>
 
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#F8FAFC' }]}>
-                <Calendar size={20} color="#64748B" />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Date of Birth</Text>
-                <Text style={[styles.infoValue, { color: '#64748B' }]}>
-                  {driver?.personalInfo?.dateOfBirth || driver?.personalInfo?.dob || profile?.dateOfBirth || profile?.dateofbirth || profile?.dob || 'Not provided'}
-                </Text>
-              </View>
-            </View>
 
-            <View style={styles.divider} />
-
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#FEF3E2' }]}>
-                <GraduationCap size={20} color="#F97316" />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>University</Text>
-                <Text style={[styles.infoValue, { color: theme.colors.secondary }]}>
-                  {driver?.personalInfo?.university || profile?.university || 'Not provided'}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#F3E8FF' }]}>
-                <BookOpen size={20} color="#8B5CF6" />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Major</Text>
-                <Text style={[styles.infoValue, { color: '#64748B' }]}>
-                  {driver?.personalInfo?.major || profile?.major || 'Not provided'}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </Card>
-
-        {/* Vehicle Information */}
-        <Card style={styles.infoCard}>
-          <View style={styles.infoHeader}>
-            <Text style={[styles.infoTitle, { color: theme.colors.secondary }]}>
-              Vehicle Information
-            </Text>
-            <TouchableOpacity 
-              style={styles.editButton} 
-              onPress={() => router.push('/settings/vehicle-info')}
-            >
-              <Edit2 size={16} color={theme.colors.primary} />
-              <Text style={[styles.editText, { color: theme.colors.primary }]}>Edit</Text>
-            </TouchableOpacity>
           </View>
 
-          <View style={styles.infoSection}>
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: theme.colors.primary + '20' }]}>
-                <Car size={20} color={theme.colors.primary} />
+          {/* ══ STATS ══ */}
+          <View style={styles.statsRow}>
+            {[
+              { label: 'Total Rides',  value: String(stats.totalRides), color: BRAND.orange, icon: 'car-outline' },
+              { label: 'Total Earned', value: `$${stats.totalEarnings.toFixed(1)}`,   color: '#10B981',  icon: 'wallet-outline' },
+              { label: 'Rating',       value: ratingDisplay,                           color: '#F59E0B',  icon: 'star-outline' },
+            ].map((stat, i) => (
+              <View key={i} style={styles.statCard}>
+                <BlurView intensity={18} tint="dark" style={StyleSheet.absoluteFillObject} />
+                <Ionicons name={stat.icon as any} size={18} color={stat.color} style={{ marginBottom: 6 }} />
+                <Text style={[styles.statValue, { color: stat.color }]}>{stat.value}</Text>
+                <Text style={styles.statLabel}>{stat.label}</Text>
               </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Vehicle</Text>
-                <Text style={[styles.infoValue, { color: theme.colors.secondary }]}>
-                  {vehicleInfo?.year && vehicleInfo?.make && vehicleInfo?.model
-                    ? `${vehicleInfo.year} ${vehicleInfo.make} ${vehicleInfo.model}`
-                    : 'Not specified'}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#FEF3E2' }]}>
-                <Palette size={20} color="#F97316" />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Color</Text>
-                <Text style={[styles.infoValue, { color: '#64748B' }]}>
-                  {vehicleInfo?.color || vehicleInfo?.colour || 'Not specified'}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.divider} />
-
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#F8FAFC' }]}>
-                <Hash size={20} color="#64748B" />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>License Plate</Text>
-                <Text style={[styles.infoValue, { color: '#64748B' }]}>
-                  {vehicleInfo?.licensePlate || vehicleInfo?.license || 'Not specified'}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#F3E8FF' }]}>
-                <Users size={20} color="#8B5CF6" />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Passenger Seats</Text>
-                <Text style={[styles.infoValue, { color: '#64748B' }]}>
-                  {vehicleInfo?.seats || 'Not specified'}
-                </Text>
-              </View>
-            </View>
+            ))}
           </View>
-        </Card>
+
+          {/* ══ PERSONAL INFO ══ */}
+          <InfoCard
+            title="Personal Information"
+            onEdit={() => router.push('/settings/account-settings')}
+            rows={personalInfoRows}
+            colors={colors}
+            isDark={isDark}
+          />
+
+          {/* ══ VEHICLE INFO ══ */}
+          <InfoCard
+            title="Vehicle Information"
+            onEdit={() => router.push('/settings/vehicle-info')}
+            rows={vehicleRows}
+            colors={colors}
+            isDark={isDark}
+          />
+
         </ScrollView>
-      )}
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
-type NormalizedDocumentInfo = {
-  key: string;
-  status?: string;
-  normalizedStatus?: string;
-  uploadedToken?: string;
-  uploadedAt?: number | string | null;
-  approved?: boolean;
-  approvedToken?: string;
-  approvedAt?: number | string | null;
-};
+// ─────────────────────────────────────────────────────────────────────────────
+// InfoCard sub-component
+// ─────────────────────────────────────────────────────────────────────────────
+
+function InfoCard({
+  title,
+  onEdit,
+  rows,
+  colors,
+  isDark,
+}: {
+  title: string;
+  onEdit: () => void;
+  rows: InfoRow[];
+  colors: AppColors;
+  isDark: boolean;
+}) {
+  const themed = createStyles(colors, isDark);
+  return (
+    <View style={themed.infoCard}>
+      {isDark && <BlurView intensity={18} tint="dark" style={StyleSheet.absoluteFillObject} />}
+      <View style={styles.infoCardInner}>
+        {/* Header */}
+        <View style={styles.infoCardHdr}>
+          <Text style={themed.infoCardTitle}>{title}</Text>
+          <TouchableOpacity onPress={onEdit} style={styles.editBtn}>
+            <Edit2 size={13} color="#F4621F" />
+            <Text style={styles.editBtnText}>Edit</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Rows */}
+        <View style={styles.infoRows}>
+          {rows.map((row, i) => {
+            if (row === null) return <View key={`div-${i}`} style={styles.infoDivider} />;
+            const IconComp = row.icon;
+            return (
+              <View key={i} style={styles.infoRow}>
+                {(() => {
+                  const palette = iconPalette(colors, row.semantic);
+                  return (
+                    <View style={[styles.infoIconWrap, { backgroundColor: palette.bg }]}>
+                      <IconComp size={17} color={palette.color} />
+                    </View>
+                  );
+                })()}
+                <View style={{ flex: 1 }}>
+                  <Text style={themed.infoLabel}>{row.label}</Text>
+                  <Text style={themed.infoValue}>{row.value}</Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper functions (unchanged from original)
+// ─────────────────────────────────────────────────────────────────────────────
 
 function collectDriverDocuments(driver: any): Record<string, any> {
   const map: Record<string, any> = {};
   if (!driver || typeof driver !== 'object') return map;
   const candidates = [
-    driver?.documents,
-    driver?.documentsStatus,
-    driver?.documentStatus,
-    driver?.documentsInfo,
-    driver?.documentInfo,
-    driver?.verification?.documents,
-    driver?.verification?.requiredDocuments,
-    driver?.compliance?.documents,
-    driver?.compliance?.requiredDocuments,
-    driver?.docs,
+    driver?.documents, driver?.documentsStatus, driver?.documentStatus,
+    driver?.documentsInfo, driver?.documentInfo, driver?.verification?.documents,
+    driver?.verification?.requiredDocuments, driver?.compliance?.documents,
+    driver?.compliance?.requiredDocuments, driver?.docs,
   ];
   candidates.forEach((candidate) => {
     if (candidate && typeof candidate === 'object') {
       Object.entries(candidate).forEach(([key, val]) => {
-        if (val !== undefined && val !== null) {
-          map[key] = val;
-        }
+        if (val !== undefined && val !== null) map[key] = val;
       });
     }
   });
   return map;
 }
 
+type NormalizedDocumentInfo = {
+  key: string; status?: string; normalizedStatus?: string;
+  uploadedToken?: string; uploadedAt?: number | string | null;
+  approved?: boolean; approvedToken?: string; approvedAt?: number | string | null;
+};
+
 function normalizeDocumentInfo(key: string, value: any): NormalizedDocumentInfo {
   const info: NormalizedDocumentInfo = { key };
   if (value === undefined || value === null) return info;
-
   if (typeof value === 'string') {
     const status = value.trim();
-    info.status = status;
-    info.normalizedStatus = status.toLowerCase();
-    info.uploadedToken = `string:${status}`;
-    info.uploadedAt = status;
-    if (['approved', 'verified', 'active', 'accepted', 'complete', 'completed'].includes(info.normalizedStatus)) {
-      info.approved = true;
-      info.approvedToken = `status:${info.normalizedStatus}`;
-      info.approvedAt = info.uploadedAt;
+    info.status = status; info.normalizedStatus = status.toLowerCase();
+    info.uploadedToken = `string:${status}`; info.uploadedAt = status;
+    if (['approved','verified','active','accepted','complete','completed'].includes(info.normalizedStatus!)) {
+      info.approved = true; info.approvedToken = `status:${info.normalizedStatus}`; info.approvedAt = info.uploadedAt;
     }
     return info;
   }
-
   if (typeof value === 'object') {
-    const rawStatus =
-      value.status ??
-      value.state ??
-      value.reviewStatus ??
-      value.verificationStatus ??
-      value.stage ??
-      value.result ??
-      value.outcome ??
-      value.currentStatus;
-    if (rawStatus !== undefined && rawStatus !== null) {
-      info.status = String(rawStatus);
-      info.normalizedStatus = info.status.toLowerCase();
-    }
-
-    const uploadSource =
-      value.uploadedAt ??
-      value.submittedAt ??
-      value.createdAt ??
-      value.timestamp ??
-      value.updatedAt ??
-      value.addedAt ??
-      value.requestedAt;
+    const rawStatus = value.status ?? value.state ?? value.reviewStatus ?? value.verificationStatus ?? value.stage ?? value.result ?? value.outcome ?? value.currentStatus;
+    if (rawStatus !== undefined && rawStatus !== null) { info.status = String(rawStatus); info.normalizedStatus = info.status.toLowerCase(); }
+    const uploadSource = value.uploadedAt ?? value.submittedAt ?? value.createdAt ?? value.timestamp ?? value.updatedAt ?? value.addedAt ?? value.requestedAt;
     const normalizedUpload = normalizeTimestampForDoc(uploadSource);
-    if (normalizedUpload) {
-      info.uploadedToken = `ts:${normalizedUpload.token}`;
-      info.uploadedAt = normalizedUpload.value;
-    }
-
-    const fileToken =
-      value.fileUrl ??
-      value.fileURL ??
-      value.filePath ??
-      value.path ??
-      value.url ??
-      value.storagePath ??
-      value.documentUrl ??
-      value.documentPath;
-    if (fileToken) {
-      const tokenStr = String(fileToken);
-      info.uploadedToken = info.uploadedToken ? `${info.uploadedToken}|file:${tokenStr}` : `file:${tokenStr}`;
-      info.uploadedAt = info.uploadedAt ?? tokenStr;
-    }
-
-    const approvedSource =
-      value.approvedAt ??
-      value.reviewedAt ??
-      value.verifiedAt ??
-      value.completedAt ??
-      value.resolvedAt ??
-      (value.approved === true || value.verified === true ? (value.updatedAt ?? uploadSource) : undefined);
+    if (normalizedUpload) { info.uploadedToken = `ts:${normalizedUpload.token}`; info.uploadedAt = normalizedUpload.value; }
+    const fileToken = value.fileUrl ?? value.fileURL ?? value.filePath ?? value.path ?? value.url ?? value.storagePath ?? value.documentUrl ?? value.documentPath;
+    if (fileToken) { const tokenStr = String(fileToken); info.uploadedToken = info.uploadedToken ? `${info.uploadedToken}|file:${tokenStr}` : `file:${tokenStr}`; info.uploadedAt = info.uploadedAt ?? tokenStr; }
+    const approvedSource = value.approvedAt ?? value.reviewedAt ?? value.verifiedAt ?? value.completedAt ?? value.resolvedAt ?? (value.approved === true || value.verified === true ? (value.updatedAt ?? uploadSource) : undefined);
     const normalizedApproved = normalizeTimestampForDoc(approvedSource);
-    if (normalizedApproved) {
-      info.approvedToken = `ts:${normalizedApproved.token}`;
-      info.approvedAt = normalizedApproved.value;
-    }
-
+    if (normalizedApproved) { info.approvedToken = `ts:${normalizedApproved.token}`; info.approvedAt = normalizedApproved.value; }
     const normalizedStatus = info.normalizedStatus;
-    const explicitApproved =
-      value.approved === true ||
-      value.verified === true ||
-      value.isApproved === true ||
-      String(value.reviewStatus ?? '').toLowerCase() === 'approved';
-    if (
-      explicitApproved ||
-      (typeof normalizedStatus === 'string' &&
-        ['approved', 'verified', 'active', 'accepted', 'complete', 'completed'].includes(normalizedStatus))
-    ) {
+    const explicitApproved = value.approved === true || value.verified === true || value.isApproved === true || String(value.reviewStatus ?? '').toLowerCase() === 'approved';
+    if (explicitApproved || (typeof normalizedStatus === 'string' && ['approved','verified','active','accepted','complete','completed'].includes(normalizedStatus))) {
       info.approved = true;
       if (!info.approvedToken) {
-        if (normalizedApproved) {
-          info.approvedToken = `ts:${normalizedApproved.token}`;
-          info.approvedAt = normalizedApproved.value;
-        } else if (info.uploadedToken) {
-          info.approvedToken = `status:${normalizedStatus ?? 'approved'}|${info.uploadedToken}`;
-          info.approvedAt = info.approvedAt ?? info.uploadedAt ?? normalizedStatus ?? 'approved';
-        } else if (normalizedStatus) {
-          info.approvedToken = `status:${normalizedStatus}`;
-          info.approvedAt = normalizedStatus;
-        } else {
-          info.approvedToken = 'status:approved';
-          info.approvedAt = 'approved';
-        }
+        if (normalizedApproved) { info.approvedToken = `ts:${normalizedApproved.token}`; info.approvedAt = normalizedApproved.value; }
+        else if (info.uploadedToken) { info.approvedToken = `status:${normalizedStatus ?? 'approved'}|${info.uploadedToken}`; info.approvedAt = info.approvedAt ?? info.uploadedAt ?? normalizedStatus ?? 'approved'; }
+        else if (normalizedStatus) { info.approvedToken = `status:${normalizedStatus}`; info.approvedAt = normalizedStatus; }
+        else { info.approvedToken = 'status:approved'; info.approvedAt = 'approved'; }
       }
-    } else {
-      info.approved = false;
-    }
-
-    if (!info.uploadedToken) {
-      const jsonToken = safeJsonStringify(value);
-      if (jsonToken) {
-        info.uploadedToken = `json:${jsonToken}`;
-        info.uploadedAt = info.uploadedAt ?? jsonToken;
-      }
-    }
-
+    } else { info.approved = false; }
+    if (!info.uploadedToken) { const jsonToken = safeJsonStringify(value); if (jsonToken) { info.uploadedToken = `json:${jsonToken}`; info.uploadedAt = info.uploadedAt ?? jsonToken; } }
     return info;
   }
-
   return info;
 }
 
 function normalizeTimestampForDoc(value: any): { token: string; value: number | string } | null {
   if (!value) return null;
-  try {
-    if (typeof value.toMillis === 'function') {
-      const millis = value.toMillis();
-      return { token: String(millis), value: millis };
-    }
-  } catch {}
+  try { if (typeof value.toMillis === 'function') { const m = value.toMillis(); return { token: String(m), value: m }; } } catch {}
   if (value instanceof Date) return { token: String(value.getTime()), value: value.getTime() };
   if (typeof value === 'number' && Number.isFinite(value)) return { token: String(value), value };
-  if (typeof value === 'string') {
-    const parsed = Date.parse(value);
-    if (!Number.isNaN(parsed)) return { token: String(parsed), value: parsed };
-    return { token: value, value };
-  }
+  if (typeof value === 'string') { const p = Date.parse(value); if (!Number.isNaN(p)) return { token: String(p), value: p }; return { token: value, value }; }
   return null;
 }
 
 function safeJsonStringify(value: any): string | null {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return null;
-  }
+  try { return JSON.stringify(value); } catch { return null; }
 }
 
-// average rating helper moved to src/services/ratings
+// ─────────────────────────────────────────────────────────────────────────────
+// Styles
+// ─────────────────────────────────────────────────────────────────────────────
+
+  const createStyles = (colors: AppColors, isDark: boolean) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.bg,
+    },
+    loadingWrap: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 14,
+    },
+    loadingText: {
+      color: colors.textSecondary,
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    hero: {
+      marginHorizontal: 16,
+      marginTop: 8,
+      marginBottom: 16,
+      borderRadius: 28,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      paddingTop: 20,
+      paddingBottom: 28,
+      alignItems: 'center',
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+      shadowColor: BRAND.navyText,
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: isDark ? 0.18 : 0.08,
+      shadowRadius: 24,
+      elevation: 5,
+    },
+    heroGlow: {
+      position: 'absolute',
+      top: -40,
+      width: 220,
+      height: 220,
+      borderRadius: 110,
+      backgroundColor: colors.primaryDim,
+      alignSelf: 'center',
+    },
+    settingsBtn: {
+      position: 'absolute',
+      top: 16,
+      right: 16,
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      overflow: 'hidden',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(13,27,72,0.06)',
+    },
+    heroName: {
+      fontSize: 22,
+      fontWeight: '800',
+      color: colors.textPrimary,
+      letterSpacing: -0.5,
+      marginBottom: 4,
+    },
+    heroEmail: {
+      fontSize: 13,
+      color: colors.textSecondary,
+      marginBottom: 14,
+      fontWeight: '500',
+    },
+    infoCard: {
+      marginHorizontal: 16,
+      marginBottom: 14,
+      borderRadius: 22,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+      shadowColor: BRAND.navyText,
+      shadowOffset: { width: 0, height: 5 },
+      shadowOpacity: isDark ? 0.16 : 0.06,
+      shadowRadius: 18,
+      elevation: 3,
+    },
+    infoCardTitle: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: colors.textPrimary,
+      letterSpacing: -0.3,
+    },
+    infoLabel: {
+      fontSize: 11,
+      color: colors.textTertiary,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+      marginBottom: 3,
+    },
+    infoValue: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.textPrimary,
+      lineHeight: 20,
+    },
+  });
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-    padding: 16,
-  },
-  profileCard: {
-    borderRadius: 20,
-    padding: 24,
-    marginBottom: 24,
-    position: 'relative',
-  },
-  settingsButton: {
-    position: 'absolute',
-    top: 20,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  profileInfo: {
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  avatarContainer: {
-    position: 'relative',
-    marginBottom: 16,
-  },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarImg: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#E5E7EB',
-  },
-  cameraButton: {
-    position: 'absolute',
-    bottom: -4,
-    right: -4,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'white',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#E05E1A',
-  },
-  profileName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 4,
-  },
-  profileEmail: {
-    fontSize: 16,
-    color: 'white',
-    opacity: 0.9,
-    marginBottom: 16,
-  },
-  verificationContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  verifiedBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  verifiedText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  ratingText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 32,
-    gap: 12,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: 'white',
-    alignItems: 'center',
-    paddingVertical: 20,
-    paddingHorizontal: 16,
-  },
-  statNumber: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 14,
-    color: '#64748B',
-    textAlign: 'center',
-  },
-  infoCard: {
-    backgroundColor: 'white',
-    padding: 20,
-    paddingBottom: 32,
-    marginBottom: 24,
-  },
-  infoHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  infoTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  editButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  editText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  infoSection: {
-    gap: 20,
-  },
-  infoItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 16,
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 2,
-  },
-  infoContent: {
-    flex: 1,
-  },
-  infoLabel: {
-    fontSize: 14,
-    color: '#64748B',
-    marginBottom: 4,
-    fontWeight: '500',
-  },
-  infoValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    lineHeight: 22,
-  },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-    color: '#1F2937',
-  },
-  addButton: {
-    marginTop: 6,
-  },
-  addButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#E2E8F0',
-    marginVertical: 4,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 80,
-  },
-  loadingText: {
+
+  // ── Profile Hero ──────────────────────────────────────────────────────────
+  hero:             { marginHorizontal:16, marginTop:8, marginBottom:16, borderRadius:28, overflow:'hidden', borderWidth:1.5, borderColor:'rgba(255,255,255,0.08)', paddingTop:20, paddingBottom:28, alignItems:'center' },
+  heroGlow:         { position:'absolute', top:-40, width:200, height:200, borderRadius:100, backgroundColor:'rgba(244,98,31,0.25)', alignSelf:'center' },
+  settingsBtn:      { position:'absolute', top:16, right:16, width:40, height:40, borderRadius:20, overflow:'hidden', alignItems:'center', justifyContent:'center', borderWidth:1, borderColor:'rgba(255,255,255,0.1)' },
+  avatarWrap:       { position:'relative', marginBottom:14 },
+  avatarRing:       { position:'absolute', top:-6, left:-6, right:-6, bottom:-6, borderRadius:52, borderWidth:2, borderColor:'#F4621F' },
+  avatarImg:        { width:88, height:88, borderRadius:44, alignItems:'center', justifyContent:'center' },
+  cameraBtn:        { position:'absolute', bottom:0, right:0, borderRadius:14, overflow:'hidden', borderWidth:2, borderColor:'#060D18' },
+  cameraBtnGrad:    { width:28, height:28, alignItems:'center', justifyContent:'center' },
+  heroName:         { fontSize:22, fontWeight:'800', color:'#F0F4FF', letterSpacing:-0.5, marginBottom:4 },
+  heroEmail:        { fontSize:13, color:'#7A8FA8', marginBottom:14 },
+  heroBadgesRow:    { flexDirection:'row', gap:8, flexWrap:'wrap', justifyContent:'center' },
+  heroBadge:        { flexDirection:'row', alignItems:'center', gap:5, paddingHorizontal:10, paddingVertical:5, borderRadius:14, borderWidth:1 },
+  heroBadgeText:    { fontSize:12, fontWeight:'700' },
+
+  // ── Stats ─────────────────────────────────────────────────────────────────
+  statsRow:         { flexDirection:'row', gap:10, marginHorizontal:16, marginBottom:16 },
+  statCard:         { flex:1, borderRadius:18, overflow:'hidden', borderWidth:1.5, borderColor:'rgba(255,255,255,0.08)', backgroundColor:'rgba(255,255,255,0.03)', paddingVertical:14, alignItems:'center' },
+  statValue:        { fontSize:20, fontWeight:'800', marginBottom:2 },
+  statLabel:        { fontSize:10, color:'#7A8FA8', fontWeight:'600', textAlign:'center' },
+
+  // ── Info Cards ────────────────────────────────────────────────────────────
+  infoCard:         { marginHorizontal:16, marginBottom:14, borderRadius:22, overflow:'hidden', borderWidth:1.5, borderColor:'rgba(255,255,255,0.08)', backgroundColor:'rgba(255,255,255,0.03)' },
+  infoCardInner:    { padding:18 },
+  infoCardHdr:      { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:18 },
+  infoCardTitle:    { fontSize:16, fontWeight:'800', color:'#F0F4FF', letterSpacing:-0.3 },
+  editBtn:          { flexDirection:'row', alignItems:'center', gap:5, backgroundColor:'rgba(244,98,31,0.1)', paddingHorizontal:10, paddingVertical:5, borderRadius:12, borderWidth:1, borderColor:'rgba(244,98,31,0.25)' },
+  editBtnText:      { fontSize:12, color:'#F4621F', fontWeight:'700' },
+  infoRows:         { gap:16 },
+  infoRow:          { flexDirection:'row', alignItems:'flex-start', gap:12 },
+  infoIconWrap:     { width:38, height:38, borderRadius:12, alignItems:'center', justifyContent:'center', flexShrink:0, marginTop:2 },
+  infoLabel:        { fontSize:11, color:'#7A8FA8', fontWeight:'600', textTransform:'uppercase', letterSpacing:0.5, marginBottom:3 },
+  infoValue:        { fontSize:15, fontWeight:'600', color:'#E2E8F0', lineHeight:20 },
+  infoDivider:      { height:1, backgroundColor:'rgba(255,255,255,0.07)', marginVertical:4 },
+
+  roleSwitchBtn: {
     marginTop: 16,
-    fontSize: 16,
-    color: '#64748B',
+    borderRadius: 18,
+    overflow: 'hidden',
+    alignSelf: 'center',
   },
+
+  roleSwitchBtnGrad: {
+    minHeight: 42,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+
+  roleSwitchText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
+
+
 });

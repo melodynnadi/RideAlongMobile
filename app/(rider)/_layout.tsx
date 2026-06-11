@@ -77,13 +77,7 @@ export default function RiderTabLayout() {
           tabBarBadgeStyle: { backgroundColor: '#EF4444', color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' },
         }}
       />
-      <Tabs.Screen
-        name="notifications"
-        options={{
-          title: 'Alerts',
-          tabBarIcon: ({ color, size }) => <Ionicons name="notifications" size={size || 24} color={color} />,
-        }}
-      />
+      <Tabs.Screen name="notifications" options={{ href: null }} />
       <Tabs.Screen
         name="profile"
         options={{

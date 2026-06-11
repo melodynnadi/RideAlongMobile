@@ -15,11 +15,12 @@ import {
   KeyboardAvoidingView,
   TouchableWithoutFeedback,
   Share,
-  ActivityIndicator,
+  ActivityIndicator,     // ← ADD
+  StatusBar,
 } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useTheme } from '@/hooks/useTheme';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import { AppColors, BRAND } from '@/constants/theme';
 import { router } from 'expo-router';
 import { firestore, firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import { addDoc, collection, serverTimestamp, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
@@ -27,7 +28,9 @@ import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import * as Location from 'expo-location';
 import { computeMaxPrice } from '@/src/utils/pricing';
 import EmailTriggerService from '@/services/EmailTriggerService';
-import { MapPin, Navigation, Calendar, Clock, DollarSign, ArrowUpDown, LocateFixed, FileText, Send, Route, Timer, Ruler, Users, Car } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
+import { Ionicons } from '@expo/vector-icons';
 
 type Coords = { lat: number; lng: number };
 type Suggestion = { description: string; place_id: string; mainText: string; secondaryText: string };
@@ -106,7 +109,7 @@ function AddressAutocomplete({
 
   return (
     <View style={[styles.autoWrap, { zIndex }]}>
-      <Text style={styles.label}>{label}</Text>
+      {!!label && <Text style={styles.label}>{label}</Text>}
       <TextInput
         style={styles.input}
         placeholder={placeholder}
@@ -125,7 +128,7 @@ function AddressAutocomplete({
       {open && (items.length > 0 || loading) && (
         <View style={styles.autoPanel}>
           {loading ? (
-            <View style={styles.autoEmpty}><Text style={styles.placesEmptyText}>Searchingâ€¦</Text></View>
+            <View style={styles.autoEmpty}><Text style={styles.placesEmptyText}>Searching...</Text></View>
           ) : (
             items.slice(0, 10).map((s, idx) => (
               <TouchableOpacity
@@ -403,7 +406,8 @@ function SeatsModal({ visible, selected, primaryColor, onClose, onSelect }: {
 }
 
 export default function BookScreen() {
-  const theme = useTheme();
+  const { colors, isDark } = useAppTheme();
+  const themed = createStyles(colors, isDark);
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -437,7 +441,6 @@ export default function BookScreen() {
   const [calcLoading, setCalcLoading] = useState<boolean>(false);
   const [distanceMiles, setDistanceMiles] = useState<number | null>(null);
   const [durationMinutes, setDurationMinutes] = useState<number | null>(null);
-  const [seatsOpen, setSeatsOpen] = useState(false);
 
   const to24h = (t: string): string => {
     // Convert 'h:mm AM/PM' or 'h:mmAM' to 'HH:mm'
@@ -553,6 +556,14 @@ export default function BookScreen() {
         return;
       }
 
+      if (!pickupCoords || !dropoffCoords) {
+        Alert.alert(
+          'Select locations',
+          'Please choose pickup and dropoff from the suggestions so we can place your ride on the map.'
+        );
+        return;
+      }
+
       setSubmitting(true);
 
       // Parse contribution (price per seat)
@@ -597,18 +608,45 @@ export default function BookScreen() {
         dropoff: dropoffLocation || null,
         pickupAddress: pickupLocation || null,
         dropoffAddress: dropoffLocation || null,
+
+        pickupLocation: pickupCoords
+          ? {
+              address: pickupLocation || null,
+              latitude: pickupCoords.lat,
+              longitude: pickupCoords.lng,
+              lat: pickupCoords.lat,
+              lng: pickupCoords.lng,
+            }
+          : null,
+
+        dropoffLocation: dropoffCoords
+          ? {
+              address: dropoffLocation || null,
+              latitude: dropoffCoords.lat,
+              longitude: dropoffCoords.lng,
+              lat: dropoffCoords.lat,
+              lng: dropoffCoords.lng,
+            }
+          : null,
+
         pickupCoords: pickupCoords || null,
         dropoffCoords: dropoffCoords || null,
+        pickupLat: pickupCoords?.lat ?? null,
+        pickupLng: pickupCoords?.lng ?? null,
+        dropoffLat: dropoffCoords?.lat ?? null,
+        dropoffLng: dropoffCoords?.lng ?? null,
         date: date || null,
         time: time || null,
         departureTime: requestedTime || null,
-  availableSeats: seatsNum,
+        availableSeats: seatsNum,
         pricePerSeat: priceNum,
         postType: 'ride_offer',
         // Legacy fallbacks some lists use
         contributionAmount: priceNum,
-  estimatedFare: null,
+        estimatedFare: null,
         notes: notes || null,
+        rideVibe: selectedVibes,
+        preferences: selectedVibes,
         // Include distance/duration details if available
         distance: (distanceText || distanceMiles != null) ? {
           text: distanceText || null,
@@ -650,7 +688,7 @@ export default function BookScreen() {
           throw new Error(result.message || result.error || 'Failed to create ride posting');
         }
 
-        console.log('âœ… Ride posting created with preferred route notifications:', result);
+        console.log('Ride posting created with preferred route notifications:', result);
 
         // Send ride posted email
         try {
@@ -682,7 +720,7 @@ export default function BookScreen() {
         setNotes('');
 
         Alert.alert('Ride Posted!', 'Your ride is now visible to riders.');
-        router.push('/driver');
+        router.push('/driver' as any);
       } catch (apiError: any) {
         console.error('Ride posting API error:', apiError);
         
@@ -749,7 +787,7 @@ export default function BookScreen() {
         setNotes('');
 
         Alert.alert('Ride Posted!', 'Your ride is now visible to riders.');
-        router.push('/driver');
+        router.push('/driver' as any);
       }
     } catch (e) {
   console.warn('ride posting submit error', e);
@@ -865,300 +903,245 @@ export default function BookScreen() {
     Number(contribution) > 0 && seats > 0 &&
     !(maxPrice > 0 && Number(contribution) > maxPrice);
 
+  const [selectedVibes, setSelectedVibes] = useState<string[]>([]);
+
+  // ── Smart pricing computed ────────────────────────────────────────────────
+  const priceNum = Number(String(contribution).replace(/[^0-9.]/g, '')) || 0;
+  const totalEarnings = priceNum > 0 ? (priceNum * seats).toFixed(2) : null;
+  const uberEstimate = distanceMiles && distanceMiles > 0
+    ? (distanceMiles * 2.1 + 2.5).toFixed(2) : null;
+  const riderSavings = uberEstimate && priceNum > 0
+    ? Math.max(0, Number(uberEstimate) - priceNum).toFixed(2) : null;
+  const suggestedMin = distanceMiles && distanceMiles > 0
+    ? Math.max(3, Math.round(distanceMiles * 0.7)) : 5;
+  const suggestedMax = distanceMiles && distanceMiles > 0
+    ? Math.max(7, Math.round(distanceMiles * 1.1)) : 9;
+  const routeIsReady = !!(pickupLocation && dropoffLocation && pickupCoords && dropoffCoords);
+  const grossEarnings = priceNum > 0 ? priceNum * seats : 0;
+  const platformFee = grossEarnings * 0.08;
+  const netEarnings = Math.max(0, grossEarnings - platformFee);
+  const suggestedText = distanceMiles && distanceMiles > 0
+    ? `$${suggestedMin}-${suggestedMax} · gas split for ${Math.round(durationMinutes || 0) || '--'}min`
+    : 'Select route to estimate';
+
+
   return (
     <KeyboardAvoidingView
-      style={styles.keyboardAvoid}
+      style={themed.root}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
     >
+      <StatusBar barStyle={colors.statusBar} />
+      <LinearGradient
+        colors={colors.gradientBg as unknown as readonly [string, string, ...string[]]}
+        style={StyleSheet.absoluteFillObject}
+      />
+
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-        <SafeAreaView style={styles.safeArea} edges={['top']}>
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={[styles.headerTitle, { color: theme.colors.secondary }]}>
-              Offer a Ride
-            </Text>
-            <Text style={styles.headerSubtitle}>
-              Share your route, earn along the way
-            </Text>
+        <SafeAreaView style={{ flex: 1 }} edges={['top']}>
+
+          {/* ── Header ── */}
+          <View style={styles.hdr}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+              <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
+            </TouchableOpacity>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={[styles.hdrTitle, { color: colors.textPrimary }]}>Post a ride</Text>
+              <Text style={[styles.hdrSub, { color: colors.textSecondary }]}>Step 1 of 3 · Route</Text>
+            </View>
           </View>
 
           <FlatList
-            style={styles.scrollArea}
-            contentContainerStyle={styles.scrollContent}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingBottom: 80 }}
             data={[0]}
             ListHeaderComponent={(
               <View>
-
-        {/* â”€â”€ Route Card â”€â”€ */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Route size={18} color={theme.colors.primary} />
-            <Text style={[styles.cardTitle, { color: theme.colors.secondary }]}>Your Route</Text>
-          </View>
-
-          {/* Route visualization with connector line */}
-          <View style={styles.routeContainer}>
-            {/* Vertical connector */}
-            <View style={styles.routeLineCol}>
-              <View style={[styles.routeDot, { backgroundColor: theme.colors.primary }]} />
-              <View style={[styles.routeLine, { backgroundColor: theme.colors.primary + '30' }]} />
-              <View style={[styles.routeDot, { backgroundColor: '#94A3B8' }]} />
-            </View>
-
-            {/* Inputs */}
-            <View style={styles.routeInputCol}>
-              <View style={styles.routeInputWrap}>
-                <AddressAutocomplete
-                  label="Pickup"
-                  placeholder="Starting point"
-                  value={pickupLocation}
-                  apiKey={GOOGLE_MAPS_API_KEY}
-                  onChangeText={(t) => { setPickupLocation(t); setPickupCoords(null); }}
-                  onSelected={({ address, coords }) => { setPickupLocation(address); setPickupCoords(coords); }}
-                  zIndex={60}
-                />
-              </View>
-              <View style={styles.routeInputWrap}>
-                <AddressAutocomplete
-                  label="Dropoff"
-                  placeholder="Destination"
-                  value={dropoffLocation}
-                  apiKey={GOOGLE_MAPS_API_KEY}
-                  onChangeText={(t) => { setDropoffLocation(t); setDropoffCoords(null); }}
-                  onSelected={({ address, coords }) => { setDropoffLocation(address); setDropoffCoords(coords); }}
-                  zIndex={50}
-                />
-              </View>
-            </View>
-          </View>
-
-          {/* Quick actions row */}
-          <View style={styles.quickActions}>
-            <TouchableOpacity
-              style={[styles.quickBtn, { borderColor: theme.colors.primary + '30' }]}
-              onPress={useCurrentLocation}
-              disabled={locLoading}
-            >
-              {locLoading ? (
-                <ActivityIndicator size="small" color={theme.colors.primary} />
-              ) : (
-                <LocateFixed size={16} color={theme.colors.primary} />
-              )}
-              <Text style={[styles.quickBtnText, { color: theme.colors.primary }]}>
-                {locLoading ? 'Locatingâ€¦' : 'Current Location'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.quickBtn, { borderColor: '#94A3B830' }]}
-              onPress={swapLocations}
-            >
-              <ArrowUpDown size={16} color="#64748B" />
-              <Text style={[styles.quickBtnText, { color: '#64748B' }]}>Swap</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Distance / Duration info strip */}
-          {(pickupCoords && dropoffCoords) && (
-            <View style={styles.infoStrip}>
-              <View style={styles.infoStripItem}>
-                <Ruler size={15} color={theme.colors.primary} />
-                <Text style={styles.infoStripLabel}>Distance</Text>
-                <Text style={[styles.infoStripValue, { color: theme.colors.secondary }]}>
-                  {calcLoading ? 'â€¦' : distanceText}
-                </Text>
-              </View>
-              <View style={[styles.infoStripDivider, { backgroundColor: '#E2E8F0' }]} />
-              <View style={styles.infoStripItem}>
-                <Timer size={15} color={theme.colors.primary} />
-                <Text style={styles.infoStripLabel}>Duration</Text>
-                <Text style={[styles.infoStripValue, { color: theme.colors.secondary }]}>
-                  {calcLoading ? 'â€¦' : durationText}
-                </Text>
-              </View>
-            </View>
-          )}
-        </View>
-
-        {/* â”€â”€ Schedule Card â”€â”€ */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Calendar size={18} color={theme.colors.primary} />
-            <Text style={[styles.cardTitle, { color: theme.colors.secondary }]}>Schedule</Text>
-          </View>
-
-          <View style={styles.scheduleRow}>
-            <TouchableOpacity
-              style={styles.scheduleInput}
-              onPress={() => { Keyboard.dismiss(); setCalendarOpen(true); }}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.scheduleIconWrap, { backgroundColor: '#EEF2FF' }]}>
-                <Calendar size={18} color="#6366F1" />
-              </View>
-              <View style={styles.scheduleTextWrap}>
-                <Text style={styles.scheduleLabel}>Date</Text>
-                <Text style={[styles.scheduleValue, !date && styles.schedulePlaceholder]}>
-                  {date || 'Select date'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.scheduleInput}
-              onPress={() => { Keyboard.dismiss(); setTimeOpen(true); }}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.scheduleIconWrap, { backgroundColor: '#FFF7ED' }]}>
-                <Clock size={18} color={theme.colors.primary} />
-              </View>
-              <View style={styles.scheduleTextWrap}>
-                <Text style={styles.scheduleLabel}>Time</Text>
-                <Text style={[styles.scheduleValue, !time && styles.schedulePlaceholder]}>
-                  {time || 'Select time'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-
-          <CalendarModal
-            visible={calendarOpen}
-            month={calendarMonth}
-            selectedDate={date}
-            primaryColor={theme.colors.primary}
-            secondaryColor={theme.colors.secondary}
-            onClose={() => setCalendarOpen(false)}
-            onSelect={(ds) => { setDate(ds); setCalendarOpen(false); setCalendarMonth(new Date(ds)); }}
-          />
-          <TimeModal
-            visible={timeOpen}
-            initialTime={time}
-            primaryColor={theme.colors.primary}
-            secondaryColor={theme.colors.secondary}
-            onClose={() => setTimeOpen(false)}
-            onSelect={(ts) => { setTime(ts); setTimeOpen(false); }}
-          />
-        </View>
-
-        {/* â”€â”€ Seats & Price Card â”€â”€ */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <DollarSign size={18} color={theme.colors.primary} />
-            <Text style={[styles.cardTitle, { color: theme.colors.secondary }]}>Seats & Price</Text>
-          </View>
-
-          {/* Seats selector */}
-          <Text style={styles.fieldLabel}>Available seats</Text>
-          <View style={styles.seatsRow}>
-            {([1, 2] as const).map((s) => (
-              <TouchableOpacity
-                key={s}
-                style={[
-                  styles.seatOption,
-                  seats === s && [styles.seatOptionActive, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primary + '08' }],
-                ]}
-                onPress={() => setSeats(s)}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.seatIconWrap, seats === s ? { backgroundColor: theme.colors.primary + '15' } : { backgroundColor: '#F1F5F9' }]}>
-                  <Users size={18} color={seats === s ? theme.colors.primary : '#94A3B8'} />
+                <View style={styles.stepWrap}>
+                  <Text style={styles.stepText}>STEP 1 OF 3 · ROUTE</Text>
+                  <View style={styles.stepTrack}>
+                    <View style={styles.stepFill} />
+                  </View>
                 </View>
-                <Text style={[styles.seatOptionText, seats === s && { color: theme.colors.primary, fontWeight: '800' }]}>
-                  {s} Seat{s === 1 ? '' : 's'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
 
-          <SeatsModal
-            visible={seatsOpen}
-            selected={seats}
-            primaryColor={theme.colors.primary}
-            onClose={() => setSeatsOpen(false)}
-            onSelect={(s) => setSeats(s)}
-          />
+                <View style={themed.formCard}>
+                  <View style={styles.routeMiniRow}>
+                    <View style={styles.routeDots}>
+                      <View style={[styles.routeMiniDot, { backgroundColor: '#13213A' }]} />
+                      <View style={styles.routeMiniLine} />
+                      <Text style={styles.stopPlus}>+</Text>
+                      <View style={styles.routeMiniLine} />
+                      <View style={[styles.routeMiniDot, { backgroundColor: BRAND.orange }]} />
+                    </View>
 
-          {/* Price per seat */}
-          <Text style={[styles.fieldLabel, { marginTop: 18 }]}>Price per seat</Text>
-          <View style={styles.priceInputRow}>
-            <View style={[styles.pricePrefix, { backgroundColor: theme.colors.primary + '10' }]}>
-              <Text style={[styles.pricePrefixText, { color: theme.colors.primary }]}>$</Text>
-            </View>
-            <TextInput
-              style={styles.priceInput}
-              placeholderTextColor="#9CA3AF"
-              placeholder="0.00"
-              value={contribution}
-              onChangeText={(t) => {
-                const cleaned = t.replace(/[^0-9.]/g, '');
-                const parts = cleaned.split('.');
-                let normalized = parts.shift() || '';
-                if (parts.length > 0) normalized += '.' + parts.join('');
-                setContribution(normalized);
-              }}
-              keyboardType="numeric"
-              onBlur={() => {
-                const priceNum = Number(String(contribution).replace(/[^0-9.\-]/g, ''));
-                const cap = maxPrice || 0;
-                if (!isNaN(priceNum) && cap > 0 && priceNum > cap) {
-                  setContribution(cap.toFixed(2));
-                  setShowCapBanner(`Price capped at $${cap.toFixed(2)}.`);
-                  setTimeout(() => setShowCapBanner(null), 2200);
-                }
-              }}
-            />
-          </View>
-          <Text style={styles.priceHint}>
-            Max for {seats} seat(s): ${maxPrice.toFixed(2)} (based on {typeof distanceMiles === 'number' ? `${distanceMiles.toFixed(1)} mi` : '--'})
-          </Text>
-          {showCapBanner ? (
-            <View style={styles.bannerInfo}>
-              <Text style={styles.bannerInfoText}>{showCapBanner}</Text>
-            </View>
-          ) : null}
-        </View>
+                    <View style={styles.routeFields}>
+                      <AddressAutocomplete
+                        label=""
+                        placeholder="Austin, TX"
+                        value={pickupLocation}
+                        onChangeText={setPickupLocation}
+                        onSelected={({ address, coords }) => {
+                          setPickupLocation(address);
+                          setPickupCoords(coords);
+                        }}
+                        apiKey={GOOGLE_MAPS_API_KEY}
+                        zIndex={60}
+                      />
 
-        {/* â”€â”€ Notes Card â”€â”€ */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <FileText size={18} color={theme.colors.primary} />
-            <Text style={[styles.cardTitle, { color: theme.colors.secondary }]}>Notes</Text>
-            <Text style={styles.optionalBadge}>Optional</Text>
-          </View>
-          <TextInput
-            style={styles.notesInput}
-            placeholder="Music preferences, pet-friendly, trunk spaceâ€¦"
-            placeholderTextColor="#9CA3AF"
-            value={notes}
-            onChangeText={setNotes}
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-          />
-        </View>
+                      <Text style={styles.addStopText}>+ stop</Text>
 
-        {/* â”€â”€ Submit Button â”€â”€ */}
-        <TouchableOpacity
-          style={[
-            styles.submitBtn,
-            { backgroundColor: theme.colors.primary },
-            (!isFormValid || submitting) && styles.submitBtnDisabled,
-          ]}
-          onPress={handleSubmit}
-          disabled={submitting || !isFormValid}
-          accessibilityRole="button"
-          accessibilityLabel="Post offered ride"
-          activeOpacity={0.85}
-        >
-          {submitting ? (
-            <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 8 }} />
-          ) : (
-            <Send size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-          )}
-          <Text style={styles.submitBtnText}>{submitting ? 'Postingâ€¦' : 'Offer Ride'}</Text>
-        </TouchableOpacity>
+                      <AddressAutocomplete
+                        label=""
+                        placeholder="Houston, TX"
+                        value={dropoffLocation}
+                        onChangeText={setDropoffLocation}
+                        onSelected={({ address, coords }) => {
+                          setDropoffLocation(address);
+                          setDropoffCoords(coords);
+                        }}
+                        apiKey={GOOGLE_MAPS_API_KEY}
+                        zIndex={50}
+                      />
+                    </View>
+                  </View>
+                </View>
 
-        <View style={{ height: 32 }} />
+                <Text style={styles.fieldGroupLabel}>WHEN</Text>
+                <View style={styles.whenRow}>
+                  <TouchableOpacity style={themed.ceoInputBtn} onPress={() => setCalendarOpen(true)}>
+                    <Text style={themed.ceoInputText}>{date || 'Fri, Nov 20'}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={[themed.ceoInputBtn, styles.timeBtn]} onPress={() => setTimeOpen(true)}>
+                    <Text style={themed.ceoInputText}>{time || '3:00 PM'}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <CalendarModal
+                  visible={calendarOpen}
+                  month={date ? new Date(date) : new Date()}
+                  selectedDate={date}
+                  primaryColor={BRAND.orange}
+                  secondaryColor="#13213A"
+                  onClose={() => setCalendarOpen(false)}
+                  onSelect={setDate}
+                />
+
+                <TimeModal
+                  visible={timeOpen}
+                  initialTime={time}
+                  primaryColor={BRAND.orange}
+                  secondaryColor="#13213A"
+                  onClose={() => setTimeOpen(false)}
+                  onSelect={setTime}
+                />
+
+                <Text style={styles.fieldGroupLabel}>SEATS AVAILABLE</Text>
+                <View style={styles.seatPillRow}>
+                  {([1, 2] as const).map((n) => (
+                    <TouchableOpacity
+                      key={n}
+                      onPress={() => setSeats(n)}
+                      style={[themed.seatPill, seats === n && styles.seatPillActive]}
+                    >
+                      <Text style={[themed.seatPillText, seats === n && styles.seatPillTextActive]}>{n}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Text style={styles.fieldGroupLabel}>PRICE PER SEAT</Text>
+                <View style={themed.priceBox}>
+                  <Text style={styles.priceDollar}>$</Text>
+                  <TextInput
+                    value={contribution}
+                    onChangeText={setContribution}
+                    placeholder="28"
+                    placeholderTextColor="#94A3B8"
+                    keyboardType="decimal-pad"
+                    style={themed.priceInputCeo}
+                  />
+
+                  <View style={styles.suggestedWrap}>
+                    <Text style={styles.suggestedLabel}>SUGGESTED</Text>
+                    <Text style={themed.suggestedText}>{suggestedText}</Text>
+                  </View>
+                </View>
+
+                {maxPrice > 0 ? (
+                  <View style={styles.capMiniBanner}>
+                    <Text style={styles.capMiniText}>
+                      Max allowed is ${maxPrice.toFixed(2)} per seat for this route.
+                    </Text>
+                  </View>
+                ) : null}
+
+                <Text style={styles.fieldGroupLabel}>NOTE FOR RIDERS (OPTIONAL)</Text>
+                <TextInput
+                  value={notes}
+                  onChangeText={setNotes}
+                  placeholder="Heading home for the weekend. Aux is open"
+                  placeholderTextColor="#94A3B8"
+                  multiline
+                  style={themed.notesCeo}
+                />
+
+                <Text style={styles.fieldGroupLabel}>RIDE VIBE (OPTIONAL)</Text>
+                <View style={styles.vibeCompactRow}>
+                  {['Quiet', 'Social', 'Music', 'Study-friendly', 'Luggage OK'].map((vibe) => {
+                    const active = selectedVibes.includes(vibe);
+
+                    return (
+                      <TouchableOpacity
+                        key={vibe}
+                        onPress={() => {
+                          setSelectedVibes((prev) =>
+                            active ? prev.filter((item) => item !== vibe) : [...prev, vibe]
+                          );
+                        }}
+                        style={[themed.vibeCompactChip, active && styles.vibeCompactChipActive]}
+                      >
+                        <Text style={[themed.vibeCompactText, active && styles.vibeCompactTextActive]}>
+                          {vibe}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <View style={themed.earningsSummary}>
+                  <View style={styles.summaryRow}>
+                    <Text style={themed.summaryLabel}>
+                      {seats} seat{seats === 1 ? '' : 's'} x ${priceNum > 0 ? priceNum.toFixed(0) : '--'}
+                    </Text>
+                    <Text style={themed.summaryValue}>${grossEarnings.toFixed(2)}</Text>
+                  </View>
+
+                  <View style={styles.summaryRow}>
+                    <Text style={themed.summaryLabel}>Platform fee (8%)</Text>
+                    <Text style={themed.summaryValue}>-${platformFee.toFixed(2)}</Text>
+                  </View>
+
+                  <View style={styles.summaryDivider} />
+
+                  <View style={styles.summaryRow}>
+                    <Text style={themed.summaryLabel}>You'll earn</Text>
+                    <Text style={styles.netEarnValue}>${netEarnings.toFixed(2)}</Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  onPress={handleSubmit}
+                  disabled={submitting || !isFormValid}
+                  style={[styles.continueBtn, (submitting || !isFormValid) && styles.submitBtnDisabled]}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.continueText}>Continue →</Text>
+                  )}
+                </TouchableOpacity>
+
+                <View style={{ height: 20 }} />
               </View>
             )}
             renderItem={() => null}
@@ -1172,641 +1155,590 @@ export default function BookScreen() {
   );
 }
 
+
+const createStyles = (colors: AppColors, isDark: boolean) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.bg,
+    },
+    card: {
+      marginHorizontal: 16,
+      marginBottom: 14,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      overflow: 'hidden',
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+    },
+    title: {
+      color: colors.textPrimary,
+    },
+    subtitle: {
+      color: colors.textSecondary,
+    },
+    primaryText: {
+      color: colors.primary,
+    },
+
+    formCard: {
+      marginHorizontal: 20,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: isDark ? colors.borderMid : '#DDE3EC',
+      backgroundColor: isDark ? colors.glassBg : '#FFFFFF',
+      padding: 12,
+    },
+    ceoInputBtn: {
+      flex: 1,
+      minHeight: 48,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: isDark ? colors.borderMid : '#DDE3EC',
+      backgroundColor: isDark ? colors.bgInput : '#FFFFFF',
+      justifyContent: 'center',
+      paddingHorizontal: 14,
+    },
+    ceoInputText: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    seatPill: {
+      height: 34,
+      minWidth: 54,
+      borderRadius: 17,
+      borderWidth: 1,
+      borderColor: isDark ? colors.borderMid : '#DDE3EC',
+      backgroundColor: isDark ? colors.bgInput : '#FFFFFF',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    seatPillText: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    priceBox: {
+      marginHorizontal: 20,
+      minHeight: 60,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: isDark ? colors.borderMid : '#DDE3EC',
+      backgroundColor: isDark ? colors.bgInput : '#FFFFFF',
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 14,
+    },
+    priceInputCeo: {
+      flex: 1,
+      color: colors.textPrimary,
+      fontSize: 28,
+      fontWeight: '400',
+      paddingVertical: 10,
+    },
+    suggestedText: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontWeight: '600',
+      textAlign: 'right',
+    },
+    notesCeo: {
+      marginHorizontal: 20,
+      minHeight: 84,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: isDark ? colors.borderMid : '#DDE3EC',
+      backgroundColor: isDark ? colors.bgInput : '#FFFFFF',
+      padding: 14,
+      color: colors.textPrimary,
+      fontSize: 14,
+      textAlignVertical: 'top',
+    },
+    vibeCompactChip: {
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: isDark ? colors.borderMid : '#DDE3EC',
+      backgroundColor: isDark ? colors.bgInput : '#FFFFFF',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    vibeCompactText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    earningsSummary: {
+      marginHorizontal: 20,
+      marginTop: 14,
+      borderRadius: 12,
+      backgroundColor: isDark ? colors.glassBg : '#F7F5EF',
+      padding: 14,
+    },
+    summaryLabel: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    summaryValue: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+      });
+
 const styles = StyleSheet.create({
-  keyboardAvoid: {
-    flex: 1,
-    backgroundColor: '#F1F5F9',
-  },
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F1F5F9',
-  },
-  flex: {
-    flex: 1,
-  },
-  /* â”€â”€ Header â”€â”€ */
-  header: {
-    padding: 16,
-    paddingBottom: 0,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 16,
-    color: '#64748B',
-  },
-  /* â”€â”€ Scroll â”€â”€ */
-  scrollArea: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 40,
-  },
-  /* â”€â”€ Card â”€â”€ */
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 16,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 3,
-    borderWidth: 1,
-    borderColor: '#F1F5F9',
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 16,
-  },
-  cardTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    flex: 1,
-    letterSpacing: -0.2,
-  },
-  /* â”€â”€ Route visualization â”€â”€ */
-  routeContainer: {
-    flexDirection: 'row',
-    gap: 14,
-  },
-  routeLineCol: {
-    width: 20,
-    alignItems: 'center',
-    paddingTop: 28,
-    paddingBottom: 28,
-  },
-  routeDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  routeLine: {
-    width: 2,
-    flex: 1,
-    marginVertical: 4,
-  },
-  routeInputCol: {
-    flex: 1,
-  },
-  routeInputWrap: {
-    marginBottom: 2,
-  },
-  /* â”€â”€ Quick actions â”€â”€ */
-  quickActions: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 8,
-  },
-  quickBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    backgroundColor: '#FAFBFC',
-  },
-  quickBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  /* â”€â”€ Info strip â”€â”€ */
-  infoStrip: {
-    flexDirection: 'row',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 16,
-    alignItems: 'center',
-  },
-  infoStripItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-  },
-  infoStripDivider: {
-    width: 1,
-    height: 36,
-    marginHorizontal: 8,
-  },
-  infoStripLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#94A3B8',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  infoStripValue: {
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  /* â”€â”€ Schedule â”€â”€ */
-  scheduleRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  scheduleInput: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    padding: 14,
-    gap: 12,
-    borderWidth: 1,
-    borderColor: '#F1F5F9',
-  },
-  scheduleIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scheduleTextWrap: {
-    flex: 1,
-  },
-  scheduleLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#94A3B8',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  scheduleValue: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#1E293B',
-  },
-  schedulePlaceholder: {
-    color: '#94A3B8',
-    fontWeight: '500',
-  },
-  /* â”€â”€ Seats â”€â”€ */
-  seatsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 4,
-  },
-  seatOption: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: '#E2E8F0',
-    backgroundColor: '#FAFBFC',
-  },
-  seatOptionActive: {
-    borderWidth: 2,
-  },
-  seatIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  seatOptionText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#475569',
-  },
-  /* â”€â”€ Payment â”€â”€ */
-  fieldLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#475569',
-    marginBottom: 10,
-  },
-  priceInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    backgroundColor: '#F8FAFC',
-    overflow: 'hidden',
-  },
-  pricePrefix: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pricePrefixText: {
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  priceInput: {
-    flex: 1,
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1E293B',
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-  },
-  priceHint: {
-    marginTop: 8,
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#64748B',
-  },
-  /* â”€â”€ Notes â”€â”€ */
-  optionalBadge: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#94A3B8',
-    backgroundColor: '#F1F5F9',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    overflow: 'hidden',
-  },
-  notesInput: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#F1F5F9',
-    padding: 14,
-    fontSize: 15,
-    color: '#1E293B',
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  /* â”€â”€ Submit â”€â”€ */
-  submitBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 16,
-    paddingVertical: 18,
-    marginTop: 4,
-    shadowColor: '#E05E1A',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  submitBtnDisabled: {
-    opacity: 0.5,
-  },
-  submitBtnText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  /* â”€â”€ Banner â”€â”€ */
-  bannerInfo: {
-    marginTop: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: '#ECFDF5',
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-  },
-  bannerInfoText: {
-    color: '#065F46',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  /* â”€â”€ Autocomplete (shared) â”€â”€ */
+
+  stepWrap: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 10,
+  paddingHorizontal: 20,
+  marginBottom: 12,
+},
+stepText: {
+  fontSize: 10,
+  color: '#7A8FA8',
+  fontWeight: '800',
+  letterSpacing: 2,
+},
+stepTrack: {
+  flex: 1,
+  height: 2,
+  backgroundColor: '#D6DAE1',
+},
+stepFill: {
+  width: '34%',
+  height: 2,
+  backgroundColor: BRAND.orange,
+},
+routeMiniRow: {
+  flexDirection: 'row',
+  gap: 10,
+},
+routeDots: {
+  width: 18,
+  alignItems: 'center',
+  paddingTop: 18,
+},
+routeMiniDot: {
+  width: 8,
+  height: 8,
+  borderRadius: 4,
+},
+routeMiniLine: {
+  width: 1,
+  flex: 1,
+  backgroundColor: '#CBD5E1',
+  marginVertical: 4,
+},
+stopPlus: {
+  color: '#94A3B8',
+  fontSize: 12,
+  fontWeight: '700',
+},
+routeFields: {
+  flex: 1,
+},
+addStopText: {
+  color: '#94A3B8',
+  fontSize: 11,
+  fontWeight: '600',
+  marginTop: -4,
+  marginBottom: 4,
+  marginLeft: 10,
+},
+fieldGroupLabel: {
+  marginHorizontal: 20,
+  marginTop: 14,
+  marginBottom: 8,
+  color: '#7A8FA8',
+  fontSize: 10,
+  fontWeight: '800',
+  letterSpacing: 2,
+},
+whenRow: {
+  flexDirection: 'row',
+  gap: 8,
+  paddingHorizontal: 20,
+},
+timeBtn: {
+  flex: 0.7,
+},
+seatPillRow: {
+  flexDirection: 'row',
+  gap: 8,
+  paddingHorizontal: 20,
+},
+seatPillActive: {
+  backgroundColor: '#13213A',
+  borderColor: '#13213A',
+},
+seatPillTextActive: {
+  color: '#FFFFFF',
+},
+priceDollar: {
+  color: BRAND.orange,
+  fontSize: 28,
+  fontWeight: '300',
+  marginRight: 8,
+},
+suggestedWrap: {
+  alignItems: 'flex-end',
+  maxWidth: 132,
+},
+suggestedLabel: {
+  color: '#94A3B8',
+  fontSize: 8,
+  fontWeight: '800',
+  letterSpacing: 0.8,
+},
+capMiniBanner: {
+  marginHorizontal: 20,
+  marginTop: 8,
+  borderRadius: 10,
+  backgroundColor: 'rgba(16,185,129,0.1)',
+  paddingHorizontal: 12,
+  paddingVertical: 8,
+},
+capMiniText: {
+  color: '#10B981',
+  fontSize: 12,
+  fontWeight: '700',
+},
+vibeCompactRow: {
+  flexDirection: 'row',
+  flexWrap: 'wrap',
+  gap: 8,
+  paddingHorizontal: 20,
+},
+vibeCompactChipActive: {
+  backgroundColor: 'rgba(244,98,31,0.12)',
+  borderColor: BRAND.orange,
+},
+vibeCompactTextActive: {
+  color: BRAND.orange,
+},
+summaryRow: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  marginBottom: 8,
+},
+summaryDivider: {
+  height: 1,
+  borderStyle: 'dashed',
+  borderWidth: 0.5,
+  borderColor: '#D6DAE1',
+  marginVertical: 8,
+},
+netEarnValue: {
+  color: BRAND.orange,
+  fontSize: 22,
+  fontWeight: '400',
+},
+continueBtn: {
+  marginHorizontal: 20,
+  marginTop: 14,
+  height: 54,
+  borderRadius: 27,
+  backgroundColor: BRAND.orange,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+continueText: {
+  color: '#FFFFFF',
+  fontSize: 15,
+  fontWeight: '800',
+},
+
+  // ── Header ────────────────────────────────────────────────────────────────
+  hdr:            { flexDirection:'row', alignItems:'center', paddingHorizontal:16, paddingTop:8, paddingBottom:14 },
+  backBtn:        { width:38, height:38, borderRadius:19, backgroundColor:'rgba(255,255,255,0.08)', alignItems:'center', justifyContent:'center' },
+  hdrTitle:       { fontSize:22, fontWeight:'800', color:'#F0F4FF', letterSpacing:-0.5 },
+  hdrSub:         { fontSize:12, color:'#7A8FA8', marginTop:1 },
+  livePill:       { flexDirection:'row', alignItems:'center', gap:5, backgroundColor:'rgba(16,185,129,0.15)', paddingHorizontal:10, paddingVertical:4, borderRadius:16, borderWidth:1, borderColor:'rgba(16,185,129,0.25)' },
+  liveDot:        { width:6, height:6, borderRadius:3, backgroundColor:'#10B981' },
+  liveText:       { color:'#10B981', fontSize:10, fontWeight:'800', letterSpacing:1.2 },
+
+  // ── Map Hero ──────────────────────────────────────────────────────────────
+  mapHero:        { marginHorizontal:16, marginBottom:8, height:220, borderRadius:24, overflow:'hidden', borderWidth:1.5, borderColor:'rgba(59,130,246,0.18)' },
+  mapGridH:       { position:'absolute', left:0, right:0, height:1, backgroundColor:'rgba(59,130,246,0.06)' },
+  mapGridV:       { position:'absolute', top:0, bottom:0, width:1, backgroundColor:'rgba(59,130,246,0.06)' },
+  mapMarker:      { position:'absolute', width:18, height:18, alignItems:'center', justifyContent:'center' },
+  mapMarkerRing:  { position:'absolute', width:18, height:18, borderRadius:9, borderWidth:2 },
+  mapMarkerCore:  { width:10, height:10, borderRadius:5, shadowOpacity:1, shadowRadius:8, shadowOffset:{width:0,height:0} },
+  mapRouteLine:   { position:'absolute', height:2.5, backgroundColor:'rgba(244,98,31,0.5)', borderRadius:2 },
+  mapPromptWrap:  { position:'absolute', top:0, left:0, right:0, bottom:40, alignItems:'center', justifyContent:'center', gap:8 },
+  mapPromptText:  { color:'rgba(255,255,255,0.3)', fontSize:12, textAlign:'center' },
+  mapInfoBar:     { position:'absolute', bottom:0, left:0, right:0, flexDirection:'row', alignItems:'center', padding:14, borderTopWidth:1, borderTopColor:'rgba(255,255,255,0.06)' },
+  mapInfoTitle:   { color:'white', fontSize:15, fontWeight:'800' },
+  mapInfoSub:     { color:'rgba(255,255,255,0.5)', fontSize:12, marginTop:2 },
+  mapEarnBadge:   { alignItems:'center', backgroundColor:'rgba(244,98,31,0.15)', borderRadius:12, paddingHorizontal:10, paddingVertical:6, borderWidth:1, borderColor:'rgba(244,98,31,0.3)' },
+  mapEarnLabel:   { color:'rgba(255,255,255,0.5)', fontSize:10, fontWeight:'600' },
+  mapEarnValue:   { color:BRAND.orange, fontSize:16, fontWeight:'800' },
+
+  // ── Demand Strip ──────────────────────────────────────────────────────────
+  demandStrip:    { marginHorizontal:16, marginBottom:16, backgroundColor:'rgba(255,255,255,0.04)', borderRadius:14, borderWidth:1, borderColor:'rgba(255,255,255,0.07)', paddingVertical:8, paddingHorizontal:12, gap:6 },
+  demandItem:     { flexDirection:'row', alignItems:'center', gap:6 },
+  demandText:     { color:'rgba(255,255,255,0.55)', fontSize:12 },
+
+  // ── Glass Cards ───────────────────────────────────────────────────────────
+  glassCard:      { marginHorizontal:16, marginBottom:14, borderRadius:22, borderWidth:1.5, borderColor:'rgba(255,255,255,0.08)', overflow:'hidden', backgroundColor:'rgba(255,255,255,0.03)' },
+  glassCardInner: { padding:18 },
+  cardHdr:        { flexDirection:'row', alignItems:'center', gap:10, marginBottom:16 },
+  cardIconWrap:   { width:32, height:32, borderRadius:10, alignItems:'center', justifyContent:'center' },
+  cardTitle:      { fontSize:16, fontWeight:'800', color:'#F0F4FF', flex:1, letterSpacing:-0.3 },
+
+  // ── Route ─────────────────────────────────────────────────────────────────
+  connectorCol:   { width:18, alignItems:'center', paddingTop:30, paddingBottom:20 },
+  connectorDot:   { width:10, height:10, borderRadius:5 },
+  connectorLine:  { width:2, flex:1, marginVertical:4, backgroundColor:'rgba(255,255,255,0.1)' },
+  quickActionsRow:{ flexDirection:'row', gap:10, marginTop:12 },
+  quickBtn:       { flexDirection:'row', alignItems:'center', gap:6, paddingHorizontal:14, paddingVertical:9, borderRadius:12, borderWidth:1, borderColor:'rgba(244,98,31,0.3)', backgroundColor:'rgba(244,98,31,0.06)' },
+  quickBtnText:   { fontSize:13, fontWeight:'600', color:BRAND.orange },
+  infoStrip:      { flexDirection:'row', backgroundColor:'rgba(255,255,255,0.05)', borderRadius:14, padding:12, marginTop:14, alignItems:'center' },
+  infoStripItem:  { flex:1, alignItems:'center', gap:3 },
+  infoStripDiv:   { width:1, height:32, backgroundColor:'rgba(255,255,255,0.08)' },
+  infoStripLabel: { fontSize:9, fontWeight:'700', color:'#7A8FA8', letterSpacing:0.8, textTransform:'uppercase' },
+  infoStripVal:   { fontSize:15, fontWeight:'800', color:'#F0F4FF' },
+
+  // ── Schedule ──────────────────────────────────────────────────────────────
+  scheduleBtn:    { flex:1, flexDirection:'row', alignItems:'center', gap:10, backgroundColor:'rgba(255,255,255,0.05)', borderRadius:14, padding:12, borderWidth:1, borderColor:'rgba(255,255,255,0.08)' },
+  scheduleBtnFilled: { borderColor:'rgba(244,98,31,0.3)', backgroundColor:'rgba(244,98,31,0.06)' },
+  scheduleIconWrap: { width:36, height:36, borderRadius:10, alignItems:'center', justifyContent:'center' },
+  scheduleLabel:  { fontSize:9, fontWeight:'700', color:'#7A8FA8', letterSpacing:0.8, textTransform:'uppercase', marginBottom:2 },
+  scheduleValue:  { fontSize:14, fontWeight:'700', color:'#F0F4FF' },
+  schedulePlaceholder: { color:'#475569', fontWeight:'500' },
+
+  // ── Seats ─────────────────────────────────────────────────────────────────
+  popularTag:     { backgroundColor:'rgba(244,98,31,0.15)', borderRadius:12, paddingHorizontal:8, paddingVertical:3 },
+  popularTagText: { color:BRAND.orange, fontSize:11, fontWeight:'700' },
+  seatRow:        { flexDirection:'row', gap:12 },
+  seatBtn:        { flex:1, borderRadius:16, borderWidth:1.5, borderColor:'rgba(255,255,255,0.08)', backgroundColor:'rgba(255,255,255,0.04)', padding:14, alignItems:'center', gap:8 },
+  seatBtnActive:  { borderColor:'rgba(244,98,31,0.5)', backgroundColor:'rgba(244,98,31,0.08)' },
+  seatIconRow:    { flexDirection:'row', gap:6 },
+  seatIconWrap:   { width:38, height:38, borderRadius:12, backgroundColor:'rgba(255,255,255,0.05)', alignItems:'center', justifyContent:'center' },
+  seatIconWrapActive: { backgroundColor:'rgba(244,98,31,0.15)' },
+  seatBtnLabel:   { fontSize:15, fontWeight:'600', color:'#7A8FA8' },
+  seatBtnSub:     { fontSize:11, color:'#475569', textAlign:'center' },
+
+  // ── Pricing ───────────────────────────────────────────────────────────────
+  aiTag:          { backgroundColor:'rgba(245,158,11,0.15)', borderRadius:12, paddingHorizontal:8, paddingVertical:3 },
+  aiTagText:      { color:'#F59E0B', fontSize:11, fontWeight:'700' },
+  priceRangeWrap: { marginBottom:14 },
+  priceRangeBar:  { height:4, backgroundColor:'rgba(255,255,255,0.08)', borderRadius:2, marginBottom:6, overflow:'hidden' },
+  priceRangeFill: { height:'100%' as any, backgroundColor:BRAND.orange, borderRadius:2 },
+  priceRangeLabel:{ fontSize:12, color:'#7A8FA8' },
+  priceInputRow:  { flexDirection:'row', alignItems:'center', borderRadius:14, borderWidth:1.5, borderColor:'rgba(255,255,255,0.1)', backgroundColor:'rgba(255,255,255,0.05)', overflow:'hidden', marginBottom:12 },
+  priceDollarBox: { paddingHorizontal:16, paddingVertical:16, backgroundColor:'rgba(244,98,31,0.1)', alignItems:'center', justifyContent:'center' },
+
+  priceInput:     { flex:1, fontSize:22, fontWeight:'700', color:'#F0F4FF', paddingHorizontal:12, paddingVertical:14 },
+  pricePerSeat:   { paddingRight:16, fontSize:14, color:'#7A8FA8', fontWeight:'500' },
+  earningsRow:    { flexDirection:'row', gap:12, marginBottom:10 },
+  earningsItem:   { flex:1, backgroundColor:'rgba(255,255,255,0.04)', borderRadius:12, padding:12, alignItems:'center' },
+  earningsLabel:  { fontSize:11, color:'#7A8FA8', fontWeight:'500', marginBottom:4 },
+  earningsValue:  { fontSize:18, fontWeight:'800', color:'#F0F4FF' },
+  priceHintText:  { fontSize:12, color:'#475569' },
+  capBanner:      { marginTop:8, paddingVertical:8, paddingHorizontal:12, borderRadius:10, backgroundColor:'rgba(16,185,129,0.1)', borderWidth:1, borderColor:'rgba(16,185,129,0.25)' },
+  capBannerText:  { color:'#10B981', fontSize:12, fontWeight:'600' },
+
+  // ── Ride Vibe ─────────────────────────────────────────────────────────────
+  optionalTag:    { fontSize:11, color:'#7A8FA8', backgroundColor:'rgba(255,255,255,0.06)', paddingHorizontal:8, paddingVertical:3, borderRadius:8 },
+  vibeSubLabel:   { fontSize:13, color:'#7A8FA8', marginBottom:12 },
+  vibeChipsRow:   { flexDirection:'row', flexWrap:'wrap', gap:8, marginBottom:14 },
+  vibeChip:       { paddingHorizontal:12, paddingVertical:8, borderRadius:20, backgroundColor:'rgba(255,255,255,0.06)', borderWidth:1, borderColor:'rgba(255,255,255,0.08)' },
+  vibeChipActive: { backgroundColor:'rgba(139,92,246,0.2)', borderColor:'rgba(139,92,246,0.5)' },
+  vibeChipText:   { fontSize:13, color:'#7A8FA8', fontWeight:'500' },
+  vibeChipTextActive: { color:'#C4B5FD', fontWeight:'700' },
+  notesInput:     { backgroundColor:'rgba(255,255,255,0.04)', borderRadius:12, borderWidth:1, borderColor:'rgba(255,255,255,0.08)', padding:12, fontSize:14, color:'#F0F4FF', minHeight:64, textAlignVertical:'top' },
+
+  // ── Campus Activity ───────────────────────────────────────────────────────
+  campusActivityTitle: { fontSize:15, fontWeight:'800', color:'#F0F4FF', marginBottom:12 },
+  campusActivityRow:   { flexDirection:'row', alignItems:'center', paddingVertical:10, gap:10 },
+  campusActivityDot:   { width:6, height:6, borderRadius:3, backgroundColor:BRAND.orange, flexShrink:0 },
+  campusActivityText:  { flex:1, fontSize:13, color:'rgba(255,255,255,0.55)' },
+
+  // ── GO LIVE Button ────────────────────────────────────────────────────────
+  goLiveBtn:      { height:60, borderRadius:22, flexDirection:'row', alignItems:'center', justifyContent:'center', overflow:'hidden', marginBottom:10 },
+  goLiveGlow:     { borderRadius:22, backgroundColor:BRAND.orange, shadowColor:BRAND.orange, shadowOpacity:0.8, shadowRadius:30, shadowOffset:{width:0,height:0} },
+  goLiveBtnText:  { color:'white', fontSize:20, fontWeight:'900', letterSpacing:1 },
+  goLiveArrow:    { position:'absolute', right:20, width:34, height:34, borderRadius:17, backgroundColor:'rgba(255,255,255,0.2)', alignItems:'center', justifyContent:'center' },
+  goLiveSubText:  { textAlign:'center', fontSize:12, color:'#475569', marginBottom:4 },
+
+  // ── Autocomplete (dark themed) ────────────────────────────────────────────
   label: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
-    color: '#64748B',
-    marginBottom: 6,
+    color: '#7A8FA8',
+    marginBottom: 5,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
+
   input: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
+    borderColor: '#DDE3EC',
+    borderRadius: 10,
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: '#1E293B',
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#13213A',
   },
+
   autoWrap: {
     position: 'relative',
     marginBottom: 10,
   },
   autoPanel: {
     position: 'absolute',
-    top: 68,
+    top: 50,
     left: 0,
     right: 0,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    maxHeight: 240,
+    borderColor: '#DDE3EC',
+    maxHeight: 220,
     overflow: 'hidden',
-    elevation: 10,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
-    shadowRadius: 16,
+    shadowRadius: 20,
     zIndex: 999,
   },
-  autoItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  autoItemRow: {
-    flexDirection: 'column',
-  },
+  autoItem:       { paddingHorizontal:14, paddingVertical:12, borderBottomWidth:1, borderBottomColor:'rgba(255,255,255,0.06)' },
+  autoItemRow:    { flexDirection:'column' },
   autoMainText: {
-    color: '#1E293B',
+    color: '#13213A',
     fontSize: 14,
     fontWeight: '600',
   },
   autoSecondaryText: {
-    color: '#94A3B8',
+    color: '#7A8FA8',
     fontSize: 12,
     marginTop: 2,
   },
   autoText: {
-    color: '#1E293B',
+    color: '#13213A',
     fontSize: 14,
   },
-  autoEmpty: {
-    padding: 14,
-  },
-  placesEmptyText: {
-    color: '#94A3B8',
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  /* â”€â”€ Calendar Modal â”€â”€ */
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  calendarCard: {
-    width: '100%',
-    maxWidth: 380,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
-    elevation: 12,
-  },
-  calendarHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  monthTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#1E293B',
-  },
-  navBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    backgroundColor: '#F8FAFC',
-  },
-  navBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  weekdaysRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
-    marginBottom: 6,
-  },
-  weekday: {
-    width: `${100 / 7}%`,
-    textAlign: 'center',
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#94A3B8',
-  },
-  daysRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  dayCell: {
-    width: `${100 / 7}%`,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    backgroundColor: '#FAFBFC',
-  },
-  dayText: {
-    fontSize: 14,
-    color: '#1E293B',
-    fontWeight: '600',
-  },
-  closeBtn: {
-    marginTop: 12,
-    alignSelf: 'flex-end',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  closeBtnText: {
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  /* â”€â”€ Time Modal â”€â”€ */
-  timeCard: {
-    width: '100%',
-    maxWidth: 380,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
-    elevation: 12,
-  },
-  clockRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginVertical: 12,
-  },
-  clockDisplay: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    flex: 1,
-  },
-  clockText: {
-    fontSize: 44,
-    fontWeight: '800',
-  },
-  stepperCol: {
-    width: 56,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  stepBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    backgroundColor: '#F8FAFC',
-  },
-  stepBtnText: {
-    fontSize: 22,
-    fontWeight: '800',
-  },
-  ampmPill: {
-    marginLeft: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 9999,
-    borderWidth: 1.5,
-  },
-  ampmText: {
-    fontWeight: '800',
-    fontSize: 14,
-  },
-  timeColumns: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  timeCol: {
-    flex: 1,
-  },
-  timeWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 10,
-    marginBottom: 10,
-  },
-  timeChip: {
-    backgroundColor: '#F1F5F9',
-    borderRadius: 9999,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    minWidth: 48,
-    alignItems: 'center',
-  },
-  timeChipActive: {
-    backgroundColor: '#E05E1A',
-  },
-  timeChipText: {
-    fontWeight: '700',
-    fontSize: 14,
-    color: '#475569',
-  },
-  timeFooter: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: 12,
-    marginTop: 8,
-  },
-  confirmBtn: {
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  confirmBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 15,
-  },
-  /* â”€â”€ Suggestion legacy â”€â”€ */
-  suggestionsPanel: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
-    marginTop: 8,
-    overflow: 'hidden',
-    position: 'absolute',
-    top: 48,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-  },
-  suggestionItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    backgroundColor: '#FFFFFF',
-  },
-  suggestionText: {
-    fontSize: 14,
-    color: '#1E293B',
-    fontWeight: '600',
-  },
-  suggestionSub: {
-    fontSize: 12,
-    color: '#64748B',
-  },
-  /* â”€â”€ Legacy compat â”€â”€ */
-  inputWrapper: {
-    position: 'relative',
-  },
-  textArea: {
-    height: 100,
-    textAlignVertical: 'top',
-  },
-  section: {
-    marginBottom: 16,
-  },
-  pickerWrap: {
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  chipsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 8,
-  },
-  chip: {
-    backgroundColor: '#F1F5F9',
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  chipText: {
-    fontSize: 12,
-    color: '#1E293B',
-    fontWeight: '600',
-  },
+  autoEmpty:      { padding:14 },
+  placesEmptyText:{ color:'#7A8FA8', fontSize:13, textAlign:'center' },
+
+  // ── Calendar Modal (keep existing light theme for modals) ─────────────────
+  modalBackdrop:  { flex:1, backgroundColor:'rgba(0,0,0,0.65)', justifyContent:'center', alignItems:'center', padding:20 },
+  calendarCard:   { width:'100%', maxWidth:380, backgroundColor:'#FFFFFF', borderRadius:22, padding:20, shadowColor:'#000', shadowOffset:{width:0,height:12}, shadowOpacity:0.25, shadowRadius:30, elevation:16 },
+  calendarHeader: { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:12 },
+  monthTitle:     { fontSize:17, fontWeight:'700', color:'#1E293B' },
+  navBtn:         { paddingHorizontal:12, paddingVertical:8, borderRadius:10, borderWidth:1, backgroundColor:'#F8FAFC' },
+  navBtnText:     { fontSize:16, fontWeight:'700' },
+  weekdaysRow:    { flexDirection:'row', justifyContent:'space-between', marginTop:8, marginBottom:6 },
+  weekday:        { width:`${100/7}%`, textAlign:'center', fontSize:12, fontWeight:'700', color:'#94A3B8' },
+  daysRow:        { flexDirection:'row', justifyContent:'space-between', marginBottom:4 },
+  dayCell:        { width:`${100/7}%`, height:44, alignItems:'center', justifyContent:'center', borderRadius:12, backgroundColor:'#FAFBFC' },
+  dayText:        { fontSize:14, color:'#1E293B', fontWeight:'600' },
+  closeBtn:       { marginTop:12, alignSelf:'flex-end', paddingHorizontal:12, paddingVertical:8 },
+  closeBtnText:   { fontWeight:'600', fontSize:14 },
+
+  // ── Time Modal ────────────────────────────────────────────────────────────
+  timeCard:       { width:'100%', maxWidth:380, backgroundColor:'#FFFFFF', borderRadius:22, padding:20, shadowColor:'#000', shadowOffset:{width:0,height:12}, shadowOpacity:0.25, shadowRadius:30, elevation:16 },
+  clockRow:       { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginVertical:12 },
+  clockDisplay:   { flexDirection:'row', alignItems:'center', justifyContent:'center', gap:4, flex:1 },
+  clockText:      { fontSize:44, fontWeight:'800', color:'#1E293B' },
+  stepperCol:     { width:56, alignItems:'center', justifyContent:'center', gap:10 },
+  stepBtn:        { width:44, height:44, borderRadius:12, alignItems:'center', justifyContent:'center', borderWidth:1, backgroundColor:'#F8FAFC' },
+  stepBtnText:    { fontSize:22, fontWeight:'800' },
+  ampmPill:       { marginLeft:8, paddingHorizontal:12, paddingVertical:6, borderRadius:9999, borderWidth:1.5 },
+  ampmText:       { fontWeight:'800', fontSize:14 },
+  timeColumns:    { flexDirection:'row', gap:12 },
+  timeCol:        { flex:1 },
+  timeWrap:       { flexDirection:'row', flexWrap:'wrap', gap:8, marginTop:10, marginBottom:10 },
+  timeChip:       { backgroundColor:'#F1F5F9', borderRadius:9999, paddingVertical:8, paddingHorizontal:14, minWidth:48, alignItems:'center' },
+  timeChipActive: { backgroundColor:'#E05E1A' },
+  timeChipText:   { fontWeight:'700', fontSize:14, color:'#475569' },
+  timeFooter:     { flexDirection:'row', justifyContent:'flex-end', alignItems:'center', gap:12, marginTop:8 },
+  confirmBtn:     { paddingHorizontal:24, paddingVertical:10, borderRadius:12 },
+  confirmBtnText: { color:'#FFFFFF', fontWeight:'700', fontSize:15 },
+
+  // ── Suggestion / Seat Modal (legacy) ──────────────────────────────────────
+  suggestionsPanel:   { backgroundColor:'#FFFFFF', borderWidth:1, borderColor:'#E2E8F0', borderRadius:12, marginTop:8, overflow:'hidden', position:'absolute', top:48, left:0, right:0, zIndex:10 },
+  suggestionItem:     { paddingHorizontal:14, paddingVertical:10, borderBottomWidth:1, borderBottomColor:'#F1F5F9', backgroundColor:'#FFFFFF' },
+  suggestionText:     { fontSize:14, color:'#1E293B', fontWeight:'600' },
+  suggestionSub:      { fontSize:12, color:'#64748B' },
+  inputWrapper:       { position:'relative' },
+  textArea:           { height:100, textAlignVertical:'top' },
+  section:            { marginBottom:16 },
+  pickerWrap:         { borderWidth:1, borderColor:'#E2E8F0', borderRadius:12, overflow:'hidden' },
+  chipsRow:           { flexDirection:'row', flexWrap:'wrap', gap:8, marginBottom:8 },
+  chip:               { backgroundColor:'#F1F5F9', borderRadius:16, paddingHorizontal:10, paddingVertical:6 },
+  chipText:           { fontSize:12, color:'#1E293B', fontWeight:'600' },
+
+  // ── Legacy compat (unused but kept for safety) ────────────────────────────
+  keyboardAvoid:  { flex:1 },
+  safeArea:       { flex:1 },
+  flex:           { flex:1 },
+  header:         { padding:16, paddingBottom:0 },
+  headerTitle:    { fontSize:28, fontWeight:'bold', marginBottom:4, color:'#F0F4FF' },
+  headerSubtitle: { fontSize:16, color:'#7A8FA8' },
+  scrollArea:     { flex:1 },
+  scrollContent:  { padding:16, paddingBottom:40 },
+  card:           { backgroundColor:'rgba(255,255,255,0.05)', borderRadius:18, padding:18, marginBottom:14, borderWidth:1, borderColor:'rgba(255,255,255,0.08)' },
+  cardHeader:     { flexDirection:'row', alignItems:'center', gap:10, marginBottom:16 },
+  routeContainer: { flexDirection:'row', gap:14 },
+  routeLineCol:   { width:20, alignItems:'center', paddingTop:28, paddingBottom:28 },
+  routeDot:       { width:12, height:12, borderRadius:6 },
+  routeLine:      { width:2, flex:1, marginVertical:4 },
+  routeInputCol:  { flex:1 },
+  routeInputWrap: { marginBottom:2 },
+  quickActions:   { flexDirection:'row', gap:10, marginTop:8 },
+  infoStripDivider:{ width:1, height:36, marginHorizontal:8 },
+  infoStripValue: { fontSize:17, fontWeight:'800', color:'#F0F4FF' },
+  scheduleRow:    { flexDirection:'row', gap:12 },
+  scheduleInput:  { flex:1, flexDirection:'row', alignItems:'center', backgroundColor:'rgba(255,255,255,0.05)', borderRadius:12, padding:14, gap:12, borderWidth:1, borderColor:'rgba(255,255,255,0.08)' },
+  scheduleTextWrap:{ flex:1 },
+  seatsRow:       { flexDirection:'row', gap:12, marginBottom:4 },
+  seatOption:     { flex:1, flexDirection:'row', alignItems:'center', gap:10, paddingVertical:14, paddingHorizontal:16, borderRadius:12, borderWidth:1.5, borderColor:'rgba(255,255,255,0.08)', backgroundColor:'rgba(255,255,255,0.04)' },
+  seatOptionActive:{ borderWidth:2 },
+  seatOptionText: { fontSize:15, fontWeight:'600', color:'#475569' },
+  fieldLabel:     { fontSize:14, fontWeight:'600', color:'#7A8FA8', marginBottom:10 },
+  priceHint:      { marginTop:8, fontSize:12, fontWeight:'500', color:'#475569' },
+  optionalBadge:  { fontSize:11, fontWeight:'600', color:'#94A3B8', backgroundColor:'rgba(255,255,255,0.06)', paddingHorizontal:8, paddingVertical:3, borderRadius:6, overflow:'hidden' },
+  submitBtn:      { flexDirection:'row', alignItems:'center', justifyContent:'center', borderRadius:16, paddingVertical:18, marginTop:4 },
+  submitBtnDisabled:{ opacity:0.5 },
+  submitBtnText:  { color:'#FFFFFF', fontSize:18, fontWeight:'700', letterSpacing:0.3 },
+  bannerInfo:     { marginTop:8, paddingVertical:8, paddingHorizontal:12, borderRadius:10, backgroundColor:'rgba(16,185,129,0.1)', borderWidth:1, borderColor:'rgba(16,185,129,0.3)' },
+  bannerInfoText: { color:'#10B981', fontSize:12, fontWeight:'600' },
+  pricePrefix:    { paddingHorizontal:16, paddingVertical:14, justifyContent:'center', alignItems:'center' },
+  pricePrefixText:{ fontSize:20, fontWeight:'800' },
+  mapLoadingOverlay: {
+  ...StyleSheet.absoluteFillObject,
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: 'rgba(8,14,23,0.25)',
+},
+
+mapPinWrap: {
+  width: 30,
+  height: 30,
+  borderRadius: 15,
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: 'rgba(255,255,255,0.92)',
+  borderWidth: 2,
+  borderColor: '#FFFFFF',
+  shadowColor: '#000',
+  shadowOpacity: 0.18,
+  shadowRadius: 8,
+  shadowOffset: { width: 0, height: 4 },
+  elevation: 5,
+},
+
+mapPin: {
+  width: 14,
+  height: 14,
+  borderRadius: 7,
+},
 });

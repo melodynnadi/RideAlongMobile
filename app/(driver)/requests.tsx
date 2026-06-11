@@ -1,18 +1,46 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, TextInput, Platform, ScrollView, Linking, Share } from 'react-native';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  TextInput,
+  ScrollView,
+  Linking,
+  Share,
+  Animated,
+  StatusBar,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useTheme } from '@/hooks/useTheme';
+
 import { firebaseAuth, firestore, storage } from '@/constants/services';
-import { collection, doc, getDoc, onSnapshot, query, updateDoc, where, addDoc, serverTimestamp, Timestamp, getDocs, limit as fsLimit } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  query,
+  where,
+  addDoc,
+  serverTimestamp,
+  Timestamp,
+  getDocs,
+} from 'firebase/firestore';
 import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { Image } from 'expo-image';
-import { Clock, ChevronRight, Star, MapPin, User, Filter, Share2 } from 'lucide-react-native';
-import { Button } from '@/components/ui/Button';
-import { theme } from '@/theme';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import { AppColors, BRAND } from '@/constants/theme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import { Ionicons } from '@expo/vector-icons';
 import { RideFiltersModal } from '@/components/RideFiltersModal';
 import { getDefaultFilters, filterRides as applyRideFilters, hasActiveFilters, type RideFilterOptions } from '@/utils/rideFilters';
-import { AddressLink } from '@/components/AddressLink';
+
 
 type InboxItem = {
   id: string;
@@ -33,6 +61,17 @@ type InboxItem = {
   requesterRating?: number | null;
   status: string;
   ridePostingId?: string | null;
+  pickupLat?: number | null;
+  pickupLng?: number | null;
+  dropoffLat?: number | null;
+  dropoffLng?: number | null;
+};
+
+type RequestFilter = 'all' | 'today' | 'tomorrow' | 'open' | 'assigned' | 'best';
+type GradientStops = readonly [string, string, ...string[]];
+
+const asGradientStops = (stops: string[]): GradientStops => {
+  return stops as unknown as GradientStops;
 };
 
 // Local helpers (mirrors logic used in Home)
@@ -89,6 +128,33 @@ function extractAddress(r: any, kind: 'pickup' | 'dropoff'): string | undefined 
   const addr = kind === 'pickup' ? (r?.pickupAddress || r?.fromAddress) : (r?.dropoffAddress || r?.toAddress);
   if (typeof addr === 'string') return addr;
   return undefined;
+}
+
+function extractCoords(r: any, kind: 'pickup' | 'dropoff'): { lat: number; lng: number } | null {
+  const loc = kind === 'pickup'
+    ? (r?.pickupLocation || r?.pickup || r?.from)
+    : (r?.dropoffLocation || r?.dropoff || r?.to);
+
+  const flatLat = kind === 'pickup' ? r?.pickupLat : r?.dropoffLat;
+  const flatLng = kind === 'pickup' ? r?.pickupLng : r?.dropoffLng;
+
+  const lat =
+    typeof loc?.latitude === 'number' ? loc.latitude :
+    typeof loc?.lat === 'number' ? loc.lat :
+    typeof flatLat === 'number' ? flatLat :
+    undefined;
+
+  const lng =
+    typeof loc?.longitude === 'number' ? loc.longitude :
+    typeof loc?.lng === 'number' ? loc.lng :
+    typeof flatLng === 'number' ? flatLng :
+    undefined;
+
+  if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat === 0 && lng === 0) return null;
+
+  return { lat, lng };
 }
 
 function formatDateOnly(d: Date) {
@@ -308,300 +374,273 @@ async function getOfferedRequestIdSet(driverId: string): Promise<Set<string>> {
 }
 
 export default function RequestsInboxScreen() {
-  const theme = useTheme();
+  const { colors, isDark } = useAppTheme();
+  const themed = createStyles(colors, isDark);
   const router = useRouter();
   const uid = firebaseAuth.currentUser?.uid ?? null;
   const email = firebaseAuth.currentUser?.email ?? null;
+
   const [items, setItems] = useState<InboxItem[]>([]);
+  const [openItems, setOpenItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [avatarByUser, setAvatarByUser] = useState<Record<string, string>>({});
   const [userDataByUserId, setUserDataByUserId] = useState<Record<string, { name: string; rating: number; email: string }>>({});
-  const [openItems, setOpenItems] = useState<InboxItem[]>([]);
   const [offeredByReqId, setOfferedByReqId] = useState<Record<string, { id: string; status: string }>>({});
-  const [filter, setFilter] = useState<'all' | 'today' | 'tomorrow' | 'open' | 'assigned'>('all');
+  const [filter, setFilter] = useState<RequestFilter>('all');
   const [search, setSearch] = useState('');
-
   const [filtersVisible, setFiltersVisible] = useState(false);
   const [basicFilters, setBasicFilters] = useState<RideFilterOptions>(getDefaultFilters());
-  // const [prefFilters, setPrefFilters] = useState<any>({});
-  // const [prefsByUserId, setPrefsByUserId] = useState<Record<string, any>>({});
+  const [mapReady, setMapReady] = useState(false);
+
+  const pulse1 = useRef(new Animated.Value(0)).current;
+  const pulse2 = useRef(new Animated.Value(0)).current;
+  const pulse3 = useRef(new Animated.Value(0)).current;
+  const pulse4 = useRef(new Animated.Value(0)).current;
+  const glowAnim = useRef(new Animated.Value(0.45)).current;
+
+  useEffect(() => {
+    const makePulse = (value: Animated.Value, delay: number) =>
+      Animated.loop(Animated.sequence([
+        Animated.delay(delay),
+        Animated.timing(value, { toValue: 1, duration: 1500, useNativeDriver: true }),
+        Animated.timing(value, { toValue: 0, duration: 1500, useNativeDriver: true }),
+      ]));
+
+    const glow = Animated.loop(Animated.sequence([
+      Animated.timing(glowAnim, { toValue: isDark ? 0.9 : 0.45, duration: 2200, useNativeDriver: true }),
+      Animated.timing(glowAnim, { toValue: isDark ? 0.25 : 0.12, duration: 2200, useNativeDriver: true }),
+    ]));
+
+    const p1 = makePulse(pulse1, 0);
+    const p2 = makePulse(pulse2, 375);
+    const p3 = makePulse(pulse3, 750);
+    const p4 = makePulse(pulse4, 1125);
+
+    p1.start(); p2.start(); p3.start(); p4.start(); glow.start();
+
+    return () => {
+      p1.stop(); p2.stop(); p3.stop(); p4.stop(); glow.stop();
+    };
+  }, [glowAnim, isDark, pulse1, pulse2, pulse3, pulse4]);
+
   const allItems = useMemo<InboxItem[]>(() => {
-    // de-dupe by id, prefer assigned items over open to keep status context
     const map: Record<string, InboxItem> = {};
-    [...openItems, ...items].forEach((i) => { map[i.id] = i; });
+    [...openItems, ...items].forEach((item) => {
+      map[item.id] = item;
+    });
     return Object.values(map);
   }, [openItems, items]);
-      const filteredItems = useMemo(() => {
-        const term = search.trim().toLowerCase();
-        return allItems.filter((i) => {
-          // Hide requests where driver has already sent an offer
-          if (offeredByReqId[i.id]) return false;
-          
-          if (filter === 'today' && !isSameDay(i.date, 0)) return false;
-          if (filter === 'tomorrow' && !isSameDay(i.date, 1)) return false;
-          if (filter === 'open' && !!items.find((x) => x.id === i.id)) return false;
-          if (filter === 'assigned' && !items.find((x) => x.id === i.id)) return false;
-          if (!term) return true;
-          
-          // Include fetched user name in search
-          const userData = i.requesterId ? userDataByUserId[i.requesterId] : undefined;
-          const searchableFields = [
-            i.pickup, 
-            i.dropoff, 
-            userData?.name, // Prioritize fetched user name
-            i.requesterName, 
-            i.requesterEmail
-          ];
-          
-          const hay = searchableFields
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase();
-          return hay.includes(term);
-        });
-      }, [allItems, items, filter, search, offeredByReqId]);
-  
-  // Apply basic filters from RideFiltersModal
-  const basicFilteredItems = useMemo(() => {
-    if (!hasActiveFilters(basicFilters)) return filteredItems;
-    // Convert to format expected by applyRideFilters
-    const rawRequests = filteredItems.map(item => ({
-      id: item.id,
-      date: item.date,
-      time: item.time,
-      pickup: item.pickup,
-      dropoff: item.dropoff,
-      price: item.price,
-      contributionAmount: item.price,
-      seats: item.seats
-    }));
-    const filtered = applyRideFilters(rawRequests, basicFilters, true);
-    const filteredIds = new Set(filtered.map((r: any) => r.id));
-    return filteredItems.filter(item => filteredIds.has(item.id));
-  }, [filteredItems, basicFilters]);
-  
-  const finalItems = basicFilteredItems;
-  // Preference filtering disabled - uncomment if needed
-  // const finalItems = useMemo(() => {
-  //   const hasAnyPref = Object.values(prefFilters || {}).some((v) => Array.isArray(v) && v.length > 0);
-  //   if (!hasAnyPref) return basicFilteredItems;
-  //   return basicFilteredItems;
-  // }, [basicFilteredItems]);
 
-  // const togglePref = (key: string, val: string) => {
-  //   // setPrefFilters implementation
-  // };
+  const scoreRequest = (item: InboxItem) => {
+    const payout = typeof item.price === 'number' ? Math.min(item.price * 4, 40) : 12;
+    const soon = isSameDay(item.date, 0) ? 25 : isSameDay(item.date, 1) ? 14 : 6;
+    const distance = typeof item.distanceMiles === 'number' ? Math.max(0, 20 - item.distanceMiles) : 8;
+    const rating = item.requesterId ? (userDataByUserId[item.requesterId]?.rating ?? 5) * 3 : 12;
+    return Math.round(Math.min(98, payout + soon + distance + rating));
+  };
 
+  const filteredItems = useMemo(() => {
+    const term = search.trim().toLowerCase();
+
+    return allItems.filter((item) => {
+      if (offeredByReqId[item.id]) return false;
+      if (filter === 'today' && !isSameDay(item.date, 0)) return false;
+      if (filter === 'tomorrow' && !isSameDay(item.date, 1)) return false;
+      if (filter === 'open' && !!items.find((x) => x.id === item.id)) return false;
+      if (filter === 'assigned' && !items.find((x) => x.id === item.id)) return false;
+      if (filter === 'best' && scoreRequest(item) < 60) return false;
+
+      if (!term) return true;
+
+      const userData = item.requesterId ? userDataByUserId[item.requesterId] : undefined;
+      const searchable = [
+        item.pickup,
+        item.dropoff,
+        userData?.name,
+        item.requesterName,
+        item.requesterEmail,
+      ].filter(Boolean).join(' ').toLowerCase();
+
+      return searchable.includes(term);
+    });
+  }, [allItems, items, filter, search, offeredByReqId, userDataByUserId]);
+
+  const finalItems = useMemo(() => {
+    const base = hasActiveFilters(basicFilters)
+      ? filteredItems.filter((item) => {
+          const raw = [{
+            id: item.id,
+            date: item.date,
+            time: item.time,
+            pickup: item.pickup,
+            dropoff: item.dropoff,
+            price: item.price,
+            contributionAmount: item.price,
+            seats: item.seats,
+          }];
+          return applyRideFilters(raw, basicFilters, true).length > 0;
+        })
+      : filteredItems;
+
+    if (filter === 'best') {
+      return [...base].sort((a, b) => scoreRequest(b) - scoreRequest(a));
+    }
+
+    return base;
+  }, [filteredItems, basicFilters, filter, userDataByUserId]);
+
+  const bestMatchCount = useMemo(
+    () => allItems.filter((item) => !offeredByReqId[item.id] && scoreRequest(item) >= 60).length,
+    [allItems, offeredByReqId, userDataByUserId]
+  );
+
+  const estimatedAverage = useMemo(() => {
+    const priced = finalItems.map((item) => item.price).filter((price): price is number => typeof price === 'number');
+    if (!priced.length) return null;
+    return priced.reduce((sum, price) => sum + price, 0) / priced.length;
+  }, [finalItems]);
+
+  const mapItems = useMemo(
+    () => finalItems.filter(
+      (item) => typeof item.pickupLat === 'number' && typeof item.pickupLng === 'number'
+    ),
+    [finalItems]
+  );
+
+  const mapRegion = useMemo(() => {
+    const first = mapItems[0];
+
+    return {
+      latitude: first?.pickupLat ?? 32.3513,
+      longitude: first?.pickupLng ?? -95.3011,
+      latitudeDelta: mapItems.length > 1 ? 0.06 : 0.04,
+      longitudeDelta: mapItems.length > 1 ? 0.06 : 0.04,
+    };
+  }, [mapItems]);
 
   useEffect(() => {
     if (!uid && !email) {
       setItems([]);
+      setOpenItems([]);
       setLoading(false);
       return;
     }
+
     setLoading(true);
-  const base = collection(firestore, 'rideRequests');
+    const base = collection(firestore, 'rideRequests');
     const unsubs: Array<() => void> = [];
 
     const handler = (snap: any) => {
       const rows: InboxItem[] = [];
+
       snap.forEach((d: any) => {
         const r = d.data() || {};
-        const contribRaw = r.contributionAmount ?? r.contribution ?? r.requestedContribution;
-        const contribNum = typeof contribRaw === 'number'
-          ? contribRaw
-          : (typeof contribRaw === 'string'
-              ? (() => { const n = parseFloat(contribRaw.replace(/[^0-9.\-]/g, '')); return isNaN(n) ? NaN : n; })()
-              : NaN);
-        const priceFieldNum = typeof r.price === 'number' ? r.price : (typeof r.price === 'string' ? (() => { const n = parseFloat(r.price.replace(/[^0-9.\-]/g, '')); return isNaN(n) ? NaN : n; })() : NaN);
-        const estFareNum = typeof r.estimatedFare === 'number' ? r.estimatedFare : (typeof r.estimatedFare === 'string' ? (() => { const n = parseFloat(r.estimatedFare.replace(/[^0-9.\-]/g, '')); return isNaN(n) ? NaN : n; })() : NaN);
-        const price = !isNaN(contribNum) && contribNum > 0 ? contribNum : (!isNaN(priceFieldNum) && priceFieldNum > 0 ? priceFieldNum : (!isNaN(estFareNum) && estFareNum > 0 ? estFareNum : null));
         const dt = getRideDateTime(r);
-        const pickup = extractAddress(r, 'pickup') || 'Pickup';
-        const dropoff = extractAddress(r, 'dropoff') || 'Dropoff';
-        const seats = (typeof r.passengers === 'number') ? r.passengers
-          : (typeof r.numPassengers === 'number' ? r.numPassengers
-          : (typeof r.seats === 'number' ? r.seats : null));
-        const durText = getDurationText(r);
         const distInfo = getDistanceInfo(r);
-        const requesterName = r.userName || r.riderName || r.requesterName || r.name || null;
-        const requesterId = r.userId || r.riderId || r.requesterId || null;
-        const requesterEmail = r.userEmail || r.riderEmail || r.requesterEmail || r.email || null;
-        const requesterPhone = r.userPhone || r.phone || r.phoneNumber || r.contactPhone || null;
+        const pickupCoords = extractCoords(r, 'pickup');
+        const dropoffCoords = extractCoords(r, 'dropoff');
+        const contribRaw = r.contributionAmount ?? r.contribution ?? r.requestedContribution;
+        const contribNum = typeof contribRaw === 'number' ? contribRaw : typeof contribRaw === 'string' ? parseFloat(contribRaw.replace(/[^0-9.\-]/g, '')) : NaN;
+        const priceNum = typeof r.price === 'number' ? r.price : typeof r.price === 'string' ? parseFloat(r.price.replace(/[^0-9.\-]/g, '')) : NaN;
+        const fareNum = typeof r.estimatedFare === 'number' ? r.estimatedFare : typeof r.estimatedFare === 'string' ? parseFloat(r.estimatedFare.replace(/[^0-9.\-]/g, '')) : NaN;
+        const price = !isNaN(contribNum) && contribNum > 0 ? contribNum : !isNaN(priceNum) && priceNum > 0 ? priceNum : !isNaN(fareNum) && fareNum > 0 ? fareNum : null;
+
         rows.push({
           id: d.id,
-          pickup,
-          dropoff,
+          pickup: extractAddress(r, 'pickup') || 'Pickup',
+          dropoff: extractAddress(r, 'dropoff') || 'Dropoff',
           date: r.date || (dt ? formatDateOnly(dt) : null),
           time: r.time || (dt ? formatTime(dt) : null),
           price,
-          seats,
-          durationText: durText || null,
+          seats: typeof r.passengers === 'number' ? r.passengers : typeof r.numPassengers === 'number' ? r.numPassengers : typeof r.seats === 'number' ? r.seats : null,
+          durationText: getDurationText(r) || null,
           distanceText: distInfo.text || null,
           distanceMiles: typeof distInfo.miles === 'number' ? distInfo.miles : null,
           notes: r.notes || null,
-          requesterName,
-          requesterId,
-          requesterEmail,
-          requesterPhone,
+          requesterName: r.userName || r.riderName || r.requesterName || r.name || null,
+          requesterId: r.userId || r.riderId || r.requesterId || null,
+          requesterEmail: r.userEmail || r.riderEmail || r.requesterEmail || r.email || null,
+          requesterPhone: r.userPhone || r.phone || r.phoneNumber || r.contactPhone || null,
           status: String(r.status || 'pending'),
           ridePostingId: r.ridePostingId || r.postingId || null,
+          pickupLat: pickupCoords?.lat ?? null,
+          pickupLng: pickupCoords?.lng ?? null,
+          dropoffLat: dropoffCoords?.lat ?? null,
+          dropoffLng: dropoffCoords?.lng ?? null,
         });
       });
+
       setItems((prev) => mergeRows(prev, rows));
       setLoading(false);
     };
 
-    // Build many alternate queries to cover various backend schemas
     const qs: any[] = [];
+
     if (uid) {
       qs.push(query(base, where('driverId', '==', uid)));
       qs.push(query(base, where('driverUID', '==', uid)));
       qs.push(query(base, where('driverUid', '==', uid)));
-      qs.push(query(base, where('userId', '==', uid))); // some systems store requester as userId
       qs.push(query(base, where('recipientId', '==', uid)));
       qs.push(query(base, where('assignedDriverId', '==', uid)));
       qs.push(query(base, where('providerId', '==', uid)));
       qs.push(query(base, where('recipients', 'array-contains', uid)));
       qs.push(query(base, where('driverIds', 'array-contains', uid)));
-      // nested driver field variants
-      try { qs.push(query(base, where('driver.id', '==', uid))); } catch {}
-      try { qs.push(query(base, where('assignedDriver.id', '==', uid))); } catch {}
     }
+
     if (email) {
       qs.push(query(base, where('driverEmail', '==', email)));
-      qs.push(query(base, where('email', '==', email)));
-      qs.push(query(base, where('userEmail', '==', email)));
-      qs.push(query(base, where('riderEmail', '==', email)));
-      qs.push(query(base, where('requesterEmail', '==', email)));
       qs.push(query(base, where('recipientsEmail', 'array-contains', email)));
-      // nested email variants
-      try { qs.push(query(base, where('driver.email', '==', email))); } catch {}
-      try { qs.push(query(base, where('assignedDriver.email', '==', email))); } catch {}
     }
 
-    // Attach listeners
-    qs.forEach((q) => {
-      try { unsubs.push(onSnapshot(q, handler, () => setLoading(false))); } catch {}
+    qs.forEach((qy) => {
+      try {
+        unsubs.push(onSnapshot(qy, handler, () => setLoading(false)));
+      } catch {}
     });
 
-    // Optional: fallback to alternate collection names
-    if (unsubs.length === 0) {
-      try {
-        const altBase = collection(firestore, 'ride_requests');
-        const altQs: any[] = [];
-        if (uid) {
-          altQs.push(query(altBase, where('driverId', '==', uid)));
-          altQs.push(query(altBase, where('userId', '==', uid)));
-        }
-        if (email) {
-          altQs.push(query(altBase, where('driverEmail', '==', email)));
-          altQs.push(query(altBase, where('email', '==', email)));
-        }
-        altQs.forEach((q) => {
-          try { unsubs.push(onSnapshot(q, handler, () => setLoading(false))); } catch {}
-        });
-      } catch {}
-    }
-
-    // Dev aid: peek at a few docs to log available fields (non-blocking)
-    (async () => {
-      try {
-        const snap = await getDocs(query(base, fsLimit(3)));
-        const sample = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        // eslint-disable-next-line no-console
-        console.log('[Requests] sample rideRequests docs:', sample);
-      } catch (e) {
-        // ignore
-      }
-    })();
-
-    // Listen to OPEN rider requests that any driver can offer on (web uses status==pending only)
     try {
-      // Match web: query only pending status, then exclude confirmed and already-offered client-side
       const qOpen = query(base, where('status', '==', 'pending'));
-  const mapOpen = async (snap: any) => {
-        console.log('[Requests] open snapshot size=', snap.size);
+
+      const mapOpen = async (snap: any) => {
         let rawDocs = snap.docs.map((d: any) => ({ id: d.id, data: d.data() || {} }));
-        console.log('[Requests] raw pending docs:', rawDocs.length);
-        
-        // Exclude confirmed rides (web joins confirmedRides collection)
-        try {
-          const confirmedSet = await getConfirmedRideRequestIdSet(rawDocs.map((doc: any) => String(doc.id)));
-          if (confirmedSet.size > 0) {
-            const before = rawDocs.length;
-            rawDocs = rawDocs.filter((doc: any) => !confirmedSet.has(String(doc.id)));
-            console.log('[Requests] filtered', before - rawDocs.length, 'confirmed rides');
-          }
-        } catch (e) {
-          console.warn('[Requests] confirmed join error', e);
-        }
-        
-        // Exclude requests the current driver already offered on (web checks rideOffers)
+
+        const confirmedSet = await getConfirmedRideRequestIdSet(rawDocs.map((docItem: any) => String(docItem.id)));
+        rawDocs = rawDocs.filter((docItem: any) => !confirmedSet.has(String(docItem.id)));
+
         if (uid) {
-          try {
-            const offeredSet = await getOfferedRequestIdSet(uid);
-            if (offeredSet.size > 0) {
-              const before = rawDocs.length;
-              rawDocs = rawDocs.filter((doc: any) => !offeredSet.has(String(doc.id)));
-              console.log('[Requests] filtered', before - rawDocs.length, 'already-offered requests');
-            }
-          } catch (e) {
-            console.warn('[Requests] offered join error', e);
-          }
+          const offeredSet = await getOfferedRequestIdSet(uid);
+          rawDocs = rawDocs.filter((docItem: any) => !offeredSet.has(String(docItem.id)));
         }
-        
+
         const rows: InboxItem[] = [];
+
         rawDocs.forEach((docWrapper: any) => {
-          const d = { id: docWrapper.id };
           const r = docWrapper.data;
-          // Exclude requests created by me
-          if (uid && (r.userId === uid)) return;
+          if (uid && r.userId === uid) return;
           if (email && typeof r.userEmail === 'string' && r.userEmail.toLowerCase() === email.toLowerCase()) return;
-          // Exclude requests already assigned to a driver (client-side filter)
           if (r.driverId || r.assignedDriverId || r.providerId || r.recipientId) return;
-          
-          // Filter: Exclude rides scheduled >24h in the past
+
           const dt = getRideDateTime(r);
-          if (dt) {
-            const now = new Date();
-            const diffMs = now.getTime() - dt.getTime();
-            const hrs = diffMs / (1000 * 60 * 60);
-            console.log('[Requests] checking ride', d.id, '| scheduled:', dt.toISOString(), '| hours ago:', hrs.toFixed(2), '| date:', r.date, '| time:', r.time);
-            if (hrs > 24) {
-              console.log('[Requests] ❌ skipping ride scheduled >24h ago:', d.id);
-              return;
-            }
-            console.log('[Requests] ✅ including ride (within 24h):', d.id);
-          } else {
-            console.log('[Requests] ⚠️ no datetime found for ride:', d.id, '| date:', r.date, '| time:', r.time);
-          }
-          
-          const pickup = extractAddress(r, 'pickup') || 'Pickup';
-          const dropoff = extractAddress(r, 'dropoff') || 'Dropoff';
-          const seats = (typeof r.passengers === 'number') ? r.passengers
-            : (typeof r.numPassengers === 'number' ? r.numPassengers
-            : (typeof r.seats === 'number' ? r.seats : null));
-          const contribRaw = r.contributionAmount ?? r.contribution ?? r.requestedContribution;
-          const contribNum = typeof contribRaw === 'number'
-            ? contribRaw
-            : (typeof contribRaw === 'string'
-                ? (() => { const n = parseFloat(contribRaw.replace(/[^0-9.\-]/g, '')); return isNaN(n) ? NaN : n; })()
-                : NaN);
-          const priceFieldNum = typeof r.price === 'number' ? r.price : (typeof r.price === 'string' ? (() => { const n = parseFloat(r.price.replace(/[^0-9.\-]/g, '')); return isNaN(n) ? NaN : n; })() : NaN);
-          const estFareNum = typeof r.estimatedFare === 'number' ? r.estimatedFare : (typeof r.estimatedFare === 'string' ? (() => { const n = parseFloat(r.estimatedFare.replace(/[^0-9.\-]/g, '')); return isNaN(n) ? NaN : n; })() : NaN);
-          const price = !isNaN(contribNum) && contribNum > 0 ? contribNum : (!isNaN(priceFieldNum) && priceFieldNum > 0 ? priceFieldNum : (!isNaN(estFareNum) && estFareNum > 0 ? estFareNum : null));
-          const durText = getDurationText(r);
+          if (dt && (Date.now() - dt.getTime()) / 3600000 > 24) return;
+
           const distInfo = getDistanceInfo(r);
+          const pickupCoords = extractCoords(r, 'pickup');
+          const dropoffCoords = extractCoords(r, 'dropoff');
+          const contribRaw = r.contributionAmount ?? r.contribution ?? r.requestedContribution;
+          const contribNum = typeof contribRaw === 'number' ? contribRaw : typeof contribRaw === 'string' ? parseFloat(contribRaw.replace(/[^0-9.\-]/g, '')) : NaN;
+          const priceNum = typeof r.price === 'number' ? r.price : typeof r.price === 'string' ? parseFloat(r.price.replace(/[^0-9.\-]/g, '')) : NaN;
+          const fareNum = typeof r.estimatedFare === 'number' ? r.estimatedFare : typeof r.estimatedFare === 'string' ? parseFloat(r.estimatedFare.replace(/[^0-9.\-]/g, '')) : NaN;
+          const price = !isNaN(contribNum) && contribNum > 0 ? contribNum : !isNaN(priceNum) && priceNum > 0 ? priceNum : !isNaN(fareNum) && fareNum > 0 ? fareNum : null;
+
           rows.push({
-            id: d.id,
-            pickup,
-            dropoff,
+            id: docWrapper.id,
+            pickup: extractAddress(r, 'pickup') || 'Pickup',
+            dropoff: extractAddress(r, 'dropoff') || 'Dropoff',
             date: r.date || (dt ? formatDateOnly(dt) : null),
             time: r.time || (dt ? formatTime(dt) : null),
             price,
-            seats,
-            durationText: durText || null,
+            seats: typeof r.passengers === 'number' ? r.passengers : typeof r.numPassengers === 'number' ? r.numPassengers : typeof r.seats === 'number' ? r.seats : null,
+            durationText: getDurationText(r) || null,
             distanceText: distInfo.text || null,
             distanceMiles: typeof distInfo.miles === 'number' ? distInfo.miles : null,
             notes: r.notes || null,
@@ -611,20 +650,26 @@ export default function RequestsInboxScreen() {
             requesterPhone: r.userPhone || r.phone || r.phoneNumber || r.contactPhone || null,
             status: String(r.status || 'pending'),
             ridePostingId: r.ridePostingId || r.postingId || null,
+            pickupLat: pickupCoords?.lat ?? null,
+            pickupLng: pickupCoords?.lng ?? null,
+            dropoffLat: dropoffCoords?.lat ?? null,
+            dropoffLng: dropoffCoords?.lng ?? null,
           });
         });
-        console.log('[Requests] open rows after local filters:', rows.length);
+
         setOpenItems(rows);
+        setLoading(false);
       };
-      unsubs.push(onSnapshot(qOpen, mapOpen, (e) => console.warn('[Requests] open listener error', e)));
+
+      unsubs.push(onSnapshot(qOpen, mapOpen, () => setLoading(false)));
     } catch {}
 
-    // Track rideOffers I have already sent (to hide those requests)
     try {
       if (uid || email) {
         const offersBase = collection(firestore, 'rideOffers');
         const qo1 = uid ? query(offersBase, where('driverId', '==', uid)) : null;
         const qo2 = email ? query(offersBase, where('driverEmail', '==', email)) : null;
+
         const mapOffers = (snap: any) => {
           const map: Record<string, { id: string; status: string }> = {};
           snap.forEach((d: any) => {
@@ -634,111 +679,101 @@ export default function RequestsInboxScreen() {
           });
           setOfferedByReqId((prev) => ({ ...prev, ...map }));
         };
+
         if (qo1) unsubs.push(onSnapshot(qo1, mapOffers));
         if (qo2) unsubs.push(onSnapshot(qo2, mapOffers));
       }
     } catch {}
 
-    return () => { unsubs.forEach((u) => u()); };
+    return () => {
+      unsubs.forEach((unsubscribe) => unsubscribe());
+    };
   }, [uid, email]);
 
   useEffect(() => {
-    // preload avatars and user data for requesterId across both open and assigned items
     (async () => {
-      const ids = Array.from(new Set([...items, ...openItems].map((i) => i.requesterId).filter(Boolean))) as string[];
+      const ids = Array.from(new Set([...items, ...openItems].map((item) => item.requesterId).filter(Boolean))) as string[];
       const missing = ids.filter((id) => !avatarByUser[id] || !userDataByUserId[id]);
       if (!missing.length) return;
+
       const nextAvatars: Record<string, string> = {};
       const nextUserData: Record<string, { name: string; rating: number; email: string }> = {};
-      // const nextPrefs: Record<string, any> = {};
-      
+
       for (const id of missing) {
         try {
-          const u = await getDoc(doc(firestore, 'riders', id));
-          if (u.exists()) {
-            const d: any = u.data();
-            
-            // Extract avatar URL
-            const raw = d.profilePicture || d.avatarUrl || d.photoURL || d.photoUrl || d.profileImageUrl || d.imageUrl;
-            if (typeof raw === 'string') {
-              if (/^(gs:\/\/|\/)/.test(raw)) {
-                try { nextAvatars[id] = await getDownloadURL(storageRef(storage, raw)); } catch {}
-              } else { nextAvatars[id] = raw; }
+          const userSnap = await getDoc(doc(firestore, 'riders', id));
+          if (!userSnap.exists()) continue;
+
+          const data: any = userSnap.data();
+          const raw = data.profilePicture || data.avatarUrl || data.photoURL || data.photoUrl || data.profileImageUrl || data.imageUrl;
+
+          if (typeof raw === 'string') {
+            if (/^(gs:\/\/|\/)/.test(raw)) {
+              try {
+                nextAvatars[id] = await getDownloadURL(storageRef(storage, raw));
+              } catch {}
+            } else {
+              nextAvatars[id] = raw;
             }
-            
-            // Extract user data (name, rating, email)
-            let name = '';
-            if (d.fullName && typeof d.fullName === 'string') {
-              name = d.fullName.trim();
-            } else if (d.firstName && d.lastName && typeof d.firstName === 'string' && typeof d.lastName === 'string') {
-              name = `${d.firstName.trim()} ${d.lastName.trim()}`;
-            } else if (d.name && typeof d.name === 'string') {
-              name = d.name.trim();
-            } else if (d.displayName && typeof d.displayName === 'string') {
-              name = d.displayName.trim();
-            }
-            
-            const rating = d.rating || d.averageRating || d.ratingSum && d.ratingCount ? (d.ratingSum / d.ratingCount) : 5.0;
-            const email = d.email || '';
-            
-            nextUserData[id] = { name, rating, email };
-            try {
-              // nextPrefs[id] = d.preferences || d.profile || d;
-            } catch {}
           }
+
+          const name =
+            data.fullName ||
+            [data.firstName, data.lastName].filter(Boolean).join(' ') ||
+            data.name ||
+            data.displayName ||
+            '';
+
+          const rating = data.rating || data.averageRating || (data.ratingSum && data.ratingCount ? data.ratingSum / data.ratingCount : 5.0);
+          nextUserData[id] = { name: String(name).trim(), rating, email: data.email || '' };
         } catch {}
       }
-      
-      if (Object.keys(nextAvatars).length) setAvatarByUser((p) => ({ ...p, ...nextAvatars }));
-      if (Object.keys(nextUserData).length) setUserDataByUserId((p) => ({ ...p, ...nextUserData }));
-      // if (Object.keys(nextPrefs).length) setPrefsByUserId((p) => ({ ...p, ...nextPrefs }));
+
+      if (Object.keys(nextAvatars).length) setAvatarByUser((prev) => ({ ...prev, ...nextAvatars }));
+      if (Object.keys(nextUserData).length) setUserDataByUserId((prev) => ({ ...prev, ...nextUserData }));
     })();
-  }, [items, openItems]);
+  }, [items, openItems, avatarByUser, userDataByUserId]);
 
   const mergeRows = (prev: InboxItem[], cur: InboxItem[]) => {
     const map: Record<string, InboxItem> = {};
-    [...prev, ...cur].forEach((r) => { map[r.id] = r; });
+    [...prev, ...cur].forEach((row) => {
+      map[row.id] = row;
+    });
     return Object.values(map).sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.time || '').localeCompare(b.time || ''));
   };
 
   const offerOnRequest = async (item: InboxItem) => {
     try {
-      if (!uid) { Alert.alert('Sign in required', 'Please sign in to offer a ride.'); return; }
-      
-      // Check verification status
-      const userDoc = await getDoc(doc(firestore, 'drivers', uid));
-      const isVerified = userDoc.exists() && userDoc.data()?.isVerified === true;
-      if (!isVerified) {
-        const verificationDeadline = userDoc.data()?.verificationDeadline;
-        const deadlineText = verificationDeadline ? ` Your deadline: ${new Date(verificationDeadline.toDate ? verificationDeadline.toDate() : verificationDeadline).toLocaleDateString()}.` : '';
-        Alert.alert(
-          'Verification Required',
-          `You must verify your student status before sending ride offers.${deadlineText}`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Verify Now', 
-              onPress: async () => {
-                try {
-                  const token = await firebaseAuth.currentUser?.getIdToken();
-                  if (token) {
-                    await Linking.openURL(`https://ridealongapp.com/pages/driver-login?token=${token}`);
-                  }
-                } catch (e) {
-                  console.warn('Failed to open verification URL', e);
-                }
-              }
-            }
-          ]
-        );
+      if (!uid) {
+        Alert.alert('Sign in required', 'Please sign in to offer a ride.');
         return;
       }
-      
-      if (offeredByReqId[item.id]) { Alert.alert('Already offered', 'You already sent an offer for this request.'); return; }
-      // Shape payload to match web offer schema (see RIDE_OFFER_IMPLEMENTATION.md)
+
+      const driverDoc = await getDoc(doc(firestore, 'drivers', uid));
+      const isVerified = driverDoc.exists() && driverDoc.data()?.isVerified === true;
+
+      if (!isVerified) {
+        Alert.alert('Verification Required', 'You must verify your student status before sending ride offers.', [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Verify Now',
+            onPress: async () => {
+              const token = await firebaseAuth.currentUser?.getIdToken();
+              if (token) await Linking.openURL(`https://ridealongapp.com/pages/driver-login?token=${token}`);
+            },
+          },
+        ]);
+        return;
+      }
+
+      if (offeredByReqId[item.id]) {
+        Alert.alert('Already offered', 'You already sent an offer for this request.');
+        return;
+      }
+
       const driverEmailFinal = email || null;
-      const driverNameFinal = firebaseAuth.currentUser?.displayName
-        || (driverEmailFinal ? String(driverEmailFinal).split('@')[0] : null);
+      const driverNameFinal = firebaseAuth.currentUser?.displayName || (driverEmailFinal ? String(driverEmailFinal).split('@')[0] : null);
+
       const payload: any = {
         rideRequestId: item.id,
         driverId: uid,
@@ -752,28 +787,35 @@ export default function RequestsInboxScreen() {
         updatedAt: serverTimestamp(),
         offerDate: serverTimestamp(),
         emailSent: false,
-        // Optional: for convenience
         offerPrice: item.price ?? null,
-        distance: item.distanceMiles != null ? { miles: item.distanceMiles, text: item.distanceText ?? `${Math.round(item.distanceMiles)} mi` } : (item.distanceText ? { text: item.distanceText } : null),
+        distance: item.distanceMiles != null ? { miles: item.distanceMiles, text: item.distanceText ?? `${Math.round(item.distanceMiles)} mi` } : item.distanceText ? { text: item.distanceText } : null,
         duration: item.durationText ?? null,
-        // Web shape: details nested
         rideDetails: {
           pickup: item.pickup ?? null,
           destination: item.dropoff ?? null,
           date: item.date ?? null,
           time: item.time ?? null,
           passengers: item.seats ?? 1,
-          contributionAmount: (typeof item.price === 'number' ? item.price.toFixed(2) : (item.price || null)),
+          contributionAmount: typeof item.price === 'number' ? item.price.toFixed(2) : item.price || null,
         },
       };
-      const ref = await addDoc(collection(firestore, 'rideOffers'), payload);
-      setOfferedByReqId((prev) => ({ ...prev, [item.id]: { id: ref.id, status: 'pending' } }));
+
+      const offerRef = await addDoc(collection(firestore, 'rideOffers'), payload);
+      setOfferedByReqId((prev) => ({ ...prev, [item.id]: { id: offerRef.id, status: 'pending' } }));
       Alert.alert('Offer sent', 'Your offer was sent to the rider.');
-    } catch (e) {
-      console.warn('offerOnRequest failed', e);
+    } catch (error) {
+      console.warn('offerOnRequest failed', error);
       Alert.alert('Failed', 'Could not send your offer.');
     }
   };
+
+  const dotAnims = [pulse1, pulse2, pulse3, pulse4];
+  const dotPositions = [
+    { top: '24%', left: '28%', color: colors.primary },
+    { top: '50%', left: '62%', color: colors.primary },
+    { top: '36%', left: '72%', color: colors.amber },
+    { top: '62%', left: '22%', color: colors.primary },
+  ];
 
   const renderItem = ({ item }: { item: InboxItem }) => {
     const isOffered = !!offeredByReqId[item.id];
@@ -781,214 +823,320 @@ export default function RequestsInboxScreen() {
     const priceText = formatMoney(item.price);
     const avatarUri = item.requesterId ? avatarByUser[item.requesterId] : undefined;
     const userData = item.requesterId ? userDataByUserId[item.requesterId] : undefined;
-    
-    // Better name fallback logic - userData only has name, rating, email fields
-    let displayName = 'Requester';
-    if (userData?.name && userData.name.trim()) {
-      displayName = userData.name.trim();
-    } else if (item.requesterName && item.requesterName.trim()) {
-      displayName = item.requesterName.trim();
-    } else if (userData?.email && userData.email.trim()) {
-      displayName = userData.email.trim();
-    } else if (item.requesterEmail && item.requesterEmail.trim()) {
-      displayName = item.requesterEmail.trim();
-    }
-    
+    const displayName = userData?.name?.trim() || item.requesterName?.trim() || userData?.email?.split('@')[0] || item.requesterEmail?.split('@')[0] || 'Student';
     const userRating = userData?.rating || 5.0;
-    
+    const initial = displayName[0]?.toUpperCase() || 'S';
+    const matchScore = scoreRequest(item);
+
     return (
-      <View style={[styles.card, theme.shadows.md]}>
-        {/* Header: Avatar, name, rating, day/time */}
-        <View style={styles.headerRow}>
-          <View style={styles.headerLeft}>
-            <View style={styles.avatarWrap}>
-              {avatarUri ? (
-                <Image source={{ uri: avatarUri }} style={styles.avatar} contentFit="cover" />
-              ) : (
-                <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                  <User size={18} color="#64748B" />
-                </View>
-              )}
-            </View>
-            <View style={{ marginLeft: 12 }}>
-              <Text style={[styles.name, { color: theme.colors.secondary }]} numberOfLines={1}>
-                {displayName}
-              </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-                <Star size={14} color={theme.colors.primary} />
-                <Text style={[styles.ratingText, { color: theme.colors.primary }]}>
-                  {userRating.toFixed(1)}
-                </Text>
-              </View>
+      <View style={[themed.reqCard, matchScore >= 70 && themed.reqCardBest]}>
+        {isDark && <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />}
+
+        <View style={styles.reqTop}>
+          <View style={styles.reqAvatarWrap}>
+            {avatarUri ? (
+              <Image source={{ uri: avatarUri }} style={styles.reqAvatar} contentFit="cover" />
+            ) : (
+              <LinearGradient colors={[BRAND.orange, BRAND.orangeDeep]} style={[styles.reqAvatar, styles.center]}>
+                <Text style={styles.reqAvatarInitial}>{initial}</Text>
+              </LinearGradient>
+            )}
+            <View style={[styles.reqOnlineDot, { backgroundColor: colors.green, borderColor: colors.bgCard }]} />
+          </View>
+
+          <View style={styles.reqIdentity}>
+            <Text style={themed.reqName} numberOfLines={1}>{displayName}</Text>
+            <View style={styles.ratingRow}>
+              <Ionicons name="star" size={11} color={colors.amber} />
+              <Text style={themed.reqRating}>{userRating.toFixed(1)}</Text>
+              <Text style={themed.reqVerified}>· Verified Student</Text>
             </View>
           </View>
-          <View style={{ alignItems: 'flex-end' }}>
-            <Text style={[styles.dayLabel, { color: '#64748B' }]}>{dayLabel}</Text>
-            <Text style={[styles.timeLabel, { color: theme.colors.primary }]}>{item.time || ''}</Text>
+
+          <View style={themed.reqPriceBadge}>
+            <Text style={themed.reqPriceLabel}>Payout</Text>
+            <Text style={themed.reqPriceValue}>{priceText || 'Open'}</Text>
           </View>
         </View>
 
-        {/* Addresses */}
-        <View style={{ marginTop: 10 }}>
-          <View style={styles.addrRow}> 
-            <View style={[styles.dot, { backgroundColor: theme.colors.primary }]} />
-            <AddressLink address={item.pickup} textStyle={{ ...styles.addrTextBold, color: theme.colors.secondary }} numberOfLines={1} />
+        <View style={themed.matchStrip}>
+          <Ionicons name="sparkles-outline" size={14} color={colors.primary} />
+          <Text style={themed.matchText}>Smart Match {matchScore}%</Text>
+          {matchScore >= 70 ? <Text style={themed.matchBest}>Best opportunity</Text> : null}
+        </View>
+
+        <View style={styles.reqRouteWrap}>
+          <View style={styles.reqRouteConnector}>
+            <View style={[styles.reqDot, { backgroundColor: colors.primary }]} />
+            <View style={[styles.reqDotLine, { backgroundColor: colors.divider }]} />
+            <View style={[styles.reqDot, { backgroundColor: colors.blue }]} />
           </View>
-          <View style={[styles.addrRow, { marginTop: 6 }]}> 
-            <View style={[styles.dot, { backgroundColor: '#9CA3AF' }]} />
-            <AddressLink address={item.dropoff} textStyle={{ ...styles.addrText, color: '#6B7280' }} numberOfLines={1} />
+
+          <View style={styles.reqRouteTextWrap}>
+            <Text style={themed.reqRouteFrom} numberOfLines={1}>{item.pickup}</Text>
+            <Text style={themed.reqRouteTo} numberOfLines={1}>{item.dropoff}</Text>
           </View>
         </View>
 
-        {/* Divider */}
-        <View style={styles.divider} />
-
-        {/* Meta row */}
-        <View style={styles.metaRow}>
-          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-            <View style={styles.metaGroup}>
-              <Clock size={16} color={'#64748B'} />
-              <Text style={styles.metaText}>{getDurationText(item as any) || ''}</Text>
-            </View>
-            <View style={styles.metaGroup}>
-              <MapPin size={16} color={'#64748B'} />
-              <Text style={styles.metaText}>{(() => {
-                if (typeof item.distanceMiles === 'number') {
-                  return `${Math.round(item.distanceMiles)} mi`;
-                } else {
-                  const distanceInfo = getDistanceInfo(item as any);
-                  return distanceInfo.text || item.distanceText || '';
-                }
-              })()}</Text>
-            </View>
-          </View>
-                <TouchableOpacity
-                  onPress={() => {
-                    const p = new URLSearchParams();
-                    const n = (displayName && displayName !== 'Requester' ? displayName : '').split(' ')[0];
-                    if (n) p.set('name', n);
-                    if (item.pickup) p.set('from', item.pickup);
-                    if (item.dropoff) p.set('to', item.dropoff);
-                    const q = p.toString();
-                    const url = `https://ridealongapp.com/request/${item.id}${q ? '?' + q : ''}`;
-                    Share.share({ message: `Check out this ride request on RideAlong!\n${url}`, url }).catch(() => {});
-                  }}
-                  style={{ marginRight: 12, padding: 2 }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Share this ride request"
-                >
-                  <Share2 size={16} color={theme.colors.primary} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => router.push(`/request/${item.id}`)} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text style={[styles.viewDetails, { color: theme.colors.primary }]}>View Details</Text>
-                  <ChevronRight size={16} color={theme.colors.primary} />
-                </TouchableOpacity>
+        <View style={styles.reqMetaRow}>
+          {dayLabel ? <MetaChip icon="calendar-outline" text={dayLabel} colors={colors} themed={themed} /> : null}
+          {item.time ? <MetaChip icon="time-outline" text={item.time} colors={colors} themed={themed} /> : null}
+          {item.distanceText ? <MetaChip icon="navigate-outline" text={item.distanceText} colors={colors} themed={themed} /> : null}
+          {item.durationText ? <MetaChip icon="timer-outline" text={item.durationText} colors={colors} themed={themed} /> : null}
+          {item.seats ? <MetaChip icon="people-outline" text={`${item.seats} seat${item.seats > 1 ? 's' : ''}`} colors={colors} themed={themed} /> : null}
         </View>
 
-        {/* Button */}
-        <View style={{ marginTop: 12 }}>
-          <Button
-            variant="primary"
-            size="md"
-            fullWidth
-            style={styles.offerBtnCompact}
+        <View style={styles.reqActions}>
+          <TouchableOpacity
+            onPress={() => {
+              const params = new URLSearchParams();
+              if (displayName !== 'Student') params.set('name', displayName.split(' ')[0]);
+              if (item.pickup) params.set('from', item.pickup);
+              if (item.dropoff) params.set('to', item.dropoff);
+              const url = `https://ridealongapp.com/request/${item.id}${params.toString() ? '?' + params.toString() : ''}`;
+              Share.share({ message: `Check out this ride request!\n${url}`, url }).catch(() => {});
+            }}
+            style={themed.reqShareBtn}
+          >
+            <Ionicons name="share-outline" size={16} color={colors.textSecondary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => router.push(`/request/${item.id}` as any)} style={styles.reqDetailsBtn}>
+            <Text style={themed.reqDetailsBtnText}>Details</Text>
+            <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.reqOfferBtn, isOffered && styles.disabled]}
             disabled={isOffered}
             onPress={() => offerOnRequest(item)}
           >
-            {isOffered ? 'Offer sent' : `Offer Ride • ${priceText || ''}`}
-          </Button>
+            <LinearGradient
+              colors={isOffered ? asGradientStops(colors.gradientCard) : [BRAND.orange, BRAND.orangeDeep]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.reqOfferBtnGrad}
+            >
+              <Ionicons name={isOffered ? 'checkmark-circle' : 'flash'} size={15} color="#FFFFFF" />
+              <Text style={styles.reqOfferBtnText}>
+                {isOffered ? 'Offer Sent' : `Send Offer${priceText ? ` · ${priceText}` : ''}`}
+              </Text>
+            </LinearGradient>
+          </TouchableOpacity>
         </View>
       </View>
     );
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }} edges={['top']}>
-      <View style={{ padding: 16, paddingBottom: 8 }}>
-        <Text style={{ fontSize: 28, fontWeight: 'bold', color: theme.colors.secondary }}>Ride Requests</Text>
-        <Text style={{ color: '#64748B', marginTop: 4 }}>Find rider requests and send offers.</Text>
-          {/* Search */}
-          <View style={styles.searchWrap}>
-            <TextInput
-              placeholder="Search requests, destinations..."
-              placeholderTextColor="#94A3B8"
-              value={search}
-              onChangeText={setSearch}
-              style={styles.searchInput}
-              returnKeyType="search"
-            />
+    <View style={themed.root}>
+      <StatusBar barStyle={colors.statusBar} />
+      <LinearGradient colors={asGradientStops(colors.gradientBg)} style={StyleSheet.absoluteFillObject} />
+
+      <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+        <View style={styles.hdr}>
+          <View style={styles.hdrText}>
+            <Text style={themed.hdrTitle}>Live Requests</Text>
+            <Text style={themed.hdrSub}>Campus transportation marketplace</Text>
           </View>
-        {/* Filters */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filtersContainer}
-        >
-          {/* Filter Modal Button */}
-          <TouchableOpacity
-            onPress={() => setFiltersVisible(true)}
-            style={[
-              styles.chip, 
-              { 
-                flexDirection: 'row', 
-                alignItems: 'center', 
-                gap: 6,
-              },
-              hasActiveFilters(basicFilters) && { 
-                backgroundColor: theme.colors.primary, 
-                borderColor: theme.colors.primary 
-              }
-            ]}
-          >
-            <Filter size={16} color={hasActiveFilters(basicFilters) ? '#FFFFFF' : '#111827'} />
-            <Text style={{ color: hasActiveFilters(basicFilters) ? '#FFFFFF' : '#111827', fontWeight: '600' }}>
-              Filters{hasActiveFilters(basicFilters) && ` (${Object.values(basicFilters).filter(v => v !== null && v !== '').length})`}
-            </Text>
-          </TouchableOpacity>
-          
-          {(['all','today','tomorrow','open','assigned'] as const).map((k) => (
-            <TouchableOpacity
-              key={k}
-              onPress={() => setFilter(k)}
-              style={[
-                styles.chip, 
-                filter === k && { 
-                  backgroundColor: theme.colors.primary, 
-                  borderColor: theme.colors.primary 
-                }
-              ]}
-            >
-              <Text style={{ color: filter === k ? '#FFFFFF' : '#111827', fontWeight: '600' }}>
-                {k === 'all' ? 'All' : k === 'today' ? 'Today' : k === 'tomorrow' ? 'Tomorrow' : k === 'open' ? 'Open' : 'Assigned'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-      {loading ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator />
+
+          <Animated.View style={[themed.campusEnergy, { opacity: glowAnim }]}>
+            <View style={[styles.campusEnergyDot, { backgroundColor: colors.primary }]} />
+            <Text style={themed.campusEnergyText}>{finalItems.length > 0 ? 'HIGH' : 'ACTIVE'}</Text>
+          </Animated.View>
         </View>
-      ) : (
+
         <FlatList
           data={finalItems}
-          keyExtractor={(i) => i.id}
-          contentContainerStyle={{ padding: 16, flexGrow: 1 }}
+          keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <View style={styles.emptyIconContainer}>
-                <MapPin size={64} color="#CBD5E1" />
+          contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <View>
+              <View style={themed.mapHero}>
+                <MapView
+                  style={StyleSheet.absoluteFillObject}
+                  provider={PROVIDER_GOOGLE}
+                  showsUserLocation
+                  showsMyLocationButton={false}
+                  showsCompass={false}
+                  toolbarEnabled={false}
+                  onMapReady={() => setMapReady(true)}
+                  initialRegion={mapRegion}
+                  region={mapRegion}
+                >
+                  {mapItems.map((item) => (
+                    <Marker
+                      key={item.id}
+                      coordinate={{
+                        latitude: item.pickupLat as number,
+                        longitude: item.pickupLng as number,
+                      }}
+                      title={item.pickup}
+                      description={item.dropoff}
+                      onPress={() => router.push(`/request/${item.id}` as any)}
+                    >
+                      <View style={styles.liveRequestMarker}>
+                        <View style={styles.liveRequestMarkerDot} />
+                        <Text style={styles.liveRequestMarkerText}>
+                          {typeof item.price === 'number' ? `$${item.price.toFixed(0)}` : 'Open'}
+                        </Text>
+                      </View>
+                    </Marker>
+                  ))}
+                </MapView>
+
+                {!mapReady && (
+                  <View style={styles.mapLoadingOverlay}>
+                    <ActivityIndicator color={colors.primary} />
+                  </View>
+                )}
+
+                {mapItems.length === 0 && (
+                  <View style={styles.mapPromptWrap} pointerEvents="none">
+                    <Ionicons name="map-outline" size={28} color={colors.textTertiary} />
+                    <Text style={[styles.mapPromptText, { color: colors.textSecondary }]}>
+                      Waiting for geotagged campus requests
+                    </Text>
+                  </View>
+                )}
+
+                <View style={themed.mapOverlay}>
+                  {isDark && <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFillObject} />}
+
+                  <View style={styles.mapOverlayText}>
+                    <View style={styles.mapLivePill}>
+                      <View style={[styles.mapLiveDot, { backgroundColor: colors.green }]} />
+                      <Text style={[styles.mapLiveText, { color: colors.green }]}>CAMPUS LIVE</Text>
+                    </View>
+
+                    <Text style={themed.mapOverlayTitle}>
+                      {loading
+                        ? 'Loading live map...'
+                        : mapItems.length > 0
+                          ? `${mapItems.length} mapped request${mapItems.length > 1 ? 's' : ''} nearby`
+                          : `${finalItems.length} request${finalItems.length === 1 ? '' : 's'} available`}
+                    </Text>
+
+                    <Text style={themed.mapOverlaySub}>
+                      {mapItems.length > 0
+                        ? 'Tap a marker to open request details'
+                        : 'New requests with pickup coordinates will appear here'}
+                    </Text>
+                  </View>
+
+                  <View style={themed.mapEarnBadge}>
+                    <Text style={themed.mapEarnLabel}>Avg Earn</Text>
+                    <Text style={themed.mapEarnValue}>{estimatedAverage ? `$${estimatedAverage.toFixed(0)}` : '$18'}</Text>
+                  </View>
+                </View>
               </View>
-              <Text style={styles.emptyStateTitle}>No ride requests</Text>
-              <Text style={styles.emptyStateSubtitle}>New requests will appear here</Text>
+
+              <View style={themed.conversionStrip}>
+                <Ionicons name="trending-up-outline" size={16} color={colors.primary} />
+                <View style={styles.conversionTextWrap}>
+                  <Text style={themed.conversionTitle}>Opportunity Engine</Text>
+                  <Text style={themed.conversionText}>
+                    {bestMatchCount > 0
+                      ? `${bestMatchCount} high-fit request${bestMatchCount > 1 ? 's' : ''} available. Prioritize Best Match to improve acceptance.`
+                      : 'No high-fit requests yet. Keep filters light to catch the next campus surge.'}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={themed.searchWrap}>
+                <Ionicons name="search" size={16} color={colors.textTertiary} style={styles.searchIcon} />
+                <TextInput
+                  placeholder="Search requests, destinations..."
+                  placeholderTextColor={colors.textTertiary}
+                  value={search}
+                  onChangeText={setSearch}
+                  style={themed.searchInput}
+                  returnKeyType="search"
+                />
+              </View>
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersContainer}>
+                <TouchableOpacity
+                  onPress={() => setFiltersVisible(true)}
+                  style={[themed.filterChip, hasActiveFilters(basicFilters) && themed.filterChipActive]}
+                >
+                  <Ionicons name="options-outline" size={13} color={hasActiveFilters(basicFilters) ? colors.primary : colors.textSecondary} />
+                  <Text style={[themed.filterChipText, hasActiveFilters(basicFilters) && themed.filterChipTextActive]}>
+                    Filters{hasActiveFilters(basicFilters) ? ` (${Object.values(basicFilters).filter((value) => value !== null && value !== '').length})` : ''}
+                  </Text>
+                </TouchableOpacity>
+
+                {([
+                  { key: 'all', label: 'All' },
+                  { key: 'best', label: 'Best Match' },
+                  { key: 'today', label: 'Today' },
+                  { key: 'tomorrow', label: 'Tomorrow' },
+                  { key: 'open', label: 'Open' },
+                  { key: 'assigned', label: 'Assigned' },
+                ] as const).map((item) => (
+                  <TouchableOpacity
+                    key={item.key}
+                    onPress={() => setFilter(item.key)}
+                    style={[themed.filterChip, filter === item.key && themed.filterChipActive]}
+                  >
+                    <Text style={[themed.filterChipText, filter === item.key && themed.filterChipTextActive]}>{item.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {!loading && (
+                <View style={styles.listHeader}>
+                  <Text style={themed.listHeaderText}>
+                    {finalItems.length > 0 ? `${finalItems.length} Request${finalItems.length > 1 ? 's' : ''} Available` : 'Campus Intelligence'}
+                  </Text>
+
+                  {finalItems.length > 0 && (
+                    <View style={themed.listHeaderBadge}>
+                      <View style={[styles.listHeaderBadgeDot, { backgroundColor: colors.green }]} />
+                      <Text style={[styles.listHeaderBadgeText, { color: colors.green }]}>Live</Text>
+                    </View>
+                  )}
+                </View>
+              )}
             </View>
           }
-        />
-      )}
+          ListEmptyComponent={
+            loading ? (
+              <View style={styles.loadingWrap}>
+                <ActivityIndicator color={colors.primary} size="large" />
+                <Text style={themed.loadingText}>Scanning campus...</Text>
+              </View>
+            ) : (
+              <View style={styles.emptyWrap}>
+                <View style={themed.emptyIconWrap}>
+                  <Ionicons name="flash" size={30} color={colors.primary} />
+                </View>
 
-      
-      {/* Ride Filters Modal */}
+                <Text style={themed.emptyTitle}>Campus Intelligence</Text>
+                <Text style={themed.emptySubtitle}>No requests right now. Your next opportunity will appear here.</Text>
+
+                <View style={styles.emptyPredictions}>
+                  {[
+                    { icon: 'time-outline', text: 'Watch late afternoon and evening windows for demand spikes.' },
+                    { icon: 'trending-up-outline', text: 'Best Match highlights rides most likely to convert.' },
+                    { icon: 'cash-outline', text: 'Higher payout requests are prioritized in the opportunity score.' },
+                    { icon: 'school-outline', text: 'Campus pickup patterns improve as more students ride.' },
+                  ].map((item) => (
+                    <View key={item.text} style={themed.emptyPredictionItem}>
+                      <Ionicons name={item.icon as any} size={17} color={colors.primary} />
+                      <Text style={themed.emptyPredictionText}>{item.text}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )
+          }
+        />
+      </SafeAreaView>
+
       <RideFiltersModal
         visible={filtersVisible}
         onClose={() => setFiltersVisible(false)}
@@ -996,496 +1144,176 @@ export default function RequestsInboxScreen() {
         initialFilters={basicFilters}
         showSeatsFilter={false}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
+function MetaChip({
+  icon,
+  text,
+  colors,
+  themed,
+}: {
+  icon: any;
+  text: string;
+  colors: AppColors;
+  themed: ReturnType<typeof createStyles>;
+}) {
+  return (
+    <View style={themed.reqMetaChip}>
+      <Ionicons name={icon} size={10} color={colors.textSecondary} />
+      <Text style={themed.reqMetaText}>{text}</Text>
+    </View>
+  );
+}
+
+const createStyles = (colors: AppColors, isDark: boolean) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.bg },
+    hdrTitle: { fontSize: 24, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.5 },
+    hdrSub: { fontSize: 12, color: colors.textSecondary, marginTop: 2, fontWeight: '500' },
+    campusEnergy: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.primaryDim, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 16, borderWidth: 1, borderColor: colors.primaryBorder },
+    campusEnergyText: { color: colors.primary, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+    mapHero: { marginHorizontal: 16, marginBottom: 10, height: 230, borderRadius: 24, overflow: 'hidden', borderWidth: 1, borderColor: colors.blueBorder, backgroundColor: colors.bgCard, shadowColor: BRAND.navyText, shadowOffset: { width: 0, height: 8 }, shadowOpacity: isDark ? 0.16 : 0.08, shadowRadius: 22, elevation: 4 },
+    mapGridH: { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: colors.mapGrid },
+    mapGridV: { position: 'absolute', top: 0, bottom: 0, width: 1, backgroundColor: colors.mapGrid },
+    road: { position: 'absolute', height: 3, backgroundColor: colors.mapRoad },
+    roadV: { position: 'absolute', width: 3, backgroundColor: colors.mapRoad },
+    mapOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', padding: 14, overflow: 'hidden', borderTopWidth: 1, borderTopColor: colors.divider, backgroundColor: isDark ? colors.mapOverlayBg : 'rgba(255,255,255,0.78)' },
+    mapOverlayTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '800' },
+    mapOverlaySub: { color: colors.textSecondary, fontSize: 11, marginTop: 2, fontWeight: '500' },
+    mapEarnBadge: { alignItems: 'center', backgroundColor: colors.primaryDim, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: colors.primaryBorder },
+    mapEarnLabel: { color: colors.textSecondary, fontSize: 9, fontWeight: '700' },
+    mapEarnValue: { color: colors.primary, fontSize: 16, fontWeight: '800' },
+    conversionStrip: { marginHorizontal: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: isDark ? colors.glassBg : colors.bgCard, borderRadius: 16, borderWidth: 1, borderColor: colors.borderMid, padding: 14 },
+    conversionTitle: { color: colors.textPrimary, fontSize: 13, fontWeight: '800', marginBottom: 2 },
+    conversionText: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, fontWeight: '500' },
+    searchWrap: { marginHorizontal: 16, marginBottom: 10, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bgInput, borderRadius: 14, borderWidth: 1, borderColor: colors.borderMid },
+    searchInput: { flex: 1, paddingHorizontal: 10, paddingVertical: 12, fontSize: 15, color: colors.textPrimary },
+    filterChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: colors.borderMid, backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCard, flexDirection: 'row', alignItems: 'center', gap: 5 },
+    filterChipActive: { backgroundColor: colors.primaryDim, borderColor: colors.primaryBorder },
+    filterChipText: { fontSize: 13, fontWeight: '700', color: colors.textSecondary },
+    filterChipTextActive: { color: colors.primary },
+    listHeaderText: { fontSize: 14, fontWeight: '800', color: colors.textSecondary },
+    listHeaderBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.greenDim, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, borderWidth: 1, borderColor: colors.greenBorder },
+    reqCard: { marginHorizontal: 16, marginBottom: 12, borderRadius: 20, borderWidth: 1, borderColor: colors.borderMid, overflow: 'hidden', backgroundColor: isDark ? colors.glassBg : colors.bgCard, shadowColor: BRAND.navyText, shadowOffset: { width: 0, height: 3 }, shadowOpacity: isDark ? 0.12 : 0.05, shadowRadius: 12, elevation: 2 },
+    reqCardBest: { borderColor: colors.primaryBorder },
+    reqName: { fontSize: 15, fontWeight: '800', color: colors.textPrimary },
+    reqRating: { fontSize: 12, color: colors.amber, fontWeight: '700' },
+    reqVerified: { fontSize: 11, color: colors.textSecondary, fontWeight: '500' },
+    reqPriceBadge: { alignItems: 'center', backgroundColor: colors.primaryDim, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: colors.primaryBorder },
+    reqPriceLabel: { fontSize: 9, color: colors.textSecondary, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+    reqPriceValue: { fontSize: 15, fontWeight: '800', color: colors.primary },
+    matchStrip: { marginHorizontal: 16, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: colors.primaryDim, borderRadius: 12, borderWidth: 1, borderColor: colors.primaryBorder, paddingHorizontal: 10, paddingVertical: 7 },
+    matchText: { color: colors.primary, fontSize: 12, fontWeight: '800' },
+    matchBest: { marginLeft: 'auto', color: colors.textSecondary, fontSize: 11, fontWeight: '700' },
+    reqRouteFrom: { fontSize: 14, fontWeight: '700', color: colors.textPrimary, marginBottom: 8 },
+    reqRouteTo: { fontSize: 14, color: colors.textSecondary, fontWeight: '500' },
+    reqMetaChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.bgInput, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, borderWidth: 1, borderColor: colors.border },
+    reqMetaText: { fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
+    reqShareBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.bgInput, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.borderMid },
+    reqDetailsBtnText: { fontSize: 13, color: colors.primary, fontWeight: '700' },
+    loadingText: { color: colors.textSecondary, fontSize: 14, fontWeight: '500' },
+    emptyIconWrap: { width: 64, height: 64, borderRadius: 20, backgroundColor: colors.primaryDim, borderWidth: 1, borderColor: colors.primaryBorder, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+    emptyTitle: { fontSize: 18, fontWeight: '800', color: colors.textPrimary, marginBottom: 6 },
+    emptySubtitle: { fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginBottom: 20, lineHeight: 18 },
+    emptyPredictionItem: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: isDark ? colors.glassBg : colors.bgCard, borderRadius: 14, borderWidth: 1, borderColor: colors.borderMid, padding: 14 },
+    emptyPredictionText: { flex: 1, fontSize: 13, color: colors.textSecondary, lineHeight: 18, fontWeight: '500' },
+  });
+
 const styles = StyleSheet.create({
-  searchWrap: {
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  searchInput: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    fontSize: 16,
-    color: '#111827',
-  },
-  filtersContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 8,
-  },
-  chip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#FFFFFF',
-  },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#EEF2F7',
-    marginBottom: 16,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    minWidth: 0,
-  },
-  avatarWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    overflow: 'hidden',
-  },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-  },
-  avatarPlaceholder: {
-    backgroundColor: '#E5E7EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  name: {
-    fontSize: 16,
-    fontWeight: '700',
-    maxWidth: 180,
-  },
-  ratingText: {
-    marginLeft: 4,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  dayLabel: {
-    fontSize: 12,
-  },
-  timeLabel: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  rowBetween: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  addrLeft: {
-    flex: 1,
-    minWidth: 0,
-  },
-  addrRight: {
-    flex: 1,
-    minWidth: 0,
-    textAlign: 'right',
-  },
-  titleArrow: {
-    marginHorizontal: 8,
-    fontSize: 16,
-  },
-  addrRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  addrTextBold: {
-    fontSize: 16,
-    fontWeight: '700',
-    flex: 1,
-    minWidth: 0,
-  },
-  addrText: {
-    fontSize: 16,
-    flex: 1,
-    minWidth: 0,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 999,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#E5E7EB',
-    marginVertical: 12,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  metaGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginRight: 16,
-  },
-  meta: {
-    color: '#6B7280',
-    marginTop: 6,
-  },
-  metaText: {
-    color: '#64748B',
-  },
-  price: {
-    color: '#1F2937',
-    fontWeight: '700',
-  },
-  viewDetails: {
-    fontWeight: '600',
-    marginRight: 4,
-  },
-  status: {
-    color: '#6B7280',
-    fontStyle: 'italic',
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 12,
-  },
-  btn: {
-    flex: 1,
-    borderRadius: 8,
-    paddingVertical: 8,
-    alignItems: 'center',
-  },
-  btnText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  filtersRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 12,
-  },
-  offerBtnCompact: {
-    minHeight: 35,
-    paddingVertical: 5,
-  },
-  modalBackdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-  },
-  modalSheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  infoCard: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#EEF2F7',
-    marginTop: 8,
-  },
-  badgeConfirmed: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#E8F7E9',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    marginTop: 12,
-  },
-  badgeConfirmedText: {
-        color: '#16A34A',
-        fontWeight: '700',
-      },
-      badgePending: {
-        alignSelf: 'flex-start',
-        backgroundColor: '#FEF3C7',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 999,
-        marginTop: 12,
-      },
-      badgePendingText: {
-        color: '#D97706',
-        fontWeight: '700',
-      },
-      badgeNeutral: {
-        alignSelf: 'flex-start',
-        backgroundColor: '#E5E7EB',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 999,
-        marginTop: 12,
-      },
-      badgeNeutralText: {
-        color: '#374151',
-        fontWeight: '700',
-      },
-      grid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 12,
-        marginTop: 8,
-      },
-      tile: {
-        width: '48%',
-        backgroundColor: '#FFFFFF',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#EEF2F7',
-        paddingVertical: 12,
-        paddingHorizontal: 12,
-      },
-      tileLabel: {
-        color: '#059669',
-        fontWeight: '600',
-        marginBottom: 4,
-      },
-      tileValue: {
-        color: '#111827',
-        fontWeight: '700',
-      },
-      // Homepage modal style parity
-      modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        justifyContent: 'flex-end',
-      },
-      modalContent: {
-        backgroundColor: '#FFFFFF',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        maxHeight: '90%',
-        paddingTop: 20,
-      },
-      modalHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingBottom: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#F1F5F9',
-      },
-      modalTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: '#1F2937',
-      },
-      closeButton: {
-        padding: 4,
-      },
-      modalBody: {
-        paddingHorizontal: 20,
-        paddingTop: 16,
-        paddingBottom: 20,
-      },
-      statusBadgeModal: {
-        alignSelf: 'flex-start',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 20,
-        marginBottom: 20,
-      },
-      statusBadgeConfirmed: {
-        backgroundColor: '#DCFCE7',
-      },
-      statusBadgeCompleted: {
-        backgroundColor: '#F3F4F6',
-      },
-      statusBadgePendingModal: {
-        backgroundColor: '#FEF3C7',
-      },
-      statusTextModal: {
-        fontSize: 12,
-        fontWeight: '600',
-        textTransform: 'capitalize',
-      },
-      statusTextConfirmed: {
-        color: '#166534',
-      },
-      statusTextCompleted: {
-        color: '#6B7280',
-      },
-      statusTextPendingModal: {
-        color: '#92400E',
-      },
-      modalSection: {
-        marginBottom: 24,
-      },
-      sectionTitleModal: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#1F2937',
-        marginBottom: 12,
-      },
-      routeModalContainer: {
-        paddingLeft: 8,
-      },
-      routeModalPoint: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 8,
-      },
-      routeModalLine: {
-        width: 2,
-        height: 20,
-        backgroundColor: '#D1D5DB',
-        marginLeft: 7,
-        marginBottom: 8,
-      },
-      orangeDotModal: {
-        width: 16,
-        height: 16,
-        borderRadius: 8,
-        backgroundColor: '#E05E1A',
-        marginRight: 12,
-      },
-      locationModalText: {
-        fontSize: 14,
-        color: '#1F2937',
-        fontWeight: '500',
-      },
-      infoGrid: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        gap: 8,
-        marginBottom: 12,
-      },
-      infoItem: {
-        flex: 1,
-        alignItems: 'center',
-        padding: 12,
-        backgroundColor: '#F8FAFC',
-        borderRadius: 8,
-        marginHorizontal: 0,
-        minWidth: 0,
-      },
-      infoLabel: {
-        fontSize: 12,
-        color: '#64748B',
-        marginTop: 4,
-        marginBottom: 2,
-      },
-      infoValue: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#1F2937',
-        textAlign: 'center',
-        flexWrap: 'wrap',
-      },
-      driverInfo: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 16,
-        backgroundColor: '#F8FAFC',
-        borderRadius: 12,
-      },
-      driverAvatar: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: '#E2E8F0',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
-      },
-      driverAvatarImg: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        marginRight: 12,
-        backgroundColor: '#E2E8F0',
-      },
-      driverDetails: {
-        flex: 1,
-      },
-      driverName: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#1F2937',
-        marginBottom: 2,
-      },
-      driverVehicle: {
-        fontSize: 14,
-        color: '#64748B',
-        marginBottom: 2,
-      },
-      driverPhone: {
-        fontSize: 14,
-        color: '#64748B',
-        marginBottom: 4,
-      },
-      ratingModalContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-      },
-      ratingModalText: {
-        fontSize: 14,
-        color: '#64748B',
-        marginLeft: 4,
-      },
-      callIconBtn: {
-        marginLeft: 12,
-        padding: 8,
-        borderRadius: theme.borderRadius.full,
-        backgroundColor: '#F1F5F9',
-        alignItems: 'center',
-        justifyContent: 'center',
-      },
-      // Empty state
-      emptyState: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'flex-start',
-        paddingTop: 80,
-      },
-      emptyIconContainer: {
-        width: 120,
-        height: 120,
-        borderRadius: 60,
-        backgroundColor: '#F1F5F9',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 24,
-      },
-      emptyStateTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: '#1F2937',
-        marginBottom: 8,
-      },
-      emptyStateSubtitle: {
-        fontSize: 16,
-        color: '#64748B',
-        textAlign: 'center',
-      },
+  safe: { flex: 1 },
+  hdr: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
+  hdrText: { flex: 1 },
+  campusEnergyDot: { width: 6, height: 6, borderRadius: 3 },
+  listContent: { paddingBottom: 60 },
+  mapDotWrap: { position: 'absolute', width: 20, height: 20, alignItems: 'center', justifyContent: 'center' },
+  mapDotRing: { position: 'absolute', width: 20, height: 20, borderRadius: 10, borderWidth: 2 },
+  mapDotCore: { width: 10, height: 10, borderRadius: 5 },
+  mapOverlayText: { flex: 1 },
+  mapLivePill: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
+  mapLiveDot: { width: 6, height: 6, borderRadius: 3 },
+  mapLiveText: { fontSize: 9, fontWeight: '800', letterSpacing: 1.2 },
+  conversionTextWrap: { flex: 1 },
+  searchIcon: { marginLeft: 14 },
+  filtersContainer: { paddingHorizontal: 16, paddingBottom: 12, gap: 8 },
+  listHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 10 },
+  listHeaderBadgeDot: { width: 5, height: 5, borderRadius: 2.5 },
+  listHeaderBadgeText: { fontSize: 10, fontWeight: '800' },
+  reqTop: { flexDirection: 'row', alignItems: 'center', padding: 16, paddingBottom: 10 },
+  reqAvatarWrap: { width: 44, height: 44, position: 'relative' },
+  reqAvatar: { width: 44, height: 44, borderRadius: 22 },
+  reqAvatarInitial: { fontSize: 18, fontWeight: '800', color: '#FFFFFF' },
+  reqOnlineDot: { position: 'absolute', bottom: 1, right: 1, width: 10, height: 10, borderRadius: 5, borderWidth: 2 },
+  reqIdentity: { flex: 1, marginLeft: 10 },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  reqRouteWrap: { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 10, gap: 10 },
+  reqRouteConnector: { width: 14, alignItems: 'center', paddingTop: 4, paddingBottom: 4 },
+  reqDot: { width: 8, height: 8, borderRadius: 4 },
+  reqDotLine: { width: 2, flex: 1, marginVertical: 3 },
+  reqRouteTextWrap: { flex: 1 },
+  reqMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 16, paddingBottom: 12 },
+  reqActions: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 14 },
+  reqDetailsBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 10, paddingVertical: 8 },
+  reqOfferBtn: { flex: 1, borderRadius: 12, overflow: 'hidden' },
+  reqOfferBtnGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 14 },
+  reqOfferBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  center: { alignItems: 'center', justifyContent: 'center' },
+  disabled: { opacity: 0.55 },
+  loadingWrap: { alignItems: 'center', paddingTop: 60, gap: 14 },
+  emptyWrap: { padding: 24, alignItems: 'center' },
+  emptyPredictions: { width: '100%', gap: 10 },
+  liveRequestMarker: {
+  minWidth: 46,
+  minHeight: 30,
+  borderRadius: 16,
+  paddingHorizontal: 9,
+  paddingVertical: 6,
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 5,
+  backgroundColor: BRAND.orange,
+  borderWidth: 2,
+  borderColor: '#FFFFFF',
+  shadowColor: BRAND.orange,
+  shadowOpacity: 0.35,
+  shadowRadius: 10,
+  shadowOffset: { width: 0, height: 4 },
+  elevation: 6,
+},
+
+liveRequestMarkerDot: {
+  width: 6,
+  height: 6,
+  borderRadius: 3,
+  backgroundColor: '#FFFFFF',
+},
+
+liveRequestMarkerText: {
+  color: '#FFFFFF',
+  fontSize: 11,
+  fontWeight: '900',
+},
+
+mapLoadingOverlay: {
+  ...StyleSheet.absoluteFillObject,
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: 'rgba(8,14,23,0.25)',
+},
+
+mapPromptWrap: {
+  ...StyleSheet.absoluteFillObject,
+  alignItems: 'center',
+  justifyContent: 'center',
+  paddingBottom: 58,
+  gap: 8,
+},
+
+mapPromptText: {
+  fontSize: 12,
+  fontWeight: '600',
+  textAlign: 'center',
+},
 });
-// end of file
+

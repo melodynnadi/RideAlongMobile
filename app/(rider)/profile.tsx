@@ -1,23 +1,78 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Image, ActivityIndicator, Alert } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Settings, Camera, Star, Edit2, User as UserIcon, Mail, Phone, Calendar, GraduationCap, BookOpen } from 'lucide-react-native';
-import { Card } from '@/components/ui/Card';
-import { useTheme } from '@/hooks/useTheme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
+import {
+  BookOpen,
+  Calendar,
+  Camera,
+  Car,
+  Edit2,
+  GraduationCap,
+  Mail,
+  Phone,
+  Settings,
+  Star,
+  User as UserIcon,
+} from 'lucide-react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { onAuthStateChanged, updateProfile as updateAuthProfile } from 'firebase/auth';
-import { collection, doc, getDoc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
-import { firebaseAuth, firestore } from '@/constants/services';
-import { logActivity } from '@/utils/activityLogger';
+import {
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  query,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
+
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
+import { firebaseAuth, firestore } from '@/constants/services';
+import { AppColors, BRAND } from '@/constants/theme';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import { pickAndUploadAvatar } from '@/services/avatarUpload';
 import { useAuthStore } from '@/stores/authStore';
 import { useVerificationStore } from '@/stores/verificationStore';
-import { pickAndUploadAvatar } from '@/services/avatarUpload';
+import { logActivity } from '@/utils/activityLogger';
 
-export default function ProfileScreen() {
-  const theme = useTheme();
-  const { isEmailVerified, refreshProfiles: refreshAuthState } = useAuthStore();
+type GradientStops = readonly [string, string, ...string[]];
+
+const asGradientStops = (stops: string[]): GradientStops => {
+  return stops as unknown as GradientStops;
+};
+
+type InfoRow = {
+  icon: any;
+  label: string;
+  value: string;
+  tint: string;
+  bg: string;
+};
+
+export default function RiderProfileScreen() {
+  const { colors, isDark } = useAppTheme();
+  const themed = createStyles(colors, isDark);
+  const {
+    isEmailVerified,
+    refreshProfiles: refreshAuthState,
+    role,
+    activeRole,
+    switchRole,
+  } = useAuthStore();
   const { isVerified, verificationStatus } = useVerificationStore();
+
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -25,12 +80,13 @@ export default function ProfileScreen() {
   const [avgRating, setAvgRating] = useState<number | null>(null);
   const [statsInitializing, setStatsInitializing] = useState(true);
   const [ratingInitializing, setRatingInitializing] = useState(true);
+  const [roleActionLoading, setRoleActionLoading] = useState(false);
+
   const validCompletedRideIdsRef = useRef<Set<string>>(new Set());
   const ratingsByRideIdRef = useRef<Map<string, { stars: number; createdAt?: number }>>(new Map());
 
-  // Refresh auth state when screen comes into focus
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       const refreshState = async () => {
         try {
           await refreshAuthState();
@@ -38,542 +94,567 @@ export default function ProfileScreen() {
           console.error('Error refreshing auth state:', error);
         }
       };
-      
-      refreshState();
+
+      void refreshState();
     }, [refreshAuthState])
   );
 
-  useEffect(() => {
-  let statsUnsub: (() => void) | undefined;
-  let ratingsUnsub: (() => void) | undefined;
-    const unsub = onAuthStateChanged(firebaseAuth, async (u) => {
-      setUser(u);
-      if (u) {
-        const ref = doc(firestore, 'riders', u.uid);
-        const snap = await getDoc(ref);
-        const data = snap.exists() ? (snap.data() as any) : null;
-        setProfile(data);
-
-        // Single listener for completed confirmed rides: drives stats and valid ride IDs
-        const completedQuery = query(
-          collection(firestore, 'confirmedRides'),
-          where('riderId', '==', u.uid),
-          where('status', '==', 'COMPLETED')
-        );
-        statsUnsub?.();
-        statsUnsub = onSnapshot(completedQuery, (snap) => {
-          let count = 0;
-          let total = 0;
-          const validSet = new Set<string>();
-          snap.forEach((d) => {
-            const r: any = d.data();
-            count += 1;
-            validSet.add(String(d.id));
-            const parseAmount = (ride: any) => {
-              const v = ride?.contributionAmount ?? ride?.estimatedFare?.total ?? ride?.estimatedFare ?? ride?.price;
-              if (typeof v === 'string') {
-                const m = v.match(/([\d.]+)/);
-                return m ? parseFloat(m[1]) || 0 : 0;
-              }
-              return Number(v) || 0;
-            };
-            let amt = parseAmount(r);
-            if (!amt && r.originalRideRequest) amt = parseAmount(r.originalRideRequest);
-            if (!amt && r.originalRidePosting) amt = parseAmount(r.originalRidePosting);
-            total += amt;
-          });
-          setStats({ totalRides: count, totalSpent: total });
-          validCompletedRideIdsRef.current = validSet;
-          recomputeAvg();
-          if (statsInitializing) setStatsInitializing(false);
-        });
-
-        // Ratings addressed to this rider
-        ratingsUnsub?.();
-        ratingsUnsub = onSnapshot(
-          query(collection(firestore, 'rideRatings'), where('rateeId', '==', u.uid)),
-          (snap4) => {
-            const map = new Map<string, { stars: number; createdAt?: number }>();
-            snap4.forEach((d) => {
-              const r: any = d.data() || {};
-              const rideId = r?.rideId as string | undefined;
-              const stars = typeof r?.stars === 'number' ? r.stars : (typeof r?.rating === 'number' ? r.rating : undefined);
-              if (!rideId || typeof stars !== 'number') return;
-              let createdAt: number | undefined;
-              const ca = r?.createdAt;
-              if (ca && typeof ca?.toDate === 'function') {
-                try { createdAt = ca.toDate().getTime(); } catch {}
-              } else if (typeof ca === 'string') {
-                const td = new Date(ca).getTime();
-                if (!isNaN(td)) createdAt = td;
-              }
-              const prev = map.get(rideId);
-              if (!prev || (createdAt || 0) >= (prev.createdAt || 0)) {
-                map.set(rideId, { stars, createdAt });
-              }
-            });
-            ratingsByRideIdRef.current = map;
-            recomputeAvg();
-            if (ratingInitializing) setRatingInitializing(false);
-          }
-        );
-      } else {
-        setProfile(null);
-        // Cleanup any prior stats listener when signed out
-        statsUnsub?.();
-        statsUnsub = undefined;
-        
-        ratingsUnsub?.();
-        ratingsUnsub = undefined;
-        setAvgRating(null);
-        setStatsInitializing(true);
-        setRatingInitializing(true);
-      }
-      setLoading(false);
-    });
-    return () => {
-      statsUnsub?.();
-      ratingsUnsub?.();
-      unsub();
-    };
-  }, []);
-
-  const recomputeAvg = () => {
+  const recomputeAvg = useCallback(() => {
     try {
       const valid = validCompletedRideIdsRef.current;
       const ratings = ratingsByRideIdRef.current;
       let sum = 0;
       let count = 0;
-      ratings.forEach((v, id) => {
-        if (valid.has(id) && typeof v?.stars === 'number' && isFinite(v.stars)) {
-          sum += v.stars;
+
+      ratings.forEach((value, id) => {
+        if (valid.has(id) && typeof value?.stars === 'number' && Number.isFinite(value.stars)) {
+          sum += value.stars;
           count += 1;
         }
       });
-      setAvgRating(count ? (sum / count) : null);
+
+      setAvgRating(count ? sum / count : null);
     } catch {}
-  };
+  }, []);
+
+  useEffect(() => {
+    let statsUnsub: (() => void) | undefined;
+    let ratingsUnsub: (() => void) | undefined;
+
+    const unsub = onAuthStateChanged(firebaseAuth, async (currentUser) => {
+      setUser(currentUser);
+
+      if (!currentUser) {
+        setProfile(null);
+        statsUnsub?.();
+        ratingsUnsub?.();
+        statsUnsub = undefined;
+        ratingsUnsub = undefined;
+        setAvgRating(null);
+        setStats({ totalRides: 0, totalSpent: 0 });
+        setStatsInitializing(true);
+        setRatingInitializing(true);
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const ref = doc(firestore, 'riders', currentUser.uid);
+        const snap = await getDoc(ref);
+        const data = snap.exists() ? (snap.data() as any) : null;
+        setProfile(data);
+
+        statsUnsub?.();
+        statsUnsub = onSnapshot(
+          query(
+            collection(firestore, 'confirmedRides'),
+            where('riderId', '==', currentUser.uid),
+            where('status', '==', 'COMPLETED')
+          ),
+          (snapshot) => {
+            let count = 0;
+            let total = 0;
+            const validSet = new Set<string>();
+
+            snapshot.forEach((item) => {
+              const ride: any = item.data();
+              count += 1;
+              validSet.add(String(item.id));
+
+              const parseAmount = (source: any) => {
+                const value =
+                  source?.contributionAmount ??
+                  source?.estimatedFare?.total ??
+                  source?.estimatedFare ??
+                  source?.price;
+
+                if (typeof value === 'string') {
+                  const match = value.match(/([\d.]+)/);
+                  return match ? parseFloat(match[1]) || 0 : 0;
+                }
+
+                return Number(value) || 0;
+              };
+
+              let amount = parseAmount(ride);
+              if (!amount && ride.originalRideRequest) amount = parseAmount(ride.originalRideRequest);
+              if (!amount && ride.originalRidePosting) amount = parseAmount(ride.originalRidePosting);
+              total += amount;
+            });
+
+            setStats({ totalRides: count, totalSpent: total });
+            validCompletedRideIdsRef.current = validSet;
+            recomputeAvg();
+            setStatsInitializing(false);
+          },
+          () => setStatsInitializing(false)
+        );
+
+        ratingsUnsub?.();
+        ratingsUnsub = onSnapshot(
+          query(collection(firestore, 'rideRatings'), where('rateeId', '==', currentUser.uid)),
+          (snapshot) => {
+            const map = new Map<string, { stars: number; createdAt?: number }>();
+
+            snapshot.forEach((item) => {
+              const rating: any = item.data() || {};
+              const rideId = rating?.rideId as string | undefined;
+              const stars =
+                typeof rating?.stars === 'number'
+                  ? rating.stars
+                  : typeof rating?.rating === 'number'
+                    ? rating.rating
+                    : undefined;
+
+              if (!rideId || typeof stars !== 'number') return;
+
+              let createdAt: number | undefined;
+              const rawCreatedAt = rating?.createdAt;
+              if (rawCreatedAt && typeof rawCreatedAt?.toDate === 'function') {
+                try {
+                  createdAt = rawCreatedAt.toDate().getTime();
+                } catch {}
+              } else if (typeof rawCreatedAt === 'string') {
+                const timestamp = new Date(rawCreatedAt).getTime();
+                if (!Number.isNaN(timestamp)) createdAt = timestamp;
+              }
+
+              const previous = map.get(rideId);
+              if (!previous || (createdAt || 0) >= (previous.createdAt || 0)) {
+                map.set(rideId, { stars, createdAt });
+              }
+            });
+
+            ratingsByRideIdRef.current = map;
+            recomputeAvg();
+            setRatingInitializing(false);
+          },
+          () => setRatingInitializing(false)
+        );
+      } catch (error) {
+        console.error('Profile load error:', error);
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      statsUnsub?.();
+      ratingsUnsub?.();
+      unsub();
+    };
+  }, [recomputeAvg]);
 
   const onChangeAvatar = async () => {
     if (!user?.uid) return;
+
     try {
       const result = await pickAndUploadAvatar();
       if (result.canceled) return;
+
       const downloadURL = result.avatarUrl;
 
-      // Update Firebase Auth profile (non-critical)
       try {
         await updateAuthProfile(user, { photoURL: downloadURL });
       } catch (authError) {
         console.warn('Failed to update auth profile:', authError);
       }
 
-      // Local state
       setProfile((prev: any) => ({ ...(prev || {}), avatarUrl: downloadURL, photoPath: result.photoPath }));
+
+      try {
+        await updateDoc(doc(firestore, 'riders', user.uid), {
+          avatarUrl: downloadURL,
+          photoPath: result.photoPath,
+          updatedAt: new Date(),
+        });
+      } catch {}
 
       void logActivity({
         type: 'profile_updated',
         entityType: 'profile',
         entityId: user.uid,
-        metadata: {
-          fields: ['avatarUrl'],
-          mode: 'avatar',
-        },
+        metadata: { fields: ['avatarUrl'], mode: 'avatar' },
       });
 
-      Alert.alert('Success', 'Profile picture updated successfully!');
-    } catch (e: any) {
-      console.error('Avatar update error:', e);
-      let errorMessage = e?.message || 'Please try again.';
-      if (e?.code === 'storage/unauthenticated') {
-        errorMessage = 'Upload failed: Please sign in again.';
+      Alert.alert('Success', 'Profile picture updated successfully.');
+    } catch (error: any) {
+      console.error('Avatar update error:', error);
+      let message = error?.message || 'Please try again.';
+      if (error?.code === 'storage/unauthenticated') {
+        message = 'Upload failed: Please sign in again.';
       }
-      Alert.alert('Avatar update failed', errorMessage);
+      Alert.alert('Avatar update failed', message);
     }
   };
 
+  const canSwitchToDriver = activeRole === 'rider' && role !== 'driver';
+
+  const handleSwitchToDriver = async () => {
+    if (!canSwitchToDriver || roleActionLoading) return;
+
+    setRoleActionLoading(true);
+
+    try {
+      if (role === 'both') {
+        await switchRole('driver');
+        router.replace('/(driver)' as any);
+        return;
+      }
+
+      Alert.alert(
+        'Driver setup required',
+        'To drive with RideAlong, you need to complete driver onboarding first.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Start setup',
+            onPress: () => router.push('/(auth)/driver-signup?role=both' as any),
+          },
+        ]
+      );
+    } catch (error: any) {
+      Alert.alert('Could not switch', error?.message || 'Please try again.');
+    } finally {
+      setRoleActionLoading(false);
+    }
+  };
+
+  const displayName =
+    profile?.fullName ||
+    profile?.fullname ||
+    profile?.name ||
+    user?.displayName ||
+    user?.email?.split('@')[0] ||
+    'Student';
+  const displayEmail = user?.email ?? 'No email';
+  const displayAvatar = profile?.avatarUrl || user?.photoURL || null;
+  const ratingText = typeof avgRating === 'number' ? avgRating.toFixed(1) : '--';
+  const isStudentVerified = isVerified || verificationStatus === 'approved';
+
+  const infoRows: InfoRow[] = [
+    {
+      icon: UserIcon,
+      label: 'Full Name',
+      value: displayName || 'Not provided',
+      tint: colors.blue,
+      bg: colors.blueDim,
+    },
+    {
+      icon: Mail,
+      label: 'Email',
+      value: displayEmail,
+      tint: colors.green,
+      bg: colors.greenDim,
+    },
+    {
+      icon: Phone,
+      label: 'Phone Number',
+      value: profile?.phoneNumber || profile?.phone || 'Not provided',
+      tint: colors.amber,
+      bg: isDark ? 'rgba(245,158,11,0.16)' : 'rgba(245,158,11,0.10)',
+    },
+    {
+      icon: Calendar,
+      label: 'Date of Birth',
+      value: profile?.dateOfBirth || profile?.dateofbirth || profile?.dob || 'Not provided',
+      tint: colors.textSecondary,
+      bg: colors.bgInput,
+    },
+    {
+      icon: GraduationCap,
+      label: 'University',
+      value: profile?.university || 'Not provided',
+      tint: colors.primary,
+      bg: colors.primaryDim,
+    },
+    {
+      icon: BookOpen,
+      label: 'Major',
+      value: profile?.major || 'Not provided',
+      tint: '#8B5CF6',
+      bg: isDark ? 'rgba(139,92,246,0.16)' : 'rgba(139,92,246,0.10)',
+    },
+  ];
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: '#F8FAFC' }]} edges={['top', 'left', 'right']}>
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.colors.primary} />
-          <Text style={styles.loadingText}>Loading profile...</Text>
-        </View>
-      ) : (
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Email Verification Banner */}
-          {!isEmailVerified && user?.email && (
-            <EmailVerificationBanner userEmail={user.email} />
-          )}
-        
-        {/* Profile Header */}
-        <View style={[styles.profileCard, { backgroundColor: theme.colors.primary }]}>
-          <TouchableOpacity 
-            style={styles.settingsButton}
-            onPress={() => router.push('/settings')}
-          >
-            <Settings size={24} color="white" />
-          </TouchableOpacity>
-          
-          <View style={styles.profileInfo}>
-            <TouchableOpacity style={styles.avatarContainer} activeOpacity={0.8} onPress={onChangeAvatar}>
-              { profile?.avatarUrl ? (
-                <Image source={{ uri: profile.avatarUrl }} style={styles.avatarImg} />
-              ) : (
-                <View style={styles.avatar}>
-                  <UserIcon size={32} color="white" />
-                </View>
-              )}
-              <TouchableOpacity style={styles.cameraButton} onPress={onChangeAvatar}>
-                <Camera size={16} color={theme.colors.primary} />
+    <View style={themed.root}>
+      <StatusBar barStyle={colors.statusBar} />
+      <LinearGradient colors={asGradientStops(colors.gradientBg)} style={StyleSheet.absoluteFillObject} />
+
+      <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={themed.loadingText}>Loading profile...</Text>
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            {!isEmailVerified && user?.email && <EmailVerificationBanner userEmail={user.email} />}
+
+            <View style={themed.heroCard}>
+              <LinearGradient
+                colors={asGradientStops([BRAND.navyText, isDark ? '#0B1524' : '#12213A'])}
+                style={StyleSheet.absoluteFillObject}
+              />
+
+              <TouchableOpacity
+                style={styles.settingsButton}
+                onPress={() => router.push('/(rider)/settings' as any)}
+                activeOpacity={0.86}
+              >
+                <Settings size={22} color="#FFFFFF" />
               </TouchableOpacity>
-            </TouchableOpacity>
-            
-            <Text style={styles.profileName}>{profile?.fullName || profile?.fullname || profile?.name || user?.displayName || 'Student'}</Text>
-            <Text style={styles.profileEmail}>{user?.email ?? 'no-email'}</Text>
-            
-            <View style={styles.verificationContainer}>
-              {isVerified || verificationStatus === 'approved' ? (
-                <View style={styles.verifiedBadge}>
-                  <Text style={styles.verifiedText}>✓ Verified Student</Text>
+
+              <View style={styles.heroContent}>
+                <TouchableOpacity style={styles.avatarWrap} activeOpacity={0.85} onPress={onChangeAvatar}>
+                  {displayAvatar ? (
+                    <Image source={{ uri: displayAvatar }} style={styles.avatarImg} />
+                  ) : (
+                    <LinearGradient
+                      colors={asGradientStops([BRAND.orange, BRAND.orangeDeep])}
+                      style={styles.avatarFallback}
+                    >
+                      <UserIcon size={34} color="#FFFFFF" />
+                    </LinearGradient>
+                  )}
+
+                  <TouchableOpacity style={styles.cameraButton} onPress={onChangeAvatar}>
+                    <Camera size={16} color={colors.primary} />
+                  </TouchableOpacity>
+                </TouchableOpacity>
+
+                <Text style={styles.profileName}>{displayName}</Text>
+                <Text style={styles.profileEmail}>{displayEmail}</Text>
+
+                <View style={styles.badgeRow}>
+                  <View style={styles.heroBadge}>
+                    <Text style={styles.heroBadgeText}>
+                      {isStudentVerified
+                        ? 'Verified Student'
+                        : verificationStatus === 'pending' || verificationStatus === 'manual-review'
+                          ? 'Pending Verification'
+                          : verificationStatus === 'rejected'
+                            ? 'Not Verified'
+                            : 'Student Profile'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.ratingPill}>
+                    <Star size={15} color="#F59E0B" fill="#F59E0B" />
+                    <Text style={styles.ratingText}>{ratingText}</Text>
+                  </View>
                 </View>
-              ) : (verificationStatus === 'pending' || verificationStatus === 'manual-review') ? (
-                <View style={[styles.verifiedBadge, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
-                  <Text style={[styles.verifiedText, { opacity: 0.75 }]}>Pending Verification</Text>
-                </View>
-              ) : verificationStatus === 'rejected' ? (
-                <View style={[styles.verifiedBadge, { backgroundColor: 'rgba(255, 255, 255, 0.2)' }]}>
-                  <Text style={styles.verifiedText}>❌ Not Verified</Text>
-                </View>
-              ) : null}
-              <View style={styles.ratingContainer}>
-                <Star size={16} color="#F59E0B" fill="#F59E0B" />
-                <Text style={styles.ratingText}>{typeof avgRating === 'number' ? avgRating.toFixed(1) : '—'}</Text>
-              </View>
-            </View>
-          </View>
-        </View>
 
-        {/* Stats */}
-        <View style={styles.statsContainer}>
-          {statsInitializing ? (
-            <>
-              <Card style={styles.statCard}>
-                <ActivityIndicator size="small" color={theme.colors.primary} />
-                <Text style={styles.statLabel}>Total Rides</Text>
-              </Card>
-              <Card style={styles.statCard}>
-                <ActivityIndicator size="small" color={theme.colors.primary} />
-                <Text style={styles.statLabel}>Total Spent</Text>
-              </Card>
-            </>
-          ) : (
-            <>
-              <Card style={styles.statCard}>
-                <Text style={[styles.statNumber, { color: theme.colors.secondary }]}>{stats.totalRides}</Text>
-                <Text style={styles.statLabel}>Total Rides</Text>
-              </Card>
-              <Card style={styles.statCard}>
-                <Text style={[styles.statNumber, { color: '#10B981' }]}>${stats.totalSpent.toFixed(1)}</Text>
-                <Text style={styles.statLabel}>Total Spent</Text>
-              </Card>
-            </>
-          )}
-        </View>
-
-        {/* Personal Information */}
-        <Card style={styles.infoCard}>
-          <View style={styles.infoHeader}>
-            <Text style={[styles.infoTitle, { color: theme.colors.secondary }]}>
-              Personal Information
-            </Text>
-            <TouchableOpacity 
-              style={styles.editButton} 
-              onPress={() => router.push('/settings/account-settings')}
-            >
-              <Edit2 size={16} color={theme.colors.primary} />
-              <Text style={[styles.editText, { color: theme.colors.primary }]}>Edit</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.infoSection}>
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#F0F9FF' }]}>
-                <UserIcon size={20} color="#3B82F6" />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Full Name</Text>
-                <Text style={[styles.infoValue, { color: theme.colors.secondary }]}>
-                  {profile?.fullName || profile?.fullname || profile?.name || user?.displayName || 'Not provided'}
-                </Text>
+                {canSwitchToDriver && (
+                  <TouchableOpacity
+                    onPress={handleSwitchToDriver}
+                    disabled={roleActionLoading}
+                    activeOpacity={0.86}
+                    style={styles.roleSwitchBtn}
+                  >
+                    <LinearGradient
+                      colors={asGradientStops([BRAND.orange, BRAND.orangeDeep])}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.roleSwitchBtnGrad}
+                    >
+                      {roleActionLoading ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <>
+                          <Car size={16} color="#FFFFFF" />
+                          <Text style={styles.roleSwitchText}>
+                            {role === 'both' ? 'Switch to Driver Mode' : 'Add Driver Mode'}
+                          </Text>
+                        </>
+                      )}
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
 
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#F0FDF4' }]}>
-                <Mail size={20} color="#10B981" />
+            <View style={styles.statsRow}>
+              <View style={themed.statCard}>
+                {statsInitializing ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Text style={[styles.statValue, { color: colors.textPrimary }]}>{stats.totalRides}</Text>
+                )}
+                <Text style={themed.statLabel}>Total Rides</Text>
               </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Email</Text>
-                <Text style={[styles.infoValue, { color: theme.colors.secondary }]}>
-                  {user?.email ?? 'Not provided'}
-                </Text>
+
+              <View style={themed.statCard}>
+                {statsInitializing ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Text style={[styles.statValue, { color: colors.primary }]}>
+                    ${stats.totalSpent.toFixed(1)}
+                  </Text>
+                )}
+                <Text style={themed.statLabel}>Total Spent</Text>
+              </View>
+
+              <View style={themed.statCard}>
+                {ratingInitializing ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Text style={[styles.statValue, { color: colors.textPrimary }]}>★{ratingText}</Text>
+                )}
+                <Text style={themed.statLabel}>Rating</Text>
               </View>
             </View>
 
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#FFFBEB' }]}>
-                <Phone size={20} color="#F59E0B" />
+            <View style={themed.infoCard}>
+              {isDark && <BlurView intensity={18} tint="dark" style={StyleSheet.absoluteFillObject} />}
+
+              <View style={styles.infoHeader}>
+                <Text style={themed.infoTitle}>Personal Information</Text>
+                <TouchableOpacity
+                  style={themed.editButton}
+                  onPress={() => router.push('/(rider)/settings/account-settings' as any)}
+                  activeOpacity={0.86}
+                >
+                  <Edit2 size={15} color={colors.primary} />
+                  <Text style={themed.editText}>Edit</Text>
+                </TouchableOpacity>
               </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Phone Number</Text>
-                <Text style={[styles.infoValue, { color: '#64748B' }]}>
-                  {profile?.phoneNumber || 'Not provided'}
-                </Text>
+
+              <View style={styles.infoSection}>
+                {infoRows.map((item, index) => {
+                  const Icon = item.icon;
+                  return (
+                    <View key={item.label}>
+                      {index === 4 && <View style={themed.divider} />}
+                      <View style={styles.infoItem}>
+                        <View style={[styles.iconContainer, { backgroundColor: item.bg }]}>
+                          <Icon size={20} color={item.tint} />
+                        </View>
+                        <View style={styles.infoContent}>
+                          <Text style={themed.infoLabel}>{item.label}</Text>
+                          <Text style={themed.infoValue}>{item.value}</Text>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })}
               </View>
             </View>
-
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#F8FAFC' }]}>
-                <Calendar size={20} color="#64748B" />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Date of Birth</Text>
-                <Text style={[styles.infoValue, { color: '#64748B' }]}>
-                  {profile?.dateOfBirth || profile?.dateofbirth || profile?.dob || 'Not provided'}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.divider} />
-
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#FEF3E2' }]}>
-                <GraduationCap size={20} color="#F97316" />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>University</Text>
-                <Text style={[styles.infoValue, { color: theme.colors.secondary }]}>
-                  {profile?.university || 'Not provided'}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.infoItem}>
-              <View style={[styles.iconContainer, { backgroundColor: '#F3E8FF' }]}>
-                <BookOpen size={20} color="#8B5CF6" />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Major</Text>
-                <Text style={[styles.infoValue, { color: '#64748B' }]}>
-                  {profile?.major || 'Not provided'}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </Card>
-        </ScrollView>
-      )}
-    </SafeAreaView>
+          </ScrollView>
+        )}
+      </SafeAreaView>
+    </View>
   );
 }
 
+const createStyles = (colors: AppColors, isDark: boolean) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.bg,
+    },
+    loadingText: {
+      marginTop: 16,
+      fontSize: 15,
+      color: colors.textSecondary,
+      fontWeight: '600',
+    },
+    heroCard: {
+      marginHorizontal: 18,
+      marginBottom: 16,
+      borderRadius: 26,
+      overflow: 'hidden',
+      minHeight: 288,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(13,27,72,0.08)',
+      shadowColor: BRAND.navyText,
+      shadowOffset: { width: 0, height: 12 },
+      shadowOpacity: isDark ? 0.2 : 0.12,
+      shadowRadius: 24,
+      elevation: 5,
+    },
+    statCard: {
+      flex: 1,
+      minHeight: 88,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 12,
+    },
+    statLabel: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '700',
+      marginTop: 5,
+      textAlign: 'center',
+    },
+    infoCard: {
+      marginHorizontal: 18,
+      marginBottom: 34,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: colors.borderMid,
+      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
+      overflow: 'hidden',
+      padding: 18,
+      shadowColor: BRAND.navyText,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: isDark ? 0.12 : 0.05,
+      shadowRadius: 14,
+      elevation: 2,
+    },
+    infoTitle: {
+      color: colors.textPrimary,
+      fontSize: 18,
+      fontWeight: '800',
+      letterSpacing: 0,
+    },
+    editButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      backgroundColor: colors.primaryDim,
+      borderWidth: 1,
+      borderColor: colors.primaryBorder,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+      borderRadius: 12,
+    },
+    editText: {
+      color: colors.primary,
+      fontSize: 13,
+      fontWeight: '800',
+    },
+    infoLabel: {
+      color: colors.textTertiary,
+      fontSize: 12,
+      fontWeight: '800',
+      marginBottom: 4,
+    },
+    infoValue: {
+      color: colors.textPrimary,
+      fontSize: 15,
+      fontWeight: '700',
+      lineHeight: 20,
+    },
+    divider: {
+      height: 1,
+      backgroundColor: colors.border,
+      marginVertical: 2,
+    },
+  });
+
 const styles = StyleSheet.create({
-  container: {
+  safe: {
     flex: 1,
   },
-  content: {
-    flex: 1,
-    padding: 16,
-  },
-  profileCard: {
-    borderRadius: 20,
-    padding: 24,
-    marginBottom: 24,
-    position: 'relative',
-  },
-  settingsButton: {
-    position: 'absolute',
-    top: 20,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  profileInfo: {
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  avatarContainer: {
-    position: 'relative',
-    marginBottom: 16,
-  },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarImg: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#E5E7EB',
-  },
-  cameraButton: {
-    position: 'absolute',
-    bottom: -4,
-    right: -4,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'white',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#E05E1A',
-  },
-  profileName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 4,
-  },
-  profileEmail: {
-    fontSize: 16,
-    color: 'white',
-    opacity: 0.9,
-    marginBottom: 16,
-  },
-  verificationContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  verifiedBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  verifiedText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  ratingText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 32,
-    gap: 12,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: 'white',
-    alignItems: 'center',
-    paddingVertical: 20,
-    paddingHorizontal: 16,
-  },
-  statNumber: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 14,
-    color: '#64748B',
-    textAlign: 'center',
-  },
-  infoCard: {
-    backgroundColor: 'white',
-    padding: 20,
-    paddingBottom: 32,
-  },
-  infoHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  infoTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  editButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  editText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  infoSection: {
-    gap: 20,
-  },
-  infoItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 16,
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 2,
-  },
-  infoContent: {
-    flex: 1,
-  },
-  infoLabel: {
-    fontSize: 14,
-    color: '#64748B',
-    marginBottom: 4,
-    fontWeight: '500',
-  },
-  infoValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    lineHeight: 22,
-  },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-    color: '#1F2937',
-  },
-  addButton: {
-    marginTop: 6,
-  },
-  addButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#E2E8F0',
-    marginVertical: 4,
+  scrollContent: {
+    paddingTop: 12,
+    paddingBottom: 90,
   },
   loadingContainer: {
     flex: 1,
@@ -581,9 +662,159 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 80,
   },
-  loadingText: {
+  settingsButton: {
+    position: 'absolute',
+    top: 18,
+    right: 18,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 3,
+  },
+  heroContent: {
+    alignItems: 'center',
+    padding: 24,
+    paddingTop: 38,
+  },
+  avatarWrap: {
+    position: 'relative',
+    marginBottom: 16,
+  },
+  avatarImg: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: '#E5E7EB',
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.32)',
+  },
+  avatarFallback: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.32)',
+  },
+  cameraButton: {
+    position: 'absolute',
+    bottom: -3,
+    right: -3,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: BRAND.orange,
+  },
+  profileName: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  profileEmail: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 4,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  heroBadge: {
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  heroBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  ratingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  ratingText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  roleSwitchBtn: {
     marginTop: 16,
-    fontSize: 16,
-    color: '#64748B',
+    borderRadius: 18,
+    overflow: 'hidden',
+    alignSelf: 'center',
+  },
+  roleSwitchBtnGrad: {
+    minHeight: 42,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  roleSwitchText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 18,
+    marginBottom: 16,
+  },
+  statValue: {
+    fontSize: 25,
+    fontWeight: '900',
+  },
+  infoHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  infoSection: {
+    gap: 18,
+  },
+  infoItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+  },
+  iconContainer: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 1,
+  },
+  infoContent: {
+    flex: 1,
   },
 });

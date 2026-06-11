@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Dimensions,
-  Animated, Easing, Image, useColorScheme, StatusBar,
+  Animated, Easing, Image, StatusBar,
 } from 'react-native';
+import { useAppTheme } from '@/hooks/ThemeContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -30,17 +31,13 @@ const COLORS = {
   lightSub:     '#5A6A7E',
 };
 
-function useAppTheme() {
-  const dark = useColorScheme() === 'dark';
-  return {
-    dark,
-    bg:     dark ? COLORS.darkBg     : COLORS.lightBg,
-    card:   dark ? COLORS.darkCard   : COLORS.lightCard,
-    border: dark ? COLORS.darkBorder : COLORS.lightBorder,
-    text:   dark ? COLORS.darkText   : COLORS.lightText,
-    sub:    dark ? COLORS.darkSub    : COLORS.lightSub,
-  };
-}
+type GradientStops = readonly [string, string, ...string[]];
+
+const asGradientStops = (stops: string[]): GradientStops => {
+  return stops as unknown as GradientStops;
+};
+
+
 
 // ─── Floating Orb ─────────────────────────────────────────────────────────────
 function FloatingOrb({ startX, startY, size, color, opacity, driftX, driftY, duration }: {
@@ -112,7 +109,16 @@ function GlassCard({ children, selected, onPress, dark }: {
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function SelectRoleScreen() {
-  const theme = useAppTheme();
+  const { colors, isDark } = useAppTheme();
+
+  const theme = {
+    dark: isDark,
+    bg: colors.bg,
+    card: colors.bgCard,
+    border: colors.border,
+    text: colors.textPrimary,
+    sub: colors.textSecondary,
+  };
   const [selected, setSelected] = useState<'rider' | 'driver' | 'both' | null>(null);
 
   const fadeTitle  = useRef(new Animated.Value(0)).current;
@@ -144,11 +150,19 @@ export default function SelectRoleScreen() {
 
   const handleContinue = () => {
     if (!selected) return;
-    if (selected === 'driver') {
-      router.push('/(auth)/driver-signup');
-    } else {
-      router.push({ pathname: '/(auth)/sign-up', params: { role: selected } });
+
+    if (selected === 'rider') {
+      router.push({
+        pathname: '/(auth)/sign-up',
+        params: { role: 'rider' },
+      });
+      return;
     }
+
+    router.push({
+      pathname: '/(auth)/driver-signup',
+      params: { role: selected },
+    });
   };
 
   const riderSelected  = selected === 'rider'  || selected === 'both';
@@ -163,7 +177,7 @@ export default function SelectRoleScreen() {
   return (
     <View style={s.root}>
       <StatusBar barStyle={theme.dark ? 'light-content' : 'dark-content'} />
-      <LinearGradient colors={bgGradient} style={StyleSheet.absoluteFillObject} />
+      <LinearGradient colors={asGradientStops(bgGradient)} style={StyleSheet.absoluteFillObject} />
 
       <FloatingOrb startX={-30}        startY={height * 0.10} size={280} color={COLORS.orange}      opacity={theme.dark ? 0.11 : 0.07} driftX={24}  driftY={18}  duration={5510} />
       <FloatingOrb startX={width + 40} startY={height * 0.35} size={240} color={COLORS.navy}        opacity={theme.dark ? 0.35 : 0.07} driftX={-20} driftY={28}  duration={6840} />
@@ -241,9 +255,13 @@ export default function SelectRoleScreen() {
         <Animated.View style={[s.bottom, { opacity: fadeBottom }]}>
           <TouchableOpacity onPress={handleContinue} disabled={!canContinue} activeOpacity={0.86}>
             <LinearGradient
-              colors={canContinue
-                ? [COLORS.orange, COLORS.orangeLight]
-                : (theme.dark ? ['#1C2A38', '#1C2A38'] : ['#D8DFE8', '#D8DFE8'])}
+              colors={asGradientStops(
+                canContinue
+                  ? [COLORS.orange, COLORS.orangeLight]
+                  : theme.dark
+                    ? ['#1C2A38', '#1C2A38']
+                    : ['#D8DFE8', '#D8DFE8']
+              )}
               start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
               style={s.ctaButton}
             >

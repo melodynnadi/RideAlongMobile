@@ -19,6 +19,7 @@ interface PromotionCardProps {
   isLoading?: boolean;
   isClaimed?: boolean;
   style?: any;
+  variant?: 'primary' | 'secondary' | 'tertiary'; // accepted but component uses promotion colors
 }
 
 export const PromotionCard: React.FC<PromotionCardProps> = ({
@@ -46,7 +47,7 @@ export const PromotionCard: React.FC<PromotionCardProps> = ({
     if (daysUntilExpiry <= 0) return 'Expired';
     if (daysUntilExpiry === 1) return 'Expires today';
     if (isExpiringSoon) return `${daysUntilExpiry} days left`;
-    return `Valid until ${promotion.endDate.toLocaleDateString()}`;
+    return `Valid until ${new Date(promotion.endDate).toLocaleDateString()}`;
   };
 
   const getCategoryIcon = () => {
@@ -77,7 +78,7 @@ export const PromotionCard: React.FC<PromotionCardProps> = ({
     }
     
     // Fallback to type-based icons
-    switch (promotion.type) {
+    switch (promotion.type as string) {
       case 'discount':
         return 'flash'; // Lightning bolt for discounts (like your orange icon)
       case 'cashback':
@@ -175,15 +176,11 @@ export const PromotionCard: React.FC<PromotionCardProps> = ({
       activeOpacity={0.8}
     >
       {promotion.imageUrl ? (
-        <ImageBackground
-          source={{ uri: promotion.imageUrl }}
-          style={styles.backgroundImage}
-          resizeMode="cover"
-        >
+        <ImageBackground source={{ uri: promotion.imageUrl }} style={styles.backgroundImage} resizeMode="cover">
           <LinearGradient
             colors={[
-              `${promotion.backgroundColor}CC`,
-              promotion.backgroundColor
+              `${promotion.backgroundColor || '#F4621F'}CC`,
+              promotion.backgroundColor || '#F4621F',
             ]}
             style={styles.overlay}
           >
@@ -192,7 +189,10 @@ export const PromotionCard: React.FC<PromotionCardProps> = ({
         </ImageBackground>
       ) : (
         <LinearGradient
-          colors={[promotion.backgroundColor, `${promotion.backgroundColor}DD`]}
+          colors={[
+            promotion.backgroundColor || '#F4621F',
+            `${promotion.backgroundColor || '#F4621F'}DD`,
+          ]}
           style={styles.gradientBackground}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}

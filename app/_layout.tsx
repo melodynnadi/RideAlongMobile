@@ -1,12 +1,14 @@
 import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Toast from 'react-native-toast-message';
+
 import '../global.css';
+
 import { useAuthStore } from '@/stores/authStore';
+import { ThemeProvider} from '@/hooks/ThemeContext';
 
 const queryClient = new QueryClient();
 
@@ -32,16 +34,38 @@ function AuthGate() {
       return;
     }
 
-    // Redirect to correct role group if in wrong one or in auth
+    if (!activeRole) {
+       if (!inAuth) router.replace('/(auth)/select-role');
+      return;
+    }
+
     if (activeRole === 'driver') {
       if (!inDriver) router.replace('/(driver)');
-    } else {
-      // rider or both (defaulting to rider)
-      if (!inRider) router.replace('/(rider)');
+      return;
     }
-  }, [isAuthenticated, isLoading, isEmailVerified, activeRole, segments]);
+
+    if (activeRole === 'rider') {
+      if (!inRider) router.replace('/(rider)');
+      return;
+    }
+  }, [isAuthenticated, isLoading, isEmailVerified, activeRole, segments, router]);
 
   return null;
+}
+
+function AppStack() {
+
+  return (
+    <>
+      <AuthGate />
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(rider)" />
+        <Stack.Screen name="(driver)" />
+      </Stack>
+      <Toast />
+    </>
+  );
 }
 
 export default function RootLayout() {
@@ -50,20 +74,15 @@ export default function RootLayout() {
   useEffect(() => {
     const unsubscribe = initializeAuth();
     return unsubscribe;
-  }, []);
+  }, [initializeAuth]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
-          <StatusBar style="light" />
-          <AuthGate />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(auth)" />
-            <Stack.Screen name="(rider)" />
-            <Stack.Screen name="(driver)" />
-          </Stack>
-          <Toast />
+          <ThemeProvider>
+            <AppStack />
+          </ThemeProvider>
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
