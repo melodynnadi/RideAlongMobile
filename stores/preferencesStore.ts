@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { firestore, firebaseAuth } from '@/constants/services';
 import { useAuthStore } from '@/stores/authStore';
-import { UserPreferences, UserProfile } from '@/types';
+import { UserPreferences } from '@/types';
 
 interface PreferencesState {
   preferences: UserPreferences | null;
@@ -44,11 +44,16 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
         throw new Error('User document not found');
       }
       
-      const userData = userDoc.data() as UserProfile;
+      const userData = userDoc.data();
+      const musicPreference = Array.isArray(userData.musicPreference)
+        ? userData.musicPreference.map(String).filter(Boolean)
+        : typeof userData.musicPreference === 'string'
+          ? userData.musicPreference.split(/[;,]/).map((item: string) => item.trim()).filter(Boolean)
+          : [];
       
       // Map Firebase data to our UserPreferences interface
       const preferences: UserPreferences = {
-        musicPreference: userData.musicPreference || [],
+        musicPreference,
         soundEnvironment: userData.soundEnvironment || '',
         conversationLevel: userData.conversationLevel || '',
         smokingPreference: userData.smokingPreference || '',

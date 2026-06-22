@@ -1,193 +1,178 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Image, StyleSheet, ActivityIndicator, TouchableOpacity, ScrollView } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import {
+  View, Text, Image, StyleSheet, ActivityIndicator,
+  TouchableOpacity, ScrollView, Linking, StatusBar,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { firestore, firebaseAuth } from '@/constants/services';
 import { doc, getDoc, query, collection, where, onSnapshot, getDocs } from 'firebase/firestore';
-import { Star, Phone, User, Music, Thermometer, MessageCircle, Cigarette, Heart } from 'lucide-react-native';
-import { Linking } from 'react-native';
-import { theme } from '@/theme';
-import { useTheme } from '@/hooks/useTheme';
 
-type Review = {
-  id: string;
-  reviewerName?: string;
-  rating?: number;
-  comment?: string;
-  createdAt?: any;
-};
+import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 
+const NAVY   = '#15233A';
+const ORANGE = '#DE5D20';
+const BG     = '#FBFAF7';
+const BORDER = '#E5E0D8';
+const MUTED  = '#8B94A6';
+const CARD   = '#FFFFFF';
+
+type Review = { id: string; reviewerName?: string; rating?: number; comment?: string; createdAt?: any };
 type CommentItem = Review & { raterId?: string; commenterName?: string; commenterAvatarUrl?: string };
 
+const PREF_ICONS: Record<string, string> = {
+  musicPreference:       'musical-notes-outline',
+  soundEnvironment:      'musical-notes-outline',
+  temperaturePreference: 'thermometer-outline',
+  conversationLevel:     'chatbubble-outline',
+  smokingPreference:     'ban-outline',
+  allowSmoking:          'ban-outline',
+  allowPets:             'paw-outline',
+  passengerType:         'person-outline',
+};
+
+const PREF_LABELS: Record<string, string> = {
+  musicPreference:       'Music',
+  soundEnvironment:      'Sound',
+  temperaturePreference: 'Temperature',
+  conversationLevel:     'Conversation',
+  smokingPreference:     'Smoking',
+  allowSmoking:          'Smoking',
+  allowPets:             'Pets',
+  passengerType:         'Passenger type',
+};
+
+function StarRow({ rating, size = 14 }: { rating: number; size?: number }) {
+  return (
+    <View style={{ flexDirection: 'row', gap: 2 }}>
+      {[1, 2, 3, 4, 5].map((s) => (
+        <Ionicons
+          key={s}
+          name={rating >= s ? 'star' : rating >= s - 0.5 ? 'star-half' : 'star-outline'}
+          size={size}
+          color="#F59E0B"
+        />
+      ))}
+    </View>
+  );
+}
+
+function InitialsAvatar({ name, size = 72 }: { name: string; size?: number }) {
+  const initials = name
+    .split(' ')
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+  return (
+    <View style={[s.avatarFallback, { width: size, height: size, borderRadius: size / 2 }]}>
+      <Text style={[s.avatarInitials, { fontSize: size * 0.36 }]}>{initials || '?'}</Text>
+    </View>
+  );
+}
+
 export default function RiderProfilePage() {
+  const { goBack } = useReturnNavigation('/(driver)');
   const { id } = useLocalSearchParams();
   const riderId = Array.isArray(id) ? id[0] : id;
-  const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [rider, setRider] = useState<any | null>(null);
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [comments, setComments] = useState<CommentItem[]>([]);
+
+  const [loading, setLoading]       = useState(true);
+  const [rider, setRider]           = useState<any | null>(null);
+  const [reviews, setReviews]       = useState<Review[]>([]);
+  const [comments, setComments]     = useState<CommentItem[]>([]);
   const [totalRides, setTotalRides] = useState<number>(0);
 
   useEffect(() => {
-  if (!riderId) return;
+    if (!riderId) return;
     let mounted = true;
-    // realtime listener for rideRatings so the RatingsSummary shows live data
+
     const revQ = query(collection(firestore, 'rideRatings'), where('rateeId', '==', riderId));
     const unsubReviews = onSnapshot(revQ, (snap) => {
       if (!mounted) return;
       const revs: Review[] = snap.docs.map((d) => {
         const data = d.data() as any;
-        // normalize rating field (some docs use `stars`)
         return { id: d.id, ...data, rating: typeof data.stars === 'number' ? data.stars : data.rating } as Review;
       });
       setReviews(revs);
 
-      // Build comments: only include docs that have a non-empty comment and were left by drivers
       (async () => {
         try {
-          const commented = revs.filter(r => r.comment && String(r.comment).trim().length > 0);
+          const commented  = revs.filter(r => r.comment && String(r.comment).trim().length > 0);
           const getRaterId = (c: any) => c.raterId || c.rater || c.reviewerId || c.reviewer || c.userId || c.authorId || c.uid || c.by || c.createdBy;
-          if (commented.length === 0) {
-            setComments([]);
-            return;
-          }
+          if (commented.length === 0) { setComments([]); return; }
 
-          const raterIds = Array.from(new Set(commented.map(c => getRaterId(c)).filter(Boolean)));
-
-          // Check which raterIds correspond to drivers. Prefer `users` doc flags (role/isDriver)
-          // and fall back to presence of a `drivers/{id}` doc. Also prefer `users` doc for name/avatar.
+          const raterIds   = Array.from(new Set(commented.map(c => getRaterId(c)).filter(Boolean)));
           const driverMap: Record<string, boolean> = {};
           const profileMap: Record<string, { name?: string; avatarUrl?: string }> = {};
 
           await Promise.all(raterIds.map(async (rid) => {
             try {
-              // First, attempt to read the users doc and look for driver flags
               const udoc = await getDoc(doc(firestore, 'riders', rid));
               if (udoc.exists()) {
                 const u = udoc.data() as any;
-                const isDriver = (u?.role === 'driver') || (u?.isDriver === true) || (u?.type === 'driver');
-                if (isDriver) {
-                  driverMap[rid] = true;
-                }
-                // capture name/avatar from users doc if present
-                const avatar = u?.avatarUrl || u?.avatarURL || u?.photoURL || u?.photoUrl || u?.profilePhoto || u?.profilePic || u?.picture || u?.avatar;
-                const uname = u?.name || u?.displayName || u?.fullName || (u?.firstName && u?.lastName ? `${u.firstName} ${u.lastName}`.trim() : null) || (u?.firstName ? u.firstName : null);
+                if (u?.role === 'driver' || u?.isDriver === true || u?.type === 'driver') driverMap[rid] = true;
+                const avatar = u?.avatarUrl || u?.avatarURL || u?.photoURL || u?.photoUrl;
+                const uname  = u?.name || u?.displayName || u?.fullName || (u?.firstName && u?.lastName ? `${u.firstName} ${u.lastName}`.trim() : u?.firstName);
                 if (avatar || uname) profileMap[rid] = { name: uname, avatarUrl: avatar };
               }
-
-              // If we didn't already mark as driver, check drivers collection presence
               if (!driverMap[rid]) {
-                try {
-                  const ddoc = await getDoc(doc(firestore, 'drivers', rid));
-                  if (ddoc.exists()) {
-                    driverMap[rid] = true;
-                    const dv = ddoc.data() as any;
-                    // prefer users name/avatar, but fallback to drivers doc if missing
-                    // Drivers collection commonly stores `fullName` and may have `avatarUrl1`
-                    const avatar2 = dv?.avatarUrl1 || dv?.avatarUrl || dv?.photoURL || dv?.profilePhoto || dv?.photo || dv?.profilePic;
-                    const dname = dv?.fullName || dv?.name || dv?.displayName;
-                    if (!profileMap[rid]) profileMap[rid] = { name: dname, avatarUrl: avatar2 };
-                    else profileMap[rid] = { name: profileMap[rid].name || dname, avatarUrl: profileMap[rid].avatarUrl || avatar2 };
-                  }
-                } catch (e) {
-                  // ignore drivers read failure
+                const ddoc = await getDoc(doc(firestore, 'drivers', rid));
+                if (ddoc.exists()) {
+                  driverMap[rid] = true;
+                  const dv = ddoc.data() as any;
+                  const avatar2 = dv?.avatarUrl1 || dv?.avatarUrl || dv?.photoURL;
+                  const dname   = dv?.fullName || dv?.name;
+                  profileMap[rid] = { name: profileMap[rid]?.name || dname, avatarUrl: profileMap[rid]?.avatarUrl || avatar2 };
                 }
               }
-            } catch (e) {
-              // ignore individual failures
-            }
+            } catch {}
           }));
 
           const built: CommentItem[] = commented.map((c) => {
             const rid = getRaterId(c as any);
             if (!rid || !driverMap[rid]) return null;
-            const p = profileMap[rid] || {};
-
-            // If this rater is the currently authenticated user and we don't yet have name/avatar,
-            // use the auth currentUser as a fallback (helps when viewing your own comment).
+            const p: any = profileMap[rid] || {};
             try {
               const authUser = (firebaseAuth as any)?.currentUser;
               if (authUser && authUser.uid === rid) {
                 if (!p.name && authUser.displayName) p.name = authUser.displayName;
                 if (!p.avatarUrl && authUser.photoURL) p.avatarUrl = authUser.photoURL;
               }
-            } catch (e) {
-              // ignore
-            }
-
-            return ({ ...c as any, raterId: rid, commenterName: p.name, commenterAvatarUrl: p.avatarUrl } as CommentItem);
+            } catch {}
+            return { ...c as any, raterId: rid, commenterName: p.name, commenterAvatarUrl: p.avatarUrl } as CommentItem;
           }).filter(Boolean) as CommentItem[];
 
           setComments(built);
-        } catch (e) {
-          // ignore
-          setComments([]);
-        }
+        } catch { setComments([]); }
       })();
-    }, () => {
-      // ignore realtime errors for now
-    });
+    }, () => {});
 
     (async () => {
       try {
-        // Primary user profile
         const d = await getDoc(doc(firestore, 'riders', riderId));
         const userData = d.exists() ? (d.data() as any) : null;
 
-        // Try to enrich preferences from a dedicated `riders` collection (preferred source for ride prefs)
-        let ridersData: any = null;
-        try {
-          const rd = await getDoc(doc(firestore, 'riders', riderId));
-          if (rd.exists()) ridersData = rd.data();
-        } catch (e) {
-          // ignore riders read failure
-        }
-
-        // Preference fields to prefer from `riders` collection
         const prefFields = ['conversationLevel', 'musicPreference', 'passengerType', 'smokingPreference', 'soundEnvironment'];
-
-        // Start with any existing preferences object on the users doc
-        const prefsFromUser = (userData && userData.preferences && typeof userData.preferences === 'object') ? { ...userData.preferences } : {};
+        const prefsFromUser = (userData?.preferences && typeof userData.preferences === 'object') ? { ...userData.preferences } : {};
         const mergedPrefs: Record<string, any> = { ...prefsFromUser };
+        prefFields.forEach(f => { if (userData?.[f] != null) mergedPrefs[f] = userData[f]; });
 
-        // Overlay fields from riders doc (preferred)
-        if (ridersData) {
-          prefFields.forEach((f) => {
-            if (ridersData[f] !== undefined && ridersData[f] !== null) mergedPrefs[f] = ridersData[f];
-          });
-        }
-
-        // If still missing some fields, fall back to top-level fields on users doc
-        prefFields.forEach((f) => {
-          if ((mergedPrefs[f] === undefined || mergedPrefs[f] === null) && userData && userData[f] !== undefined && userData[f] !== null) {
-            mergedPrefs[f] = userData[f];
-          }
-        });
-
-        // Normalize name field from multiple possible sources
-        const displayName = userData?.name || userData?.displayName || userData?.fullName || 
-          (userData?.firstName && userData?.lastName ? `${userData.firstName} ${userData.lastName}`.trim() : null) ||
-          (userData?.firstName ? userData.firstName : null);
-
-        const finalRider = userData ? { 
-          ...userData, 
-          name: displayName || 'Unknown',
-          preferences: Object.keys(mergedPrefs).length ? mergedPrefs : (userData.preferences || null) 
-        } : null;
+        const displayName = userData?.name || userData?.displayName || userData?.fullName ||
+          (userData?.firstName && userData?.lastName ? `${userData.firstName} ${userData.lastName}`.trim() : null) || userData?.firstName;
+        const finalRider = userData
+          ? { ...userData, name: displayName || 'Unknown', preferences: Object.keys(mergedPrefs).length ? mergedPrefs : (userData.preferences || null) }
+          : null;
 
         if (!mounted) return;
         setRider(finalRider);
 
-        // total completed rides for this rider
-        const ridesQ = query(collection(firestore, 'confirmedRides'), where('riderId', '==', riderId), where('status', '==', 'COMPLETED'));
-        const ridesSnap = await getDocs(ridesQ);
-        if (!mounted) return;
-        setTotalRides(ridesSnap.size || 0);
-      } catch (e) {
-        // ignore
-      } finally {
-        if (mounted) setLoading(false);
-      }
+        const ridesSnap = await getDocs(
+          query(collection(firestore, 'confirmedRides'), where('riderId', '==', riderId), where('status', '==', 'COMPLETED'))
+        );
+        if (mounted) setTotalRides(ridesSnap.size || 0);
+      } catch {}
+      finally { if (mounted) setLoading(false); }
     })();
 
     return () => { mounted = false; unsubReviews(); };
@@ -195,328 +180,293 @@ export default function RiderProfilePage() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color={theme.colors.primary} />
+      <View style={s.root}>
+        <StatusBar barStyle="dark-content" />
+        <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
+          <View style={s.loadingWrap}>
+            <ActivityIndicator color={ORANGE} size="large" />
+          </View>
+        </SafeAreaView>
       </View>
     );
   }
 
-  const reviewsData = reviews || [];
+  const totalReviews  = reviews.length;
+  const computedAvg   = totalReviews
+    ? reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / totalReviews
+    : (rider?.rating ?? 0);
+  const averageRating = Number((computedAvg || 0).toFixed(1));
+  const histogram     = [5, 4, 3, 2, 1].map(star => reviews.filter(r => Math.round(r.rating || 0) === star).length);
 
-  // Compute a single source of truth for average rating and total reviews
-  const totalReviews = reviewsData.length;
-  const computedAverage = totalReviews ? reviewsData.reduce((s, r) => s + (r.rating || 0), 0) / totalReviews : (rider?.rating ?? 0);
-  const averageRating = Number((computedAverage || 0).toFixed(1));
-
-  // Histogram counts for stars 5 -> 1
-  const histogram = [5, 4, 3, 2, 1].map((star) => reviewsData.filter(r => Math.round(r.rating || 0) === star).length);
-
-  // Top header (fixed) — back button + title. Render this above the ScrollView so it stays stagnant.
-  function TopHeader() {
-    const appTheme = useTheme();
-    return (
-      <View style={[styles.header, { backgroundColor: '#F8FAFC' }]}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-          accessibilityLabel="Go back"
-        >
-          <Text style={{ color: appTheme.colors.secondary, fontSize: 18}}>←</Text>
-        </TouchableOpacity>
-        <View style={styles.headerContent}>
-          <Text style={[styles.headerTitle, { color: appTheme.colors.secondary }]}>Rider details</Text>
-          <Text style={styles.headerSubtitle}>View your rider details</Text>
-        </View>
-      </View>
-    );
+  const prefOrder  = ['conversationLevel', 'musicPreference', 'passengerType', 'smokingPreference', 'soundEnvironment', 'allowPets', 'temperaturePreference'];
+  const prefEntries: Array<[string, any]> = [];
+  if (rider?.preferences) {
+    prefOrder.forEach(k => { if (rider.preferences[k] != null) prefEntries.push([k, rider.preferences[k]]); });
+    Object.entries(rider.preferences).forEach(([k, v]) => { if (!prefOrder.includes(k)) prefEntries.push([k, v]); });
   }
 
-  // RiderCard (scrollable) — avatar, name, rating, call button. This stays inside the ScrollView.
-  function RiderCard({ name, avatarUrl, averageRatingProp, totalRidesProp }: { name?: string; avatarUrl?: string | null; averageRatingProp?: number; totalRidesProp?: number }) {
-    return (
-      <View style={styles.headerCard}>
-        {avatarUrl ? (
-          <Image source={{ uri: avatarUrl }} style={styles.avatar} accessibilityLabel={`${name}'s avatar`} />
-        ) : (
-          <View style={styles.avatarPlaceholder} accessibilityLabel="No avatar">
-            <User size={50} color="#64748B" />
-          </View>
-        )}
-        <View style={{ marginLeft: 12, flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.name}>{name ?? 'Unknown'}</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
-              <Star size={16} color="#F59E0B" />
-              <Text style={styles.ratingText} accessibilityLabel={`Average rating ${averageRatingProp ?? averageRating}`}>{typeof averageRatingProp === 'number' ? averageRatingProp.toFixed(1) : averageRating.toFixed(1)}</Text>
-              <Text style={styles.metaText}> • {totalRidesProp ?? totalRides} rides</Text>
-            </View>
-          </View>
-
-          {rider?.phone ? (
-            <TouchableOpacity
-              onPress={() => Linking.openURL(`tel:${rider.phone}`)}
-              style={styles.callButton}
-              accessibilityLabel={`Call ${name || 'rider'}`}
-            >
-              <Phone size={18} color="#FFFFFF" />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      </View>
-    );
-  }
-
-  function RatingsSummary({ averageRating: avgProp, totalReviews: totalProp, histogram: histProp }: { averageRating?: number; totalReviews?: number; histogram?: number[] }) {
-    const avg = typeof avgProp === 'number' ? avgProp : averageRating;
-    const total = typeof totalProp === 'number' ? totalProp : totalReviews;
-    const hist = histProp || histogram;
-
-    if (total === 0) {
-      return (
-        <View style={styles.ratingsSummaryCard} accessibilityLabel="Ratings summary">
-          <Text style={styles.noRatingsText}>No ratings yet</Text>
-        </View>
-      );
-    }
-
-    return (
-      <View style={styles.ratingsSummaryCard} accessibilityLabel="Ratings summary">
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <View style={{ alignItems: 'center', marginRight: 12 }}>
-            <Text style={styles.avgRatingText} accessibilityLabel={`Average rating ${avg}`}>{avg.toFixed(1)}</Text>
-            <Text style={styles.reviewsCount}>{total} reviews</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            {hist.map((count, idx) => {
-              const star = 5 - idx;
-              const pct = total ? Math.round((count / total) * 100) : 0;
-              return (
-                <View key={star} style={styles.ratingBarRow} accessibilityLabel={`${star} stars: ${count}`}>
-                  <Text style={styles.starLabel}>{star}</Text>
-                  <View style={styles.barBackground}>
-                    <View style={[styles.barFill, { width: `${pct}%` }]} />
-                  </View>
-                  <Text style={styles.starCount}>{count}</Text>
-                </View>
-              );
-            })}
-          </View>
-        </View>
-      </View>
-    );
-  }
-
-  function ReviewsList({ data }: { data: Review[] }) {
-    if (!data || data.length === 0) {
-      return (
-        <View style={{ marginTop: 8 }}>
-          <View style={styles.reviewRow}><Text style={styles.reviewerName}>Anonymous</Text><Text style={styles.reviewMeta}> • —</Text></View>
-        </View>
-      );
-    }
-
-    return (
-      <View>
-        {data.map((item) => (
-          <View key={item.id} style={styles.reviewRow} accessibilityLabel={`Review by ${item.reviewerName ?? 'Anonymous'}`}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={styles.reviewerName}>{item.reviewerName ?? 'Anonymous'}</Text>
-              <Text style={styles.reviewMeta}> • {item.rating ?? '—'}</Text>
-            </View>
-            {item.comment ? <Text style={[styles.reviewText, styles.reviewQuote]}>{`"${String(item.comment).trim()}"`}</Text> : null}
-          </View>
-        ))}
-      </View>
-    );
-  }
-
-  function CommentsList({ data }: { data: CommentItem[] }) {
-    if (!data || data.length === 0) return null;
-
-    return (
-      <View>
-        {data.map((c) => (
-          <View key={c.id} style={styles.reviewRow} accessibilityLabel={`Comment by ${c.commenterName ?? 'Driver'}`}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              {c.commenterAvatarUrl ? (
-                <Image source={{ uri: c.commenterAvatarUrl }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 12 }} />
-              ) : (
-                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#F1F5F9', marginRight: 12, justifyContent: 'center', alignItems: 'center' }}>
-                  <User size={18} color="#64748B" />
-                </View>
-              )}
-              <View style={{ flex: 1 }}>
-                <Text style={styles.reviewerName}>{c.commenterName ?? 'Driver'}</Text>
-                <Text style={[styles.reviewText, styles.reviewQuote]}>{`"${String(c.comment).trim()}"`}</Text>
-              </View>
-            </View>
-          </View>
-        ))}
-      </View>
-    );
-  }
-
-  // List header should render RiderCard then RatingsSummary then Preferences (RiderCard is scrollable)
-  const ListHeader = () => (
-    <View>
-      <RiderCard name={rider?.name} avatarUrl={rider?.avatarUrl} averageRatingProp={rider?.rating} totalRidesProp={totalRides} />
-      {/* Small subtitle above ratings summary */}
-      <View style={{ marginTop: 8, marginBottom: 6 }}>
-        <Text style={styles.ratingsSubtitle}>Ratings summary</Text>
-      </View>
-      <RatingsSummary averageRating={averageRating} totalReviews={totalReviews} histogram={histogram} />
-      {/* Preferences Section */}
-      <View style={styles.sectionBlock}>
-        <Text style={styles.sectionTitle}>Ride Preferences</Text>
-        {rider?.preferences ? (
-          <View style={styles.preferencesContainer}>
-            {/* Render preferences in a predictable order with label left and value right */}
-            {(() => {
-              const prefs = rider.preferences || {};
-              const order = ['conversationLevel', 'musicPreference', 'passengerType', 'smokingPreference', 'soundEnvironment', 'allowPets', 'temperaturePreference'];
-              const entries: Array<[string, any]> = [];
-              order.forEach((k) => {
-                if (prefs[k] !== undefined && prefs[k] !== null) entries.push([k, prefs[k]]);
-              });
-              // include any other keys not in the order
-              Object.entries(prefs).forEach(([k, v]) => {
-                if (!order.includes(k)) entries.push([k, v]);
-              });
-
-              const labelFor = (key: string) => {
-                switch (key) {
-                  case 'musicPreference': return 'Music';
-                  case 'temperaturePreference': return 'Temperature';
-                  case 'conversationLevel': return 'Conversation';
-                  case 'smokingPreference':
-                  case 'allowSmoking': return 'Smoking';
-                  case 'allowPets': return 'Pets';
-                  case 'passengerType': return 'Passenger Type';
-                  case 'soundEnvironment': return 'Sound Environment';
-                  default: return key;
-                }
-              };
-
-              const iconFor = (key: string) => {
-                switch (key) {
-                  case 'musicPreference': return <Music size={16} color="#64748B" />;
-                  case 'temperaturePreference': return <Thermometer size={16} color="#64748B" />;
-                  case 'conversationLevel': return <MessageCircle size={16} color="#64748B" />;
-                  case 'smokingPreference':
-                  case 'allowSmoking': return <Cigarette size={16} color="#64748B" />;
-                  case 'allowPets': return <Heart size={16} color="#64748B" />;
-                  case 'passengerType': return <User size={16} color="#64748B" />;
-                  case 'soundEnvironment': return <Music size={16} color="#64748B" />;
-                  default: return null;
-                }
-              };
-
-              const formatValue = (v: any) => {
-                if (typeof v === 'boolean') return v ? 'Yes' : 'No';
-                if (v === null || v === undefined) return '—';
-                return String(v);
-              };
-
-              return entries.map(([key, value]) => (
-                <View key={key} style={styles.preferenceItem}>
-                  <View style={styles.preferenceIcon}>{iconFor(key)}</View>
-                  <View style={styles.preferenceRow}>
-                    <Text style={styles.preferenceLabel}>{labelFor(key)}</Text>
-                    <Text style={styles.preferenceValueRight}>{formatValue(value)}</Text>
-                  </View>
-                </View>
-              ));
-            })()}
-          </View>
-        ) : (
-          <Text style={styles.noPreferences}>No preferences specified</Text>
-        )}
-      </View>
-    </View>
-  )
+  const riderName = rider?.name ?? 'Unknown';
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F8FAFC' }}>
-      <TopHeader />
-      <ScrollView contentContainerStyle={[styles.container, { paddingTop: 12 }]} showsVerticalScrollIndicator={false}>
-        {/* Scrollable content: rider card, ratings, preferences */}
-        <ListHeader />
+    <View style={s.root}>
+      <StatusBar barStyle="dark-content" />
+      <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}>
 
-        {/* Comments header + list (only drivers' comments) */}
-        {comments.length > 0 && (
-          <>
-            <View style={{ marginTop: 12, marginBottom: 8 }}>
-              <Text style={styles.reviewsHeader}>Comments</Text>
+          {/* ── Header ── */}
+          <View style={s.pageHeader}>
+            <TouchableOpacity style={s.backBtn} onPress={goBack} activeOpacity={0.75}>
+              <Ionicons name="chevron-back" size={22} color={NAVY} />
+            </TouchableOpacity>
+            <Text style={s.pageTitle}>Rider Profile</Text>
+          </View>
+
+          {/* ── Hero ── */}
+          <View style={s.heroWrap}>
+            <View style={s.heroAvatarWrap}>
+              {rider?.avatarUrl ? (
+                <Image source={{ uri: rider.avatarUrl }} style={s.heroAvatar} />
+              ) : (
+                <InitialsAvatar name={riderName} size={88} />
+              )}
+              {totalReviews > 0 && (
+                <View style={s.ratingBadge}>
+                  <Ionicons name="star" size={11} color="#F59E0B" />
+                  <Text style={s.ratingBadgeText}>{averageRating.toFixed(1)}</Text>
+                </View>
+              )}
             </View>
-            <CommentsList data={comments} />
-          </>
-        )}
-      </ScrollView>
+
+            <Text style={s.heroName}>{riderName}</Text>
+            {rider?.email ? <Text style={s.heroEmail}>{rider.email}</Text> : null}
+
+            <View style={s.statsRow}>
+              <View style={s.statPill}>
+                <Text style={s.statValue}>{totalRides}</Text>
+                <Text style={s.statLabel}>rides</Text>
+              </View>
+              <View style={s.statDivider} />
+              <View style={s.statPill}>
+                <Text style={s.statValue}>{totalReviews}</Text>
+                <Text style={s.statLabel}>reviews</Text>
+              </View>
+              {averageRating > 0 && (
+                <>
+                  <View style={s.statDivider} />
+                  <View style={s.statPill}>
+                    <Text style={s.statValue}>{averageRating.toFixed(1)}</Text>
+                    <Text style={s.statLabel}>avg rating</Text>
+                  </View>
+                </>
+              )}
+            </View>
+
+            {rider?.phone ? (
+              <TouchableOpacity
+                style={s.callRow}
+                onPress={() => Linking.openURL(`tel:${rider.phone}`)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="call-outline" size={16} color={ORANGE} />
+                <Text style={s.callText}>{rider.phone}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {/* ── Ratings breakdown ── */}
+          {totalReviews > 0 && (
+            <>
+              <Text style={s.sectionLabel}>RATINGS</Text>
+              <View style={s.card}>
+                <View style={s.ratingsLayout}>
+                  <View style={s.bigRatingBlock}>
+                    <Text style={s.bigRatingNum}>{averageRating.toFixed(1)}</Text>
+                    <StarRow rating={averageRating} size={14} />
+                    <Text style={s.bigRatingSub}>{totalReviews} {totalReviews === 1 ? 'review' : 'reviews'}</Text>
+                  </View>
+                  <View style={s.histogramBlock}>
+                    {histogram.map((count, idx) => {
+                      const star = 5 - idx;
+                      const pct  = totalReviews ? (count / totalReviews) * 100 : 0;
+                      return (
+                        <View key={star} style={s.barRow}>
+                          <Text style={s.barLabel}>{star}</Text>
+                          <Ionicons name="star" size={10} color="#F59E0B" style={{ marginRight: 4 }} />
+                          <View style={s.barTrack}>
+                            <View style={[s.barFill, { width: `${pct}%` }]} />
+                          </View>
+                          <Text style={s.barCount}>{count}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              </View>
+            </>
+          )}
+
+          {/* ── Ride preferences ── */}
+          {prefEntries.length > 0 && (
+            <>
+              <Text style={s.sectionLabel}>RIDE PREFERENCES</Text>
+              <View style={s.card}>
+                {prefEntries.map(([key, value], idx) => {
+                  const label  = PREF_LABELS[key] || key;
+                  const icon   = PREF_ICONS[key] || 'ellipse-outline';
+                  const valStr = typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value ?? '—');
+                  return (
+                    <View key={key} style={[s.prefRow, idx < prefEntries.length - 1 && s.prefBorder]}>
+                      <View style={s.prefIconWrap}>
+                        <Ionicons name={icon as any} size={15} color={ORANGE} />
+                      </View>
+                      <Text style={s.prefLabel}>{label}</Text>
+                      <Text style={s.prefValue}>{valStr}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </>
+          )}
+
+          {/* ── Driver comments ── */}
+          {comments.length > 0 && (
+            <>
+              <Text style={s.sectionLabel}>DRIVER COMMENTS</Text>
+              <View style={s.card}>
+                {comments.map((c, idx) => (
+                  <View key={c.id} style={[s.commentRow, idx < comments.length - 1 && s.commentBorder]}>
+                    {c.commenterAvatarUrl ? (
+                      <Image source={{ uri: c.commenterAvatarUrl }} style={s.commentAvatar} />
+                    ) : (
+                      <View style={[s.commentAvatar, s.commentAvatarFallback]}>
+                        <Text style={s.commentInitials}>
+                          {(c.commenterName || 'D').charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.commentName}>{c.commenterName ?? 'Driver'}</Text>
+                      {c.comment ? (
+                        <Text style={s.commentText}>"{String(c.comment).trim()}"</Text>
+                      ) : null}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
+
+          {totalReviews === 0 && prefEntries.length === 0 && comments.length === 0 && (
+            <View style={s.emptyState}>
+              <Ionicons name="person-circle-outline" size={48} color={BORDER} />
+              <Text style={s.emptyTitle}>No activity yet</Text>
+              <Text style={s.emptyText}>This rider hasn't completed any rides or received reviews.</Text>
+            </View>
+          )}
+
+          <View style={{ height: 48 }} />
+        </ScrollView>
+      </SafeAreaView>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { paddingTop: 40, paddingHorizontal: 16, paddingBottom: 40, backgroundColor: '#F8FAFC' },
-  pageHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  backBtn: { padding: 8 },
-  backText: { fontSize: 20, color: '#0B1220' },
-  // ...existing code...
-  backButton: {
-    marginTop: 50,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'white',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
+const s = StyleSheet.create({
+  root:        { flex: 1, backgroundColor: BG },
+  safe:        { flex: 1 },
+  scroll:      { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 40 },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+  // Header — matches settings/profile pages
+  pageHeader: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
+  backBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    borderWidth: 1, borderColor: BORDER,
+    backgroundColor: CARD,
+    alignItems: 'center', justifyContent: 'center',
   },
-  headerContent: {
-    flex: 1,
+  pageTitle: { color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+
+  // Hero
+  heroWrap:       { alignItems: 'center', paddingVertical: 8, marginBottom: 16 },
+  heroAvatarWrap: { position: 'relative', marginBottom: 14 },
+  heroAvatar:     { width: 88, height: 88, borderRadius: 44, borderWidth: 3, borderColor: BORDER },
+  avatarFallback: { backgroundColor: '#EEE8DF', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: BORDER },
+  avatarInitials: { color: NAVY, fontWeight: '700' },
+  ratingBadge: {
+    position: 'absolute', bottom: -4, right: -4,
+    flexDirection: 'row', alignItems: 'center', gap: 2,
+    backgroundColor: NAVY, borderRadius: 12,
+    paddingHorizontal: 7, paddingVertical: 3,
+    borderWidth: 2, borderColor: BG,
   },
-  headerTitle: {
-    marginTop: 50,
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 2,
+  ratingBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  heroName:  { color: NAVY, fontSize: 22, fontWeight: '800', letterSpacing: -0.3, textAlign: 'center', marginBottom: 4 },
+  heroEmail: { color: MUTED, fontSize: 13, marginBottom: 18, textAlign: 'center' },
+  statsRow:  { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
+  statPill:  { alignItems: 'center', paddingHorizontal: 20 },
+  statValue: { color: NAVY, fontSize: 20, fontWeight: '800', lineHeight: 24 },
+  statLabel: { color: MUTED, fontSize: 11, fontWeight: '600', marginTop: 2 },
+  statDivider: { width: 1, height: 32, backgroundColor: BORDER },
+  callRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#FEF0E8', borderRadius: 20,
+    paddingHorizontal: 16, paddingVertical: 8,
   },
-  header: { flexDirection: 'row', alignItems: 'center', padding: 16, paddingBottom: 16 },
-  headerLargeTitle: { fontSize: 28, fontWeight: 'bold', marginBottom: 4 },
-  headerSubtitle: { fontSize: 16, color: '#64748B' },
-  headerCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#EEF2F7', marginBottom: 16 },
-  avatar: { width: 72, height: 72, borderRadius: 36 },
-  avatarPlaceholder: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
-  name: { fontSize: 20, fontWeight: '700', color: '#0B1220' },
-  ratingText: { marginLeft: 8, fontWeight: '600', color: '#0B1220' },
-  metaText: { marginLeft: 6, color: '#64748B' },
-  sectionBlock: { marginTop: 20 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#0B1220', marginBottom: 8 },
-  preferencesContainer: { gap: 8 },
-  preferenceItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#EEF2F7', marginBottom: 8 },
-  preferenceIcon: { width: 36, alignItems: 'center' },
-  pIcon: { fontSize: 16 },
-  preferenceContent: { flex: 1 },
-  preferenceLabel: { fontSize: 14, fontWeight: '600', color: '#0B1220' },
-  preferenceValue: { fontSize: 14, color: '#64748B' },
-  preferenceRow: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  preferenceValueRight: { fontSize: 14, color: '#64748B', textAlign: 'right' },
-  noPreferences: { color: '#64748B', fontStyle: 'italic' },
-  ratingsSummaryCard: { backgroundColor: '#FFFFFF', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#EEF2F7', marginBottom: 12 },
-  avgRatingText: { fontSize: 28, fontWeight: '700', color: '#0B1220' },
-  reviewsCount: { fontSize: 12, color: '#64748B' },
-  noRatingsText: { color: '#64748B', fontStyle: 'italic', padding: 8 },
-  ratingsSubtitle: { marginTop: 16, fontSize: 16, fontWeight: '700', color: '#0B1220' },
-  ratingBarRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 4 },
-  starLabel: { width: 18, fontSize: 12, color: '#0B1220' },
-  barBackground: { flex: 1, height: 8, backgroundColor: '#F1F5F9', borderRadius: 8, marginHorizontal: 8 },
-  barFill: { height: 8, backgroundColor: '#F97316', borderRadius: 8 },
-  starCount: { width: 28, textAlign: 'right', fontSize: 12, color: '#64748B' },
-  callButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#0B1220', alignItems: 'center', justifyContent: 'center', marginLeft: 12 },
-  reviewRow: { marginTop: 12, backgroundColor: '#FFFFFF', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#EEF2F7' },
-  reviewerName: { fontWeight: '700', color: '#0B1220' },
-  reviewMeta: { marginLeft: 6, color: '#64748B' },
-  reviewText: { marginTop: 6, color: '#334155' },
-  reviewsHeader: { marginTop: 16, fontSize: 16, fontWeight: '700', color: '#0B1220' },
-  reviewQuote: { fontStyle: 'italic', color: '#475569' },
+  callText: { color: ORANGE, fontSize: 14, fontWeight: '600' },
+
+  // Section label
+  sectionLabel: { color: MUTED, fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginBottom: 8 },
+
+  // Card wrapper
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: BORDER,
+    padding: 16,
+    marginBottom: 20,
+    shadowColor: NAVY,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 1,
+  },
+
+  // Ratings
+  ratingsLayout:  { flexDirection: 'row', alignItems: 'center', gap: 20 },
+  bigRatingBlock: { alignItems: 'center', minWidth: 64 },
+  bigRatingNum:   { color: NAVY, fontSize: 40, fontWeight: '800', lineHeight: 44 },
+  bigRatingSub:   { color: MUTED, fontSize: 11, fontWeight: '600', marginTop: 4 },
+  histogramBlock: { flex: 1 },
+  barRow:    { flexDirection: 'row', alignItems: 'center', marginVertical: 3 },
+  barLabel:  { width: 12, fontSize: 11, color: NAVY, fontWeight: '700', textAlign: 'right', marginRight: 2 },
+  barTrack:  { flex: 1, height: 6, backgroundColor: '#ECDFD0', borderRadius: 3, marginHorizontal: 6 },
+  barFill:   { height: 6, backgroundColor: ORANGE, borderRadius: 3 },
+  barCount:  { width: 20, textAlign: 'right', fontSize: 11, color: MUTED, fontWeight: '600' },
+
+  // Preferences (plain rows, no card)
+  prefRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, gap: 12 },
+  prefBorder:  { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  prefIconWrap: {
+    width: 32, height: 32, borderRadius: 10,
+    backgroundColor: '#FEF0E8',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  prefLabel: { flex: 1, color: NAVY, fontSize: 14, fontWeight: '600' },
+  prefValue: { color: MUTED, fontSize: 13, fontWeight: '500' },
+
+  // Comments (plain rows, no card)
+  commentRow:            { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 12 },
+  commentBorder:         { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  commentAvatar:         { width: 38, height: 38, borderRadius: 19, flexShrink: 0 },
+  commentAvatarFallback: { backgroundColor: '#EEE8DF', alignItems: 'center', justifyContent: 'center' },
+  commentInitials:       { color: NAVY, fontSize: 14, fontWeight: '700' },
+  commentName:           { color: NAVY, fontSize: 14, fontWeight: '700', marginBottom: 4 },
+  commentText:           { color: MUTED, fontSize: 13, lineHeight: 19, fontStyle: 'italic' },
+
+  // Empty state
+  emptyState: { alignItems: 'center', paddingVertical: 48, gap: 10 },
+  emptyTitle: { color: NAVY, fontSize: 16, fontWeight: '700' },
+  emptyText:  { color: MUTED, fontSize: 13, textAlign: 'center', lineHeight: 20, maxWidth: 260 },
 });

@@ -1,14 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Modal, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform } from 'react-native';
-import { X } from 'lucide-react-native';
-import { useTheme } from '@/hooks/useTheme';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
+import { Check, CreditCard, ShieldCheck, Smartphone, X } from 'lucide-react-native';
+import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { computeTotals } from '@/utils/fees';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs, addDoc, Timestamp } from 'firebase/firestore';
-import { firestore } from '@/constants/services';
-import { useStripe, isPlatformPaySupported, PlatformPay } from '@stripe/stripe-react-native';
+import { useStripe, isPlatformPaySupported } from '@/components/platform/stripe';
 
 export type PaymentModalProps = {
   visible: boolean;
@@ -20,17 +16,14 @@ export type PaymentModalProps = {
 };
 
 export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onPaymentSuccess }: PaymentModalProps) {
-  const theme = useTheme();
-
   const riderId = firebaseAuth.currentUser?.uid ?? null;
   const [creating, setCreating] = useState(false);
   const [confirming, setConfirming] = useState(false);
   // Payment flow bypassed for now; keep minimal state
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [cardComplete, setCardComplete] = useState(false);
   const [selectedMethod, setSelectedMethod] = useState<'card' | 'apple' | null>(null);
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
-  const [savedCards, setSavedCards] = useState<Array<{ id: string; brand: string; last4: string; isDefault?: boolean }>>([]);
+  const [savedCards, setSavedCards] = useState<{ id: string; brand: string; last4: string; isDefault?: boolean }[]>([]);
   const [appleSupported, setAppleSupported] = useState(false);
   const [pendingIntentId, setPendingIntentId] = useState<string | null>(null);
   const { confirmPayment, confirmPlatformPayPayment } = useStripe();
@@ -51,7 +44,6 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
   const baseUrl = getApiBaseUrl();
   const log = (...args: any[]) => {
     try {
-      // eslint-disable-next-line no-console
       console.log('[PaymentModal]', ...args);
     } catch {}
   };
@@ -59,7 +51,10 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
   useEffect(() => {
     let cancelled = false;
     async function loadPaymentUI() {
-      if (!visible) return;
+      if (!visible) {
+        loadKeyRef.current = null;
+        return;
+      }
       setErrorMsg(null);
       if (!riderId) {
         Alert.alert('Sign in required', 'You need to be signed in to request a ride.');
@@ -76,7 +71,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       try {
         setCreating(true);
         const userRef = doc(firestore, 'riders', riderId);
-        const applyCards = (cards: Array<{ id: string; brand: string; last4: string; isDefault?: boolean }>) => {
+        const applyCards = (cards: { id: string; brand: string; last4: string; isDefault?: boolean }[]) => {
           if (cancelled) return;
           setSavedCards(cards);
           const def = cards.find((x) => x.isDefault) || cards[0];
@@ -163,15 +158,10 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
     return () => {
       cancelled = true;
       setErrorMsg(null);
-      setCardComplete(false);
       setCreating(false);
       setConfirming(false);
-      if (!visible) {
-        // Allow refetch on next open
-        loadKeyRef.current = null;
-      }
     };
-  }, [visible, riderId]);
+  }, [visible, riderId, appleSupported, baseUrl, onClose]);
 
   const handleCancel = async () => {
     try {
@@ -298,7 +288,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           } else if (errorData.error) {
             userMessage = errorData.error;
           }
-        } catch (parseErr) {
+        } catch {
           // If parsing fails, use raw text if available
           if (t) userMessage = t;
         }
@@ -457,94 +447,133 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
     }
   };
 
+  const canConfirm = selectedMethod === 'apple' || (selectedMethod === 'card' && !!selectedPaymentMethodId);
+
   return (
     <Modal animationType="slide" transparent visible={visible} onRequestClose={handleCancel}>
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
-          {/* Header */}
+          <View style={styles.sheetHandle} />
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Payment</Text>
-            <TouchableOpacity onPress={handleCancel} style={styles.closeButton}>
-              <X size={22} color="#64748B" />
+            <View style={styles.headerCopy}>
+              <Text style={styles.modalTitle}>Confirm payment</Text>
+              <Text style={styles.modalSubtitle}>Review your fare and payment method</Text>
+            </View>
+            <TouchableOpacity onPress={handleCancel} style={styles.closeButton} accessibilityRole="button" accessibilityLabel="Close payment">
+              <X size={20} color="#15233A" />
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} showsVerticalScrollIndicator={false}>
             {errorMsg ? (
               <View style={styles.errorBanner}>
                 <Text style={styles.errorBannerText}>{errorMsg}</Text>
               </View>
             ) : null}
-            {/* Line items */}
-            <Card style={styles.summaryCard}>
-              <Text style={[styles.summaryTitle, { color: theme.colors.secondary }]}>Summary</Text>
+
+            <View style={styles.totalHero}>
+              <Text style={styles.totalEyebrow}>TOTAL DUE</Text>
+              <Text style={styles.totalHeroValue}>${totals.total.toFixed(2)}</Text>
+              <Text style={styles.totalHeroCaption}>Authorized now and captured after your ride.</Text>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Fare details</Text>
               <View style={styles.rowBetween}>
                 <Text style={styles.lineLabel}>Ride fee</Text>
                 <Text style={styles.lineValue}>${totals.rideFee.toFixed(2)}</Text>
               </View>
               <View style={styles.rowBetween}>
-                <Text style={styles.lineLabel}>Platform fee (7.25%)</Text>
+                <Text style={styles.lineLabel}>Platform fee</Text>
                 <Text style={styles.lineValue}>${totals.platformFee.toFixed(2)}</Text>
               </View>
               <View style={styles.rowBetween}>
-                <Text style={styles.lineLabel}>Stripe fee (2.9% + $0.30)</Text>
+                <Text style={styles.lineLabel}>Processing fee</Text>
                 <Text style={styles.lineValue}>${totals.stripeFee.toFixed(2)}</Text>
               </View>
               <View style={[styles.rowBetween, styles.totalRow]}>
-                <Text style={[styles.totalLabel, { color: theme.colors.secondary }]}>Total</Text>
-                <Text style={[styles.totalValue, { color: theme.colors.secondary }]}>${totals.total.toFixed(2)}</Text>
+                <Text style={styles.totalLabel}>Total</Text>
+                <Text style={styles.totalValue}>${totals.total.toFixed(2)}</Text>
               </View>
-              <Text style={styles.holdNote}>A temporary hold will be placed. You won’t be charged until the driver confirms.</Text>
-            </Card>
+            </View>
 
-            {/* Payment method selection */}
-            <Card style={styles.methodCard}>
-              <Text style={[styles.summaryTitle, { color: theme.colors.secondary }]}>Payment method</Text>
-              {Platform.OS === 'ios' && appleSupported && (
-                <TouchableOpacity style={styles.methodRow} onPress={() => setSelectedMethod('apple')}>
-                  <View style={[styles.radio, selectedMethod === 'apple' && styles.radioSelected]} />
-                  <Text style={styles.methodLabel}>Apple Pay {appleSupported ? '' : '(Unavailable)'}</Text>
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Payment method</Text>
+              {Platform.OS === 'ios' ? (
+                <TouchableOpacity
+                  style={[styles.methodRow, selectedMethod === 'apple' && styles.methodRowSelected, !appleSupported && styles.methodRowUnavailable]}
+                  onPress={() => setSelectedMethod('apple')}
+                  disabled={!appleSupported}
+                >
+                  <View style={styles.methodIcon}><Smartphone size={19} color="#15233A" /></View>
+                  <View style={styles.methodCopy}>
+                    <Text style={styles.methodLabel}>Apple Pay</Text>
+                    <Text style={styles.methodMeta}>{appleSupported ? 'Pay with your Apple Wallet' : 'Unavailable on this device'}</Text>
+                  </View>
+                  <View style={[styles.selection, selectedMethod === 'apple' && styles.selectionActive]}>
+                    {selectedMethod === 'apple' ? <Check size={13} color="#FFFFFF" strokeWidth={3} /> : null}
+                  </View>
                 </TouchableOpacity>
-              )}
-              <TouchableOpacity style={styles.methodRow} onPress={() => setSelectedMethod('card')}>
-                <View style={[styles.radio, selectedMethod === 'card' && styles.radioSelected]} />
-                <Text style={styles.methodLabel}>Credit or Debit Card</Text>
+              ) : null}
+
+              <TouchableOpacity style={[styles.methodRow, selectedMethod === 'card' && styles.methodRowSelected]} onPress={() => setSelectedMethod('card')}>
+                <View style={styles.methodIcon}><CreditCard size={19} color="#15233A" /></View>
+                <View style={styles.methodCopy}>
+                  <Text style={styles.methodLabel}>Saved card</Text>
+                  <Text style={styles.methodMeta}>{savedCards.length ? 'Choose a card below' : 'No saved cards available'}</Text>
+                </View>
+                <View style={[styles.selection, selectedMethod === 'card' && styles.selectionActive]}>
+                  {selectedMethod === 'card' ? <Check size={13} color="#FFFFFF" strokeWidth={3} /> : null}
+                </View>
               </TouchableOpacity>
 
-              {selectedMethod === 'card' && (
-                <View style={{ marginTop: 8 }}>
+              {selectedMethod === 'card' ? (
+                <View style={styles.savedCardList}>
                   {creating ? (
-                    <ActivityIndicator />
+                    <ActivityIndicator color="#DE5D20" />
                   ) : savedCards.length ? (
-                    savedCards.map((c) => (
-                      <TouchableOpacity key={c.id} style={styles.cardRow} onPress={() => setSelectedPaymentMethodId(c.id)}>
-                        <View style={[styles.radioSm, selectedPaymentMethodId === c.id && styles.radioSelected]} />
-                        <Text style={styles.cardText}>{(c.brand || 'Card').toUpperCase()} •••• {c.last4} {c.isDefault ? '(Default)' : ''}</Text>
+                    savedCards.map((card) => (
+                      <TouchableOpacity
+                        key={card.id}
+                        style={[styles.cardRow, selectedPaymentMethodId === card.id && styles.cardRowSelected]}
+                        onPress={() => { setSelectedMethod('card'); setSelectedPaymentMethodId(card.id); }}
+                      >
+                        <View style={styles.cardBrand}><CreditCard size={17} color="#DE5D20" /></View>
+                        <View style={styles.cardCopy}>
+                          <Text style={styles.cardText}>{card.brand || 'Card'} ending in {card.last4}</Text>
+                          <Text style={styles.cardMeta}>{card.isDefault ? 'Default payment method' : 'Saved payment method'}</Text>
+                        </View>
+                        <View style={[styles.selection, selectedPaymentMethodId === card.id && styles.selectionActive]}>
+                          {selectedPaymentMethodId === card.id ? <Check size={13} color="#FFFFFF" strokeWidth={3} /> : null}
+                        </View>
                       </TouchableOpacity>
                     ))
                   ) : (
-                    <Text style={styles.addCardHint}>No saved cards. Add one in Payment Methods.</Text>
+                    <Text style={styles.addCardHint}>Add a card from Payment Methods before requesting this ride.</Text>
                   )}
                 </View>
-              )}
+              ) : null}
 
-              {/* Temporarily suppress errors in UI */}
-            </Card>
+              <View style={styles.securityNote}>
+                <ShieldCheck size={17} color="#15803D" />
+                <Text style={styles.securityText}>Secure payment powered by Stripe</Text>
+              </View>
+            </View>
           </ScrollView>
 
           <View style={styles.formActions}>
-            <Button variant="outline" style={styles.cancelBtn} onPress={handleCancel} disabled={confirming}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              style={styles.confirmBtn}
+            <TouchableOpacity
+              style={[styles.confirmBtn, (creating || confirming || !canConfirm) && styles.confirmBtnDisabled]}
               onPress={handleConfirm}
-              disabled={creating || confirming || !selectedMethod}
-              loading={confirming}
+              disabled={creating || confirming || !canConfirm}
+              activeOpacity={0.84}
             >
-              Confirm
-            </Button>
+              {confirming ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.confirmBtnText}>Confirm and request ride - ${totals.total.toFixed(2)}</Text>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -553,43 +582,57 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
 }
 
 const styles = StyleSheet.create({
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: 'white', borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '85%' },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E7EB' },
-  modalTitle: { fontSize: 22, fontWeight: 'bold' },
-  closeButton: { padding: 8 },
-  modalBody: { paddingHorizontal: 16 },
-  summaryCard: { backgroundColor: 'white', padding: 16, marginTop: 16 },
-  summaryTitle: { fontSize: 16, fontWeight: '600', marginBottom: 8 },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6 },
-  lineLabel: { fontSize: 14, color: '#374151' },
-  lineValue: { fontSize: 14, color: '#111827' },
-  totalRow: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E5E7EB', marginTop: 8, paddingTop: 8 },
-  totalLabel: { fontSize: 16, fontWeight: '700' },
-  totalValue: { fontSize: 16, fontWeight: '700' },
-  cardFieldCard: { backgroundColor: 'white', padding: 16, marginTop: 16 },
-  holdNote: { marginTop: 8, color: '#64748B', fontSize: 12 },
-  methodCard: { backgroundColor: 'white', padding: 16, marginTop: 16 },
-  methodRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
-  methodLabel: { marginLeft: 10, fontSize: 14, color: '#0F172A' },
-  radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#CBD5E1' },
-  radioSm: { width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: '#CBD5E1', marginRight: 8 },
-  radioSelected: { backgroundColor: '#111827', borderColor: '#111827' },
-  cardRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
-  cardText: { fontSize: 14, color: '#0F172A' },
-  addCardHint: { marginTop: 8, fontSize: 12, color: '#64748B' },
-  errorText: { marginTop: 8, color: '#DC2626' },
-  errorBanner: {
-    backgroundColor: '#FEE2E2',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 16,
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.48)', justifyContent: 'flex-end' },
+  modalContent: {
+    backgroundColor: '#FBFAF7',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '92%',
+    overflow: 'hidden',
   },
-  errorBannerText: {
-    color: '#B91C1C',
-    fontSize: 13,
-  },
-  formActions: { flexDirection: 'row', gap: 12, padding: 16 },
-  cancelBtn: { flex: 1 },
-  confirmBtn: { flex: 1 },
+  sheetHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: '#D8D3CB', alignSelf: 'center', marginTop: 10 },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 16 },
+  headerCopy: { flex: 1, paddingRight: 12 },
+  modalTitle: { color: '#15233A', fontSize: 24, lineHeight: 30, fontWeight: '700' },
+  modalSubtitle: { color: '#8B94A6', fontSize: 13, lineHeight: 18, fontWeight: '500', marginTop: 2 },
+  closeButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: '#E5E0D8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  modalBody: { flexGrow: 0 },
+  modalBodyContent: { paddingHorizontal: 20, paddingBottom: 12, gap: 14 },
+  totalHero: { backgroundColor: '#15233A', borderRadius: 18, paddingHorizontal: 18, paddingVertical: 18 },
+  totalEyebrow: { color: '#BAC4D4', fontSize: 11, lineHeight: 15, fontWeight: '700', letterSpacing: 1.1 },
+  totalHeroValue: { color: '#FFFFFF', fontSize: 32, lineHeight: 39, fontWeight: '700', marginTop: 2 },
+  totalHeroCaption: { color: '#D6DCE5', fontSize: 12, lineHeight: 17, fontWeight: '500', marginTop: 4 },
+  section: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E0D8', borderRadius: 18, padding: 16 },
+  sectionTitle: { color: '#15233A', fontSize: 16, lineHeight: 22, fontWeight: '700', marginBottom: 9 },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 32 },
+  lineLabel: { color: '#6F7888', fontSize: 13, fontWeight: '500' },
+  lineValue: { color: '#15233A', fontSize: 13, fontWeight: '600' },
+  totalRow: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#DDE1E7', marginTop: 7, paddingTop: 10 },
+  totalLabel: { color: '#15233A', fontSize: 15, fontWeight: '700' },
+  totalValue: { color: '#15233A', fontSize: 17, fontWeight: '700' },
+  methodRow: { minHeight: 62, borderWidth: 1, borderColor: '#E5E0D8', borderRadius: 14, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', marginTop: 8 },
+  methodRowSelected: { borderColor: '#DE5D20', backgroundColor: '#FFF8F3' },
+  methodRowUnavailable: { opacity: 0.55 },
+  methodIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F4F1EC', alignItems: 'center', justifyContent: 'center' },
+  methodCopy: { flex: 1, marginLeft: 11 },
+  methodLabel: { color: '#15233A', fontSize: 14, fontWeight: '700', textTransform: 'capitalize' },
+  methodMeta: { color: '#8B94A6', fontSize: 11, lineHeight: 16, fontWeight: '500', marginTop: 1 },
+  selection: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: '#C8CED8', alignItems: 'center', justifyContent: 'center' },
+  selectionActive: { backgroundColor: '#DE5D20', borderColor: '#DE5D20' },
+  savedCardList: { marginTop: 8, gap: 7 },
+  cardRow: { minHeight: 58, borderWidth: 1, borderColor: '#ECE8E1', borderRadius: 14, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF' },
+  cardRowSelected: { borderColor: '#DE5D20', backgroundColor: '#FFF8F3' },
+  cardBrand: { width: 32, height: 32, borderRadius: 10, backgroundColor: '#FCE9DD', alignItems: 'center', justifyContent: 'center' },
+  cardCopy: { flex: 1, marginLeft: 10 },
+  cardText: { color: '#15233A', fontSize: 13, fontWeight: '700', textTransform: 'capitalize' },
+  cardMeta: { color: '#8B94A6', fontSize: 11, fontWeight: '500', marginTop: 2 },
+  addCardHint: { color: '#6F7888', fontSize: 12, lineHeight: 18, fontWeight: '500', paddingVertical: 10 },
+  securityNote: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 14 },
+  securityText: { color: '#47705A', fontSize: 12, fontWeight: '600' },
+  errorBanner: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 14, padding: 12 },
+  errorBannerText: { color: '#B91C1C', fontSize: 12, lineHeight: 18, fontWeight: '600' },
+  formActions: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: Platform.OS === 'ios' ? 30 : 20, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E5E0D8', backgroundColor: '#FBFAF7' },
+  confirmBtn: { minHeight: 54, borderRadius: 27, backgroundColor: '#DE5D20', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18 },
+  confirmBtnDisabled: { opacity: 0.5 },
+  confirmBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700', textAlign: 'center' },
 });

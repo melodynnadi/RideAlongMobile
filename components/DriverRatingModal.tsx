@@ -138,10 +138,10 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   title: { fontSize: 18, fontWeight: '700', color: '#111827' },
-  closeBtn: { padding: 6 },
+  closeBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   subtitle: { color: '#6B7280', marginBottom: 12 },
   starsRow: { flexDirection: 'row', gap: 8, marginBottom: 12, justifyContent: 'center', alignItems: 'center' },
-  starBtn: { padding: 4 },
+  starBtn: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   input: {
     borderWidth: 1,
     borderColor: '#E5E7EB',

@@ -6,6 +6,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   updateProfile,
+  deleteUser,
 } from 'firebase/auth';
 import {
   doc,
@@ -19,6 +20,7 @@ import { Alert } from 'react-native';
 
 import { firebaseAuth, firestore } from '@/services/firebase';
 import { registerRiderPushToken, registerDriverPushToken } from '@/utils/registerPushToken';
+import { SignupUniversity, validateSignupUniversity } from '@/services/authSignup';
 
 type ActiveRole = 'rider' | 'driver';
 type UserRole = ActiveRole | 'both';
@@ -72,7 +74,7 @@ interface AuthState {
   driverProfile: DriverProfile | null;
 
   initializeAuth: () => () => void;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string, preferredRole?: 'rider' | 'driver') => Promise<void>;
   signUp: (params: SignUpParams) => Promise<string>;
   signOut: () => Promise<void>;
   switchRole: (role: ActiveRole) => Promise<void>;
@@ -91,6 +93,7 @@ interface SignUpParams {
   lastName: string;
   role: UserRole;
   university?: string;
+  universityData?: SignupUniversity;
   phone?: string;
 }
 
@@ -128,9 +131,11 @@ function deriveRole(
   return null;
 }
 
-async function resolveActiveRole(role: UserRole): Promise<ActiveRole> {
+async function resolveActiveRole(role: UserRole, preferred?: 'rider' | 'driver' | null): Promise<ActiveRole> {
   if (role === 'rider') return 'rider';
   if (role === 'driver') return 'driver';
+
+  if (preferred) return preferred;
 
   try {
     const stored = await AsyncStorage.getItem(LAST_ROLE_KEY);
@@ -173,6 +178,7 @@ async function upsertUserDoc(params: {
   role: UserRole;
   activeRole: ActiveRole;
   emailVerified?: boolean;
+  create?: boolean;
 }) {
   await setDoc(
     doc(firestore, 'users', params.uid),
@@ -192,11 +198,14 @@ async function upsertUserDoc(params: {
       emailVerified: params.emailVerified ?? false,
       status: 'active',
       updatedAt: serverTimestamp(),
-      createdAt: serverTimestamp(),
+      ...(params.create ? { createdAt: serverTimestamp() } : {}),
     },
     { merge: true },
   );
 }
+
+let signUpInProgress = false;
+let preferredSignInRole: 'rider' | 'driver' | null = null;
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   uid: null,
@@ -231,6 +240,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         const role = deriveRole(riderProfile, driverProfile);
 
         if (!role) {
+          if (signUpInProgress) return;
           await firebaseSignOut(firebaseAuth);
           Alert.alert(
             'No profile found',
@@ -277,7 +287,43 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           return;
         }
 
-        const activeRole = await resolveActiveRole(role);
+        // Validate preferred role from sign-in screen toggle
+        const pref = preferredSignInRole;
+        preferredSignInRole = null;
+
+        const unauthState = {
+          uid: null as null,
+          email: null as null,
+          isLoading: false,
+          isAuthenticated: false,
+          isEmailVerified: false,
+          role: null as null,
+          activeRole: null as null,
+          riderProfile: null as null,
+          driverProfile: null as null,
+        };
+
+        if (pref === 'rider' && !riderProfile) {
+          await firebaseSignOut(firebaseAuth);
+          Alert.alert(
+            'No rider account',
+            'This account is registered as a driver only. Use the Driver toggle to sign in, or sign up for a rider account.',
+          );
+          set(unauthState);
+          return;
+        }
+
+        if (pref === 'driver' && !driverProfile) {
+          await firebaseSignOut(firebaseAuth);
+          Alert.alert(
+            'No driver account',
+            'This account is registered as a rider only. Use the Rider toggle to sign in, or sign up as a driver.',
+          );
+          set(unauthState);
+          return;
+        }
+
+        const activeRole = await resolveActiveRole(role, pref);
         await persistActiveRole(activeRole);
 
         const fallbackProfile = riderProfile || driverProfile;
@@ -319,88 +365,126 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     return unsubscribe;
   },
 
-  signIn: async (email, password) => {
+  signIn: async (email, password, preferredRole) => {
+    if (preferredRole) preferredSignInRole = preferredRole;
     set({ isLoading: true });
 
     try {
-      await signInWithEmailAndPassword(firebaseAuth, email, password);
+      await signInWithEmailAndPassword(firebaseAuth, email.trim().toLowerCase(), password);
     } catch (err) {
+      preferredSignInRole = null;
       set({ isLoading: false });
       throw err;
     }
   },
 
-  signUp: async ({ email, password, firstName, lastName, role, university, phone }) => {
+  signUp: async ({ email, password, firstName, lastName, role, university, universityData, phone }) => {
     set({ isLoading: true });
+    signUpInProgress = true;
 
     try {
       const normalizedEmail = email.trim().toLowerCase();
+      const normalizedUniversity: SignupUniversity = universityData || {
+        name: university?.trim() || '',
+        custom: true,
+      };
+      await validateSignupUniversity(normalizedUniversity);
+
       const { user } = await createUserWithEmailAndPassword(firebaseAuth, normalizedEmail, password);
       const displayName = `${firstName} ${lastName}`.trim();
 
-      await updateProfile(user, { displayName });
-      await sendEmailVerification(user);
+      try {
+        await updateProfile(user, { displayName });
 
-      const initialActiveRole: ActiveRole = role === 'driver' ? 'driver' : 'rider';
-      await persistActiveRole(initialActiveRole);
+        const initialActiveRole: ActiveRole = role === 'driver' ? 'driver' : 'rider';
+        await persistActiveRole(initialActiveRole);
 
-      const baseProfile = {
-        email: normalizedEmail,
-        firstName,
-        lastName,
-        name: displayName,
-        fullName: displayName,
-        phone: phone || null,
-        university: university || null,
-        isVerified: false,
-        emailVerified: false,
-        status: 'active',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
+        const normalizedUniversityData = {
+          name: normalizedUniversity.name,
+          city: normalizedUniversity.city || null,
+          state: normalizedUniversity.state || null,
+          id: normalizedUniversity.id || null,
+          custom: normalizedUniversity.custom || false,
+        };
+        const baseProfile = {
+          email: normalizedEmail,
+          firstName,
+          lastName,
+          name: displayName,
+          fullName: displayName,
+          phone: phone || null,
+          university: normalizedUniversity.name,
+          universityData: normalizedUniversityData,
+          isVerified: false,
+          emailVerified: false,
+          status: 'active',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
 
-      if (role === 'rider' || role === 'both') {
-        await setDoc(doc(firestore, 'riders', user.uid), {
-          ...baseProfile,
-          role: 'rider',
+        if (role === 'rider' || role === 'both') {
+          await setDoc(doc(firestore, 'riders', user.uid), {
+            ...baseProfile,
+            role: 'rider',
+          });
+        }
+
+        if (role === 'driver' || role === 'both') {
+          await setDoc(doc(firestore, 'drivers', user.uid), {
+            ...baseProfile,
+            role: 'driver',
+            userUid: user.uid,
+            personalInfo: {
+              firstName,
+              lastName,
+              email: normalizedEmail,
+              phone: phone || '',
+              university: normalizedUniversity.name,
+              universityData: normalizedUniversityData,
+            },
+            applicationStatus: 'pending',
+            verificationStatus: 'pending',
+            driverStatus: 'pending',
+          });
+        }
+
+        await upsertUserDoc({
+          uid: user.uid,
+          email: normalizedEmail,
+          firstName,
+          lastName,
+          phone: phone || null,
+          university: normalizedUniversity.name,
+          role,
+          activeRole: initialActiveRole,
+          emailVerified: false,
+          create: true,
         });
-      }
+        await sendEmailVerification(user);
 
-      if (role === 'driver' || role === 'both') {
-        await setDoc(doc(firestore, 'drivers', user.uid), {
-          ...baseProfile,
-          role: 'driver',
-          verificationStatus: 'pending',
-          driverStatus: 'pending',
+        const profiles = await fetchProfiles(user.uid);
+        set({
+          uid: user.uid,
+          email: normalizedEmail,
+          isAuthenticated: true,
+          isEmailVerified: false,
+          role,
+          activeRole: initialActiveRole,
+          riderProfile: profiles.riderProfile,
+          driverProfile: profiles.driverProfile,
+          isLoading: false,
         });
+
+        return user.uid;
+      } catch (error) {
+        await deleteUser(user).catch(() => {});
+        throw error;
       }
-
-      await upsertUserDoc({
-        uid: user.uid,
-        email: normalizedEmail,
-        firstName,
-        lastName,
-        phone: phone || null,
-        university: university || null,
-        role,
-        activeRole: initialActiveRole,
-        emailVerified: false,
-      });
-
-      set({
-        uid: user.uid,
-        email: normalizedEmail,
-        isAuthenticated: true,
-        isEmailVerified: false,
-        role,
-        activeRole: initialActiveRole,
-        isLoading: false,
-      });
-
-      return user.uid;
     } catch (err) {
       set({ isLoading: false });
       throw err;
+    } finally {
+      signUpInProgress = false;
     }
   },
 

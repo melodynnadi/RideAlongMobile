@@ -5,15 +5,16 @@
 import React, { useState } from 'react';
 import {
   View, Text, Modal, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Alert, useColorScheme, Platform,
+  ActivityIndicator, Alert, Platform,
 } from 'react-native';
-import { CardField, useStripe } from '@stripe/stripe-react-native';
+import { CardField, useStripe } from '@/components/platform/stripe';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/stores/authStore';
 import { createSetupIntent, savePaymentMethod } from '@/services/payments';
 import { usePaymentStore } from '@/stores/paymentStore';
+import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 const COLORS = {
@@ -35,15 +36,14 @@ const COLORS = {
 };
 
 function useAppTheme() {
-  const dark = useColorScheme() === 'dark';
   return {
-    dark,
-    card:        dark ? COLORS.darkCard        : COLORS.lightCard,
-    border:      dark ? COLORS.darkBorder      : COLORS.lightBorder,
-    text:        dark ? COLORS.darkText        : COLORS.lightText,
-    sub:         dark ? COLORS.darkSub         : COLORS.lightSub,
-    input:       dark ? COLORS.darkInput       : COLORS.lightInput,
-    inputBorder: dark ? COLORS.darkInputBorder : COLORS.lightInputBorder,
+    dark: false,
+    card: COLORS.lightCard,
+    border: COLORS.lightBorder,
+    text: COLORS.lightText,
+    sub: COLORS.lightSub,
+    input: COLORS.lightInput,
+    inputBorder: COLORS.lightInputBorder,
   };
 }
 
@@ -126,7 +126,7 @@ export function AddCardModal({ visible, onClose, onSuccess }: AddCardModalProps)
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={s.overlay}>
+      <KeyboardAwareModalView style={s.overlay}>
         <TouchableOpacity
           style={s.backdrop}
           activeOpacity={1}
@@ -154,20 +154,22 @@ export function AddCardModal({ visible, onClose, onSuccess }: AddCardModalProps)
               onPress={onClose}
               disabled={isProcessing}
               style={[s.closeBtn, { backgroundColor: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}
+              accessibilityRole="button"
+              accessibilityLabel="Close add card"
             >
               <Ionicons name="close" size={20} color={theme.text} />
             </TouchableOpacity>
           </View>
 
           {/* Card Field */}
-          <View style={[s.cardFieldWrap, { backgroundColor: theme.input, borderColor: theme.inputBorder }]}>
-            <BlurView intensity={dark ? 15 : 30} tint={dark ? 'dark' : 'light'} style={StyleSheet.absoluteFillObject} />
+          <View style={[s.cardFieldWrap, { backgroundColor: dark ? theme.input : '#FFFFFF', borderColor: theme.inputBorder }]}>
+            {dark ? <BlurView intensity={15} tint="dark" style={StyleSheet.absoluteFillObject} /> : null}
             <CardField
               postalCodeEnabled
-              placeholders={{ number: '4242 4242 4242 4242' }}
+              placeholders={{ number: '1234 1234 1234 1234' }}
               cardStyle={{
-                backgroundColor: 'transparent',
-                textColor: theme.text,
+                backgroundColor: dark ? COLORS.darkInput : '#FFFFFF',
+                textColor: dark ? COLORS.darkText : '#15233A',
                 placeholderColor: dark ? '#3A5570' : '#A0B0C0',
                 borderColor: 'transparent',
                 borderWidth: 0,
@@ -175,20 +177,6 @@ export function AddCardModal({ visible, onClose, onSuccess }: AddCardModalProps)
               style={s.cardField}
               onCardChange={setCardDetails}
             />
-          </View>
-
-          {/* Test card info */}
-          <View style={[s.infoBox, {
-            backgroundColor: dark ? 'rgba(244,98,31,0.08)' : 'rgba(244,98,31,0.06)',
-            borderColor: 'rgba(244,98,31,0.25)',
-          }]}>
-            <View style={s.infoRow}>
-              <Ionicons name="information-circle" size={15} color={COLORS.orange} />
-              <Text style={[s.infoTitle, { color: COLORS.orange }]}>Test Cards</Text>
-            </View>
-            <Text style={[s.infoText, { color: theme.sub }]}>4242 4242 4242 4242 — Success</Text>
-            <Text style={[s.infoText, { color: theme.sub }]}>4000 0000 0000 9995 — Insufficient funds</Text>
-            <Text style={[s.infoText, { color: theme.sub }]}>Any future expiry & any CVV</Text>
           </View>
 
           {/* Security badge */}
@@ -231,7 +219,7 @@ export function AddCardModal({ visible, onClose, onSuccess }: AddCardModalProps)
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardAwareModalView>
     </Modal>
   );
 }
@@ -253,7 +241,7 @@ const s = StyleSheet.create({
   headerIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   title:      { fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
   subtitle:   { fontSize: 13, fontWeight: '400', marginTop: 1 },
-  closeBtn:   { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  closeBtn:   { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
 
   cardFieldWrap: {
     marginHorizontal: 24, marginBottom: 16,
@@ -262,10 +250,6 @@ const s = StyleSheet.create({
   },
   cardField: { height: 52, marginHorizontal: 4 },
 
-  infoBox:   { marginHorizontal: 24, marginBottom: 12, borderWidth: 1, borderRadius: 14, padding: 14, gap: 4 },
-  infoRow:   { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
-  infoTitle: { fontSize: 13, fontWeight: '700' },
-  infoText:  { fontSize: 12, lineHeight: 18, fontWeight: '400' },
 
   securityBox:  { marginHorizontal: 24, marginBottom: 16, flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderWidth: 1, borderRadius: 14, padding: 12 },
   securityText: { flex: 1, fontSize: 12, lineHeight: 18, fontWeight: '400' },

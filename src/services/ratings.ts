@@ -1,6 +1,16 @@
 import { collection, doc, documentId, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
 import { firestore } from '@/constants/services';
 
+export async function hasUserRatedRide(rideId: string, userId: string): Promise<boolean> {
+  if (!rideId || !userId) return false;
+  try {
+    const rating = await getDoc(doc(firestore, 'rideRatings', `${rideId}_${userId}`));
+    return rating.exists();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Get driver's cached rating from their profile document (fast path).
  * Falls back to computing from rideRatings if not available.

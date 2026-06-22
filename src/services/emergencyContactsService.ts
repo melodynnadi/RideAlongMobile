@@ -4,8 +4,7 @@ import {
   updateDoc, 
   setDoc,
   serverTimestamp,
-  arrayUnion,
-  arrayRemove
+  arrayUnion
 } from 'firebase/firestore';
 import { firestore, firebaseAuth } from '@/constants/services';
 import { logActivity } from '@/src/services/activity';
@@ -60,7 +59,14 @@ export async function getEmergencyContacts(): Promise<EmergencyContact[]> {
     }
     
     const driverData = driverSnap.data();
-    return driverData.emergencyContacts || [];
+    const contacts = Array.isArray(driverData.emergencyContacts) ? driverData.emergencyContacts : [];
+    return contacts.map((contact: Partial<EmergencyContact>, index: number) => ({
+      id: contact.id || `legacy-${index}`,
+      name: String(contact.name || ''),
+      phone: String(contact.phone || ''),
+      relationship: String(contact.relationship || ''),
+      addedAt: contact.addedAt,
+    }));
   } catch (error) {
     console.error('Error fetching emergency contacts:', error);
     throw new Error('Failed to fetch emergency contacts');
@@ -166,8 +172,8 @@ export async function updateEmergencyContact(contactId: string, updates: Partial
     const emergencyContacts = driverData.emergencyContacts || [];
     
     // Find and update the contact
-    const updatedContacts = emergencyContacts.map((contact: EmergencyContact) => 
-      contact.id === contactId 
+    const updatedContacts = emergencyContacts.map((contact: EmergencyContact, index: number) => 
+      (contact.id || `legacy-${index}`) === contactId 
         ? { ...contact, ...updates }
         : contact
     );
@@ -177,17 +183,16 @@ export async function updateEmergencyContact(contactId: string, updates: Partial
       updatedAt: serverTimestamp(),
     });
 
-    // Log the activity
-    await logActivity({
-      type: 'profile_updated',
-      entityType: 'driver_profile',
-      entityId: user.uid,
-      metadata: { 
-        action: 'emergency_contact_updated',
-        contactId,
-        updates
-      },
-    });
+    try {
+      await logActivity({
+        type: 'profile_updated',
+        entityType: 'driver_profile',
+        entityId: user.uid,
+        metadata: { action: 'emergency_contact_updated', contactId, updates },
+      });
+    } catch (activityError) {
+      console.warn('Failed to log emergency contact update:', activityError);
+    }
   } catch (error) {
     console.error('Error updating emergency contact:', error);
     throw new Error('Failed to update emergency contact');
@@ -215,30 +220,29 @@ export async function removeEmergencyContact(contactId: string): Promise<void> {
     const emergencyContacts = driverData.emergencyContacts || [];
     
     // Find the contact to remove
-    const contactToRemove = emergencyContacts.find((contact: EmergencyContact) => contact.id === contactId);
+    const contactToRemove = emergencyContacts.find((contact: EmergencyContact, index: number) => (contact.id || `legacy-${index}`) === contactId);
     if (!contactToRemove) {
       throw new Error('Contact not found');
     }
 
     // Remove the contact from the array
-    const updatedContacts = emergencyContacts.filter((contact: EmergencyContact) => contact.id !== contactId);
+    const updatedContacts = emergencyContacts.filter((contact: EmergencyContact, index: number) => (contact.id || `legacy-${index}`) !== contactId);
 
     await updateDoc(driverRef, {
       emergencyContacts: updatedContacts,
       updatedAt: serverTimestamp(),
     });
 
-    // Log the activity
-    await logActivity({
-      type: 'profile_updated',
-      entityType: 'driver_profile',
-      entityId: user.uid,
-      metadata: { 
-        action: 'emergency_contact_removed',
-        contactName: contactToRemove.name,
-        contactId
-      },
-    });
+    try {
+      await logActivity({
+        type: 'profile_updated',
+        entityType: 'driver_profile',
+        entityId: user.uid,
+        metadata: { action: 'emergency_contact_removed', contactName: contactToRemove.name, contactId },
+      });
+    } catch (activityError) {
+      console.warn('Failed to log emergency contact removal:', activityError);
+    }
   } catch (error) {
     console.error('Error removing emergency contact:', error);
     throw new Error('Failed to remove emergency contact');

@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../RideAlongWebApp"
+		}
+	],
+	"settings": {
+		"liveServer.settings.multiRootWorkspaceName": "RideAlongWebApp"
+	}
+}

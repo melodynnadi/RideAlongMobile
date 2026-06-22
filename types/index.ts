@@ -97,6 +97,16 @@ export interface RidePreferences {
   conversationLevel: 'quiet' | 'normal' | 'chatty';
 }
 
+export interface UserPreferences {
+  musicPreference: string[];
+  soundEnvironment: string;
+  conversationLevel: string;
+  smokingPreference: string;
+  driverGender: string;
+  passengerType: string;
+  preferencesUpdatedAt?: string;
+}
+
 export interface LegalDocument {
   id: string;
   title: string;

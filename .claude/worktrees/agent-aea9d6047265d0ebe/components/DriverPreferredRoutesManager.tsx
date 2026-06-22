@@ -1,0 +1,241 @@
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { MapPin, Navigation, Plus, Pencil, Trash2, ArrowRight, X } from 'lucide-react-native';
+import { useDriverPreferredRoutesStore } from '@/stores/preferredRoutesStore';
+import { CityAutocomplete } from './CityAutocomplete';
+import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
+
+export const DriverPreferredRoutesManager: React.FC = () => {
+  const { routes, load, add, update, remove, loading, saving, error, clearError } = useDriverPreferredRoutesStore();
+  const [origin, setOrigin] = useState('');
+  const [destination, setDestination] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => { if (error) Alert.alert('Preferred Routes', error, [{ text: 'OK', onPress: () => clearError() }]); }, [error, clearError]);
+
+  const resetForm = () => { setOrigin(''); setDestination(''); setEditingId(null); };
+
+  const onSave = async () => {
+    if (!origin.trim() || !destination.trim()) { Alert.alert('Validation', 'Origin and destination required'); return; }
+    if (editingId) { await update(editingId, origin, destination); if (!error) resetForm(); } else { await add(origin, destination); if (!error) resetForm(); }
+  };
+
+  const editRoute = (id: string) => {
+    const r = routes.find(r => r.id === id); if (!r) return; setEditingId(id); setOrigin(r.origin); setDestination(r.destination);
+  };
+
+  const deleteRoute = (id: string) => {
+    Alert.alert('Delete Route', 'Remove this preferred route?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => { await remove(id); if (!error && editingId === id) resetForm(); } }
+    ]);
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.heading}>Preferred Routes</Text>
+      <Text style={styles.subheading}>We notify you when riders request matching routes.</Text>
+
+      {/* Origin input */}
+      <View style={styles.inputGroup}>
+        <View style={styles.inputLabel}>
+          <MapPin size={16} color="#E05E1A" />
+          <Text style={styles.inputLabelText}>Pickup</Text>
+        </View>
+        <View style={{ zIndex: 2 }}>
+          <CityAutocomplete
+            placeholder="City or address"
+            value={origin}
+            onChangeText={setOrigin}
+            onSelected={setOrigin}
+            apiKey={GOOGLE_MAPS_API_KEY}
+          />
+        </View>
+      </View>
+
+      {/* Destination input */}
+      <View style={[styles.inputGroup, { zIndex: 1 }]}>
+        <View style={styles.inputLabel}>
+          <Navigation size={16} color="#E05E1A" />
+          <Text style={styles.inputLabelText}>Dropoff</Text>
+        </View>
+        <CityAutocomplete
+          placeholder="City or address"
+          value={destination}
+          onChangeText={setDestination}
+          onSelected={setDestination}
+          apiKey={GOOGLE_MAPS_API_KEY}
+        />
+      </View>
+
+      {/* Action buttons */}
+      <View style={styles.actions}>
+        {editingId && (
+          <TouchableOpacity style={styles.cancelBtn} onPress={resetForm}>
+            <X size={16} color="#64748B" />
+            <Text style={styles.cancelBtnText}>Cancel</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          style={[styles.saveBtn, saving && { opacity: 0.7 }]}
+          onPress={onSave}
+          disabled={saving}
+        >
+          {editingId ? (
+            <Pencil size={16} color="white" />
+          ) : (
+            <Plus size={16} color="white" />
+          )}
+          <Text style={styles.saveBtnText}>
+            {editingId ? (saving ? 'Updating...' : 'Update Route') : (saving ? 'Adding...' : 'Add Route')}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Saved routes */}
+      {loading ? (
+        <ActivityIndicator style={{ marginTop: 20 }} color="#E05E1A" />
+      ) : routes.length === 0 ? (
+        <Text style={styles.empty}>No preferred routes yet.</Text>
+      ) : (
+        <View style={styles.routesList}>
+          {routes.map(item => (
+            <View key={item.id} style={styles.routeCard}>
+              <View style={styles.routeInfo}>
+                <Text style={styles.routeOrigin} numberOfLines={1}>{item.origin}</Text>
+                <ArrowRight size={14} color="#94A3B8" style={{ marginHorizontal: 6 }} />
+                <Text style={styles.routeDest} numberOfLines={1}>{item.destination}</Text>
+              </View>
+              <View style={styles.routeActions}>
+                <TouchableOpacity style={styles.iconBtn} onPress={() => editRoute(item.id)} hitSlop={8}>
+                  <Pencil size={16} color="#64748B" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.iconBtn} onPress={() => deleteRoute(item.id)} hitSlop={8}>
+                  <Trash2 size={16} color="#DC2626" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    padding: 16,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  heading: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 4,
+  },
+  subheading: {
+    fontSize: 13,
+    color: '#64748B',
+    marginBottom: 16,
+  },
+  inputGroup: {
+    marginBottom: 12,
+  },
+  inputLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  inputLabelText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  saveBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#E05E1A',
+  },
+  saveBtnText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  cancelBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+  },
+  cancelBtnText: {
+    color: '#64748B',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  routesList: {
+    marginTop: 16,
+    gap: 8,
+  },
+  routeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  routeInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  routeOrigin: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F172A',
+    flexShrink: 1,
+  },
+  routeDest: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#475569',
+    flexShrink: 1,
+  },
+  routeActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginLeft: 10,
+  },
+  iconBtn: {
+    padding: 6,
+  },
+  empty: {
+    textAlign: 'center',
+    marginTop: 20,
+    color: '#94A3B8',
+    fontSize: 14,
+  },
+});
+
+export default DriverPreferredRoutesManager;

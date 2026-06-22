@@ -1,52 +1,52 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Modal, TouchableOpacity, StyleSheet, TextInput, ActivityIndicator, Alert, Switch, Platform, KeyboardAvoidingView, ScrollView } from 'react-native';
-import { X } from 'lucide-react-native';
-import { useTheme } from '@/hooks/useTheme';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { EmergencyButton } from '@/components/EmergencyButton';
+import {
+  View, Text, Modal, TouchableOpacity, StyleSheet, TextInput,
+  ActivityIndicator, Alert, Switch, Platform, KeyboardAvoidingView, ScrollView,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { firebaseAuth, firestore } from '@/constants/services';
 import { logActivity } from '@/utils/activityLogger';
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
+
+const NAVY   = '#15233A';
+const ORANGE = '#DE5D20';
+const BG     = '#FBFAF7';
+const BORDER = '#E5E0D8';
+const MUTED  = '#8B94A6';
+const RED    = '#DC2626';
 
 export type FlagRideModalProps = {
   visible: boolean;
   onClose: () => void;
   rideId: string | null;
-  onFlagged?: (rideId: string) => void; // optimistic update callback
+  role?: 'driver' | 'rider';
+  onFlagged?: (rideId: string) => void;
 };
 
 const REASONS = [
-  { value: 'safety', label: 'Safety' },
-  { value: 'behavior', label: 'Behavior' },
-  { value: 'fare_route_dispute', label: 'Fare/Route dispute' },
-  { value: 'vehicle_accident', label: 'Vehicle/Accident' },
-  { value: 'no_show', label: 'No-show' },
-  { value: 'lost_and_found', label: 'Lost & found' },
-  { value: 'other', label: 'Other' },
+  { value: 'safety',            label: 'Safety' },
+  { value: 'behavior',          label: 'Behavior' },
+  { value: 'fare_route_dispute',label: 'Fare / Route dispute' },
+  { value: 'vehicle_accident',  label: 'Vehicle / Accident' },
+  { value: 'no_show',           label: 'No-show' },
+  { value: 'lost_and_found',    label: 'Lost & found' },
+  { value: 'other',             label: 'Other' },
 ] as const;
 
-export function FlagRideModal({ visible, onClose, rideId, onFlagged }: FlagRideModalProps) {
-  const theme = useTheme();
-  // prefer a light, neutral modal background to avoid the dark-blue card color
- const modalContentStyle = [styles.modalContent, { backgroundColor: (theme?.colors?.bg || '#FFFFFF') }];
-  const cardBodyStyle = [styles.body, { backgroundColor: (theme?.colors?.bg || '#FFFFFF') }];
-  const [reason, setReason] = useState<string>('');
-  const [details, setDetails] = useState<string>('');
+export function FlagRideModal({ visible, onClose, rideId, role = 'rider', onFlagged }: FlagRideModalProps) {
+  const [reason, setReason]             = useState<string>('');
+  const [details, setDetails]           = useState<string>('');
   const [severityHigh, setSeverityHigh] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [submitting, setSubmitting]     = useState(false);
   const [loadingExisting, setLoadingExisting] = useState(false);
-  const [existingLoaded, setExistingLoaded] = useState(false);
 
   useEffect(() => {
     let active = true;
     async function loadExisting() {
       if (!visible || !rideId) return;
-      setExistingLoaded(false);
       setLoadingExisting(true);
       try {
-        const id = `${rideId}_rider`;
-        const snap = await getDoc(doc(firestore, 'rideFlags', id));
+        const snap = await getDoc(doc(firestore, 'rideFlags', `${rideId}_${role}`));
         if (!active) return;
         if (snap.exists()) {
           const data = snap.data() as any;
@@ -56,29 +56,19 @@ export function FlagRideModal({ visible, onClose, rideId, onFlagged }: FlagRideM
             setSeverityHigh((data.severity || 'normal') === 'high');
           }
         }
-      } catch (e) {
-        // ignore load errors, keep form empty
-      } finally {
-        if (active) {
-          setLoadingExisting(false);
-          setExistingLoaded(true);
-        }
-      }
+      } catch {}
+      finally { if (active) setLoadingExisting(false); }
     }
     loadExisting();
     return () => { active = false; };
-  }, [visible, rideId]);
+  }, [visible, rideId, role]);
 
   const valid = details.trim().length >= 20 && !!reason && REASONS.some((r) => r.value === reason) && !!rideId;
-
-  const showSignInPrompt = () => {
-    Alert.alert('Sign in required', 'You need to sign in to flag a ride.');
-  };
 
   const submitFlag = async () => {
     if (submitting) return;
     const user = firebaseAuth.currentUser;
-    if (!user) { showSignInPrompt(); return; }
+    if (!user) { Alert.alert('Sign in required', 'You need to sign in to flag a ride.'); return; }
     if (!rideId) { Alert.alert('Ride not found', 'No ride selected.'); return; }
     setSubmitting(true);
     try {
@@ -87,18 +77,17 @@ export function FlagRideModal({ visible, onClose, rideId, onFlagged }: FlagRideM
       const ride = rideSnap.data() as any;
 
       const postingId = ride?.ridePostingId;
-      let allRideIds = [rideId];
-      let allRiderIds = [ride?.riderId ?? ride?.userId ?? null];
+      let allRideIds   = [rideId];
+      let allRiderIds  = [ride?.riderId ?? ride?.userId ?? null];
       let allRiderNames = [ride?.riderName ?? 'Passenger'];
 
       if (postingId) {
         try {
-          const groupQuery = query(
+          const groupSnap = await getDocs(query(
             collection(firestore, 'confirmedRides'),
             where('ridePostingId', '==', postingId),
             where('driverId', '==', ride.driverId)
-          );
-          const groupSnap = await getDocs(groupQuery);
+          ));
           allRideIds = []; allRiderIds = []; allRiderNames = [];
           groupSnap.forEach((d) => {
             allRideIds.push(d.id);
@@ -106,37 +95,49 @@ export function FlagRideModal({ visible, onClose, rideId, onFlagged }: FlagRideM
             allRiderIds.push(data?.riderId ?? data?.userId ?? null);
             allRiderNames.push(data?.riderName ?? 'Passenger');
           });
-        } catch (e) {
-          console.warn('Could not fetch group rides for flagging', e);
-        }
+        } catch (e) { console.warn('Could not fetch group rides for flagging', e); }
       }
 
       for (let i = 0; i < allRideIds.length; i++) {
         const rid = allRideIds[i];
-        const flagDocId = `${rid}_rider`;
+        const flagDocId = `${rid}_${role}`;
         const thisRideSnap = await getDoc(doc(firestore, 'confirmedRides', rid));
         const thisRide = thisRideSnap.exists() ? thisRideSnap.data() : ride;
-        const payload = {
+        const statusBeforeFlag = String(thisRide?.status || '').toUpperCase();
+        const completedAtValue = thisRide?.completedAt;
+        const completedAt = completedAtValue?.toDate
+          ? completedAtValue.toDate()
+          : completedAtValue
+            ? new Date(completedAtValue)
+            : null;
+        const payoutHold = role === 'rider' && (
+          statusBeforeFlag !== 'COMPLETED' ||
+          (!!completedAt && !Number.isNaN(completedAt.getTime()) && Date.now() - completedAt.getTime() <= 24 * 60 * 60 * 1000)
+        );
+        await setDoc(doc(firestore, 'rideFlags', flagDocId), {
           rideId: rid, ridePostingId: postingId ?? null, isGroupRide: !!postingId,
           totalPassengers: allRideIds.length,
           riderId: thisRide?.riderId ?? thisRide?.userId ?? null,
           riderName: thisRide?.riderName ?? 'Passenger',
           driverId: thisRide?.driverId ?? null, driverName: thisRide?.driverName ?? 'Driver',
+          statusBeforeFlag: thisRide?.status ?? null,
           statusAtFlag: thisRide?.status ?? null,
           pickup: thisRide?.pickup ?? null, dropoff: thisRide?.dropoff ?? null,
           date: thisRide?.date ?? null, time: thisRide?.time ?? null,
           reason, details: details.trim(),
           severity: severityHigh ? 'high' : 'normal',
-          attachments: [], flaggedByRole: 'rider', reviewStatus: 'open',
+          attachments: [], flaggedByRole: role, reviewStatus: 'open',
           updatedAt: serverTimestamp(), createdAt: serverTimestamp(),
-        } as any;
-        await setDoc(doc(firestore, 'rideFlags', flagDocId), payload, { merge: true });
+        } as any, { merge: true });
         await updateDoc(doc(firestore, 'confirmedRides', rid), {
-          status: 'FLAGGED', statusAtFlag: thisRide?.status ?? 'IN_PROGRESS', updatedAt: serverTimestamp(),
+          status: 'FLAGGED',
+          statusBeforeFlag: thisRide?.status ?? 'IN_PROGRESS',
+          statusAtFlag: thisRide?.status ?? 'IN_PROGRESS',
+          ...(payoutHold ? { payoutHold: true } : {}),
+          updatedAt: serverTimestamp(),
         });
       }
 
-      // Notify driver
       try {
         if (ride?.driverId) {
           await addDoc(collection(firestore, 'notifications'), {
@@ -151,14 +152,13 @@ export function FlagRideModal({ visible, onClose, rideId, onFlagged }: FlagRideM
         }
       } catch (e) { console.warn('Failed to send driver notification', e); }
 
-      // Notify admin
       try {
         await addDoc(collection(firestore, 'adminNotifications'), {
           type: 'ride_flag',
           title: postingId ? 'Group Ride Flagged' : 'Ride Flagged',
-          message: `A ${postingId ? 'group ride' : 'ride'} has been flagged by rider. Reason: ${reason}`,
+          message: `A ${postingId ? 'group ride' : 'ride'} has been flagged by ${role}. Reason: ${reason}`,
           rideIds: allRideIds, ridePostingId: postingId ?? null,
-          flaggedByRole: 'rider', flaggedById: user.uid,
+          flaggedByRole: role, flaggedById: user.uid,
           reason, details: details.trim(),
           driverId: ride?.driverId ?? null, driverName: ride?.driverName ?? 'Driver',
           riderIds: allRiderIds.filter(Boolean), riderNames: allRiderNames,
@@ -166,7 +166,6 @@ export function FlagRideModal({ visible, onClose, rideId, onFlagged }: FlagRideM
         });
       } catch (e) { console.warn('Failed to send admin notification', e); }
 
-      // Notify other passengers in group
       if (postingId && allRiderIds.length > 1) {
         for (let i = 0; i < allRiderIds.length; i++) {
           const riderId = allRiderIds[i];
@@ -183,82 +182,115 @@ export function FlagRideModal({ visible, onClose, rideId, onFlagged }: FlagRideM
       }
 
       try { onFlagged?.(rideId); } catch {}
-
       void logActivity({
         type: 'ride_flagged', entityType: 'ride', entityId: rideId,
         metadata: { rideId, reason, severity: severityHigh ? 'high' : 'normal', flaggedRides: allRideIds.length, isGroupRide: !!postingId },
       });
 
-      if (postingId) {
-        Alert.alert('Group Ride Flagged',
-          `All ${allRideIds.length} passengers have been flagged. Admin will review this case.`,
-          [{ text: 'OK', onPress: () => onClose() }]
-        );
-      } else {
-        Alert.alert('Flag submitted', 'Thank you — the ride has been flagged for review.',
-          [{ text: 'OK', onPress: () => onClose() }]
-        );
-      }
+      Alert.alert(
+        postingId ? 'Group ride flagged' : 'Ride flagged',
+        postingId
+          ? `All ${allRideIds.length} rides have been flagged for review.`
+          : 'Thank you — the ride has been flagged for admin review.',
+        [{ text: 'OK', onPress: () => onClose() }]
+      );
     } catch (err: any) {
-      const msg = err?.message ?? 'Could not submit flag';
-      Alert.alert('Error', msg);
+      Alert.alert('Error', err?.message ?? 'Could not submit flag');
       setSubmitting(false);
     }
   };
 
   return (
     <Modal animationType="slide" transparent visible={visible} onRequestClose={() => { if (!submitting) onClose(); }}>
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.modalOverlay}
-      >
-        <View style={modalContentStyle}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Flag Ride</Text>
-            <TouchableOpacity onPress={() => { if (!submitting) onClose(); }} style={styles.closeButton} accessibilityLabel="Close flag modal">
-              <X size={22} color="#64748B" />
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={s.overlay}>
+        <View style={s.sheet}>
+
+          {/* Handle */}
+          <View style={s.handle} />
+
+          {/* Header */}
+          <View style={s.header}>
+            <View style={s.headerIcon}>
+              <Ionicons name="flag" size={18} color={RED} />
+            </View>
+            <Text style={s.title}>Flag Ride</Text>
+            <TouchableOpacity onPress={() => { if (!submitting) onClose(); }} style={s.closeBtn} activeOpacity={0.7}>
+              <Ionicons name="close" size={20} color={MUTED} />
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.scrollView} keyboardShouldPersistTaps="handled">
-            <Card style={cardBodyStyle}>
-            {/* Emergency Call Button */}
-            <EmergencyButton />
-            
-            {loadingExisting && <ActivityIndicator />}
-            <Text style={styles.label}>Reason</Text>
-            <View style={styles.reasonRow}>
+          <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+
+            {loadingExisting ? (
+              <ActivityIndicator color={ORANGE} style={{ marginBottom: 16 }} />
+            ) : null}
+
+            {/* Reason */}
+            <Text style={s.label}>What happened?</Text>
+            <View style={s.pillRow}>
               {REASONS.map((r) => (
-                <TouchableOpacity key={r.value} style={[styles.reasonPill, reason === r.value && styles.reasonPillSelected]} onPress={() => setReason(r.value)} accessibilityRole="button" accessibilityLabel={`Reason: ${r.label}`}>
-                  <Text style={[styles.reasonText, reason === r.value && styles.reasonTextSelected]}>{r.label}</Text>
+                <TouchableOpacity
+                  key={r.value}
+                  style={[s.pill, reason === r.value && s.pillSelected]}
+                  onPress={() => setReason(r.value)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[s.pillText, reason === r.value && s.pillTextSelected]}>{r.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            <Text style={styles.label}>Details</Text>
+            {/* Details */}
+            <Text style={[s.label, { marginTop: 20 }]}>Details</Text>
             <TextInput
-              style={styles.textArea}
+              style={s.textarea}
               multiline
               editable={!submitting}
               value={details}
-              onChangeText={setDetails}
-              placeholder="Describe what happened (min 20 characters)"
-              accessibilityLabel="Flag details"
+              onChangeText={(t) => setDetails(t.slice(0, 1000))}
+              placeholder="Describe what happened (min 20 characters)..."
+              placeholderTextColor={MUTED}
+              textAlignVertical="top"
             />
-            <Text style={styles.hint}>{details.trim().length} / 1000</Text>
+            <Text style={s.charCount}>{details.trim().length} / 1000</Text>
 
-            <View style={styles.rowBetweenAlign}>
-              <Text style={styles.label}>Emergency (high severity)</Text>
-              <Switch value={severityHigh} onValueChange={setSeverityHigh} disabled={submitting} />
+            {/* Severity */}
+            <View style={s.severityRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.label}>High severity</Text>
+                <Text style={s.severityHint}>Safety risk or emergency situation</Text>
+              </View>
+              <Switch
+                value={severityHigh}
+                onValueChange={setSeverityHigh}
+                disabled={submitting}
+                trackColor={{ false: BORDER, true: 'rgba(220,38,38,0.3)' }}
+                thumbColor={severityHigh ? RED : '#FFF'}
+              />
             </View>
 
-            <View style={styles.actionsRow}>
-              <Button variant="outline" style={styles.btn} onPress={() => { if (!submitting) onClose(); }} disabled={submitting}>Cancel</Button>
-              <Button variant="error" style={styles.btn} onPress={submitFlag} disabled={!valid || submitting} loading={submitting}>
-                {submitting ? 'Submitting...' : 'Submit'}
-              </Button>
+            {/* Actions */}
+            <View style={s.actions}>
+              <TouchableOpacity
+                style={s.cancelBtn}
+                onPress={() => { if (!submitting) onClose(); }}
+                disabled={submitting}
+                activeOpacity={0.75}
+              >
+                <Text style={s.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.submitBtn, (!valid || submitting) && s.submitBtnDisabled]}
+                onPress={submitFlag}
+                disabled={!valid || submitting}
+                activeOpacity={0.85}
+              >
+                {submitting
+                  ? <ActivityIndicator size="small" color="#FFF" />
+                  : <Text style={s.submitBtnText}>Submit</Text>}
+              </TouchableOpacity>
             </View>
-          </Card>
+
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
@@ -266,25 +298,38 @@ export function FlagRideModal({ visible, onClose, rideId, onFlagged }: FlagRideM
   );
 }
 
-const styles = StyleSheet.create({
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: 'white', borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '85%' },
-  scrollView: { flexGrow: 0 },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E7EB' },
-  modalTitle: { fontSize: 20, fontWeight: '700' },
-  closeButton: { padding: 8 },
-  body: { padding: 16 },
-  label: { fontSize: 14, fontWeight: '600', marginTop: 8 },
-  reasonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-  reasonPill: { paddingHorizontal: 10, paddingVertical: 8, backgroundColor: '#F3F4F6', borderRadius: 999, marginRight: 8, marginTop: 8 },
-  reasonPillSelected: { backgroundColor: '#FEE2E2' },
-  reasonText: { color: '#0F172A', textTransform: 'capitalize' },
-  reasonTextSelected: { color: '#881337' },
-  textArea: { minHeight: 100, borderWidth: StyleSheet.hairlineWidth, borderColor: '#E5E7EB', borderRadius: 8, padding: 10, marginTop: 8, textAlignVertical: 'top' },
-  hint: { color: '#6B7280', fontSize: 12, marginTop: 6 },
-  rowBetweenAlign: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 },
-  actionsRow: { flexDirection: 'row', gap: 12, marginTop: 16 },
-  btn: { flex: 1 },
+const s = StyleSheet.create({
+  overlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  sheet:      { backgroundColor: BG, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 36, maxHeight: '90%' },
+  handle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: BORDER, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
+
+  header:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: BORDER, gap: 10 },
+  headerIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#FEF2F2', alignItems: 'center', justifyContent: 'center' },
+  title:      { flex: 1, color: NAVY, fontSize: 17, fontWeight: '700', letterSpacing: -0.2 },
+  closeBtn:   { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F1F3F6', alignItems: 'center', justifyContent: 'center' },
+
+  body:       { padding: 20, paddingBottom: 8 },
+
+  label:      { color: NAVY, fontSize: 13, fontWeight: '700', marginBottom: 10, letterSpacing: 0.1 },
+
+  pillRow:    { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  pill:       { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFF' },
+  pillSelected:     { backgroundColor: '#FEF2F2', borderColor: RED },
+  pillText:         { color: MUTED, fontSize: 13, fontWeight: '600' },
+  pillTextSelected: { color: RED, fontWeight: '700' },
+
+  textarea:   { minHeight: 110, borderWidth: 1, borderColor: BORDER, borderRadius: 14, padding: 14, fontSize: 14, color: NAVY, backgroundColor: '#FFF', lineHeight: 20 },
+  charCount:  { color: MUTED, fontSize: 11, fontWeight: '500', marginTop: 6, textAlign: 'right' },
+
+  severityRow:  { flexDirection: 'row', alignItems: 'center', marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: BORDER },
+  severityHint: { color: MUTED, fontSize: 12, fontWeight: '500', marginTop: 2 },
+
+  actions:    { flexDirection: 'row', gap: 10, marginTop: 24 },
+  cancelBtn:  { flex: 1, paddingVertical: 14, borderRadius: 24, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFF', alignItems: 'center' },
+  cancelBtnText: { color: NAVY, fontSize: 14, fontWeight: '700' },
+  submitBtn:  { flex: 1, paddingVertical: 14, borderRadius: 24, backgroundColor: RED, alignItems: 'center' },
+  submitBtnDisabled: { opacity: 0.45 },
+  submitBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
 });
 
 export default FlagRideModal;

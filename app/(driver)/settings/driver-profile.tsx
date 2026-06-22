@@ -1,6 +1,5 @@
-import React from 'react';
-import ProfileScreen from '@/src/screens/ProfileScreen';
+import StudentVerificationScreen from '@/components/StudentVerificationScreen';
 
 export default function DriverProfileRoute() {
-  return <ProfileScreen />;
+  return <StudentVerificationScreen fallbackRoute="/(driver)/settings" />;
 }

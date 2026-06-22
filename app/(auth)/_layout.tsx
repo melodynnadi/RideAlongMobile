@@ -5,12 +5,14 @@ export default function AuthLayout() {
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: '#F8FAFC' },
+        contentStyle: { backgroundColor: '#FBFAF7' },
         animation: 'slide_from_right',
+        gestureEnabled: true,
       }}
     >
       <Stack.Screen name="sign-in" />
       <Stack.Screen name="sign-up" />
+      <Stack.Screen name="driver-signup" />
       <Stack.Screen name="select-role" />
       <Stack.Screen name="verify-email" />
       <Stack.Screen name="forgot-password" />

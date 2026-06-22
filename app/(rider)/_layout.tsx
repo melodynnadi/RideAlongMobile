@@ -1,8 +1,6 @@
-import { Tabs } from 'expo-router';
+import { router, Tabs } from 'expo-router';
 import React, { useEffect } from 'react';
-import { Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 
 import { HapticTab } from '@/components/HapticTab';
 import TabBarBackground from '@/components/ui/TabBarBackground';
@@ -38,12 +36,7 @@ export default function RiderTabLayout() {
         tabBarButton: HapticTab,
         tabBarBackground: TabBarBackground,
         tabBarStyle: {
-          backgroundColor: '#101826',
-          borderTopColor: '#1E2D45',
-          borderTopWidth: 1,
-          height: Platform.OS === 'ios' ? 90 : 80,
-          paddingBottom: Platform.OS === 'ios' ? 25 : 15,
-          paddingTop: 10,
+          display: 'none',
         },
       }}
     >
@@ -57,8 +50,8 @@ export default function RiderTabLayout() {
       <Tabs.Screen
         name="book"
         options={{
-          title: 'Book',
-          tabBarIcon: ({ color, size }) => <Ionicons name="car" size={size || 24} color={color} />,
+          title: 'Request',
+          tabBarIcon: ({ color, size }) => <Ionicons name="add-circle-outline" size={size || 24} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -86,13 +79,17 @@ export default function RiderTabLayout() {
         }}
       />
       {/* Hide all non-tab screens from the tab bar */}
-      <Tabs.Screen name="available-rides" options={{ href: null }} />
+      <Tabs.Screen name="available-rides" options={{ href: null, title: 'Rides' }} />
+      <Tabs.Screen name="booking-confirmed" options={{ href: null }} />
+      <Tabs.Screen name="trip-in-progress" options={{ href: null }} />
+      <Tabs.Screen name="rate-trip" options={{ href: null }} />
       <Tabs.Screen name="settings" options={{ href: null, tabBarStyle: { display: 'none' } }} />
       <Tabs.Screen name="legal" options={{ href: null }} />
       <Tabs.Screen name="legal/privacy" options={{ href: null }} />
       <Tabs.Screen name="legal/terms" options={{ href: null }} />
       <Tabs.Screen name="messages/[chatId]" options={{ href: null }} />
       <Tabs.Screen name="ride/[id]" options={{ href: null }} />
+      <Tabs.Screen name="trip/[confirmedRideId]" options={{ href: null }} />
       <Tabs.Screen name="driver/[driverId]" options={{ href: null }} />
     </Tabs>
   );

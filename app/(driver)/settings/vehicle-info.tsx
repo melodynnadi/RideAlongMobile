@@ -1,13 +1,34 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, ActivityIndicator, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  TextInput,
+  ActivityIndicator,
+  Alert,
+  StatusBar,
+  Image,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, Car, Palette, Hash, Users, Save, Edit2 } from 'lucide-react-native';
-import { Card } from '@/components/ui/Card';
-import { useTheme } from '@/hooks/useTheme';
-import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as FileSystem from 'expo-file-system/legacy';
+
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
-import { firebaseAuth, firestore } from '@/constants/services';
+import { collection, doc, getDoc, getDocs, limit, query, setDoc, where } from 'firebase/firestore';
+import { getDownloadURL, ref as storageRef } from 'firebase/storage';
+import { firebaseAuth, firebaseConfig, firestore, storage } from '@/constants/services';
+
+import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
+
+const NAVY   = '#15233A';
+const ORANGE = '#DE5D20';
+const BG     = '#FBFAF7';
+const BORDER = '#E5E0D8';
+const MUTED  = '#8B94A6';
 
 interface VehicleInfo {
   make?: string;
@@ -16,75 +37,142 @@ interface VehicleInfo {
   color?: string;
   licensePlate?: string;
   seats?: number;
+  amenities?: string[];
+  imageUrl?: string;
+  imagePath?: string;
 }
 
+const AMENITY_OPTIONS = ['A/C', 'USB charging', 'Trunk space', 'Aux jack', 'Bluetooth', 'Pet-friendly', 'Bike rack'];
+const SEAT_OPTIONS = [1, 2, 3, 4, 5, 6];
+
+async function uploadVehicleImageFile(sourceUri: string, uid: string, idToken: string) {
+  const jpegFormat = (ImageManipulator as any)?.SaveFormat?.JPEG || 'jpeg';
+  const resized = await ImageManipulator.manipulateAsync(
+    sourceUri,
+    [{ resize: { width: 1200 } }],
+    { compress: 0.78, format: jpegFormat as any },
+  );
+
+  const bucket = firebaseConfig.storageBucket;
+  if (!bucket) throw new Error('Firebase Storage is not configured.');
+
+  const imagePath = 'vehicleImages/' + uid + '/' + Date.now() + '_vehicle.jpg';
+  const uploadUrl =
+    'https://firebasestorage.googleapis.com/v0/b/' +
+    encodeURIComponent(bucket) +
+    '/o?name=' +
+    encodeURIComponent(imagePath);
+
+  const response = await FileSystem.uploadAsync(uploadUrl, resized.uri, {
+    httpMethod: 'POST',
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+    headers: {
+      Authorization: 'Firebase ' + idToken,
+      'Content-Type': 'image/jpeg',
+    },
+  });
+
+  if (response.status < 200 || response.status >= 300) {
+    let message = 'Vehicle image upload failed.';
+    try {
+      const body = JSON.parse(response.body);
+      message = body?.error?.message || body?.error || message;
+    } catch {}
+    throw new Error(message);
+  }
+
+  const imageUrl = await getDownloadURL(storageRef(storage, imagePath));
+  return { imageUrl, imagePath };
+}
 export default function VehicleInfoScreen() {
-  const theme = useTheme();
+  const { goBack } = useReturnNavigation('/(driver)/settings');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [editMode, setEditMode] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [vehicleInfo, setVehicleInfo] = useState<VehicleInfo>({
-    make: '',
-    model: '',
-    year: '',
-    color: '',
-    licensePlate: '',
-    seats: 4,
+    make: '', model: '', year: '', color: '', licensePlate: '', seats: 3, amenities: [],
   });
+  const [driverData, setDriverData] = useState<any>(null);
+  const [pendingImageUri, setPendingImageUri] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
-      if (user) {
-        await loadVehicleInfo(user.uid);
-      } else {
-        setLoading(false);
-      }
+      if (user) await loadVehicleInfo(user.uid);
+      else setLoading(false);
     });
-
-    return () => unsubscribe();
+    return unsubscribe;
   }, []);
 
   const loadVehicleInfo = async (uid: string) => {
     try {
       setLoading(true);
-      
-      // Try to get vehicle info from drivers collection
       const driverRef = doc(firestore, 'drivers', uid);
       const driverSnap = await getDoc(driverRef);
-      
-      if (driverSnap.exists()) {
-        const driverData = driverSnap.data();
-        const vehicleData = driverData.vehicleInfo || {};
-        
-        // If vehicle info is not in driver doc, try to get from application
-        if (!vehicleData.make && driverData.applicationId) {
-          const appRef = doc(firestore, 'driverApplications', driverData.applicationId);
-          const appSnap = await getDoc(appRef);
-          
-          if (appSnap.exists()) {
-            const appData = appSnap.data();
-            const appVehicleInfo = appData.vehicleInfo || {};
-            
-            setVehicleInfo({
-              make: appVehicleInfo.make || '',
-              model: appVehicleInfo.model || '',
-              year: appVehicleInfo.year || '',
-              color: appVehicleInfo.color || appVehicleInfo.colour || '',
-              licensePlate: appVehicleInfo.licensePlate || appVehicleInfo.license || '',
-              seats: appVehicleInfo.seats || 4,
-            });
-          }
-        } else {
-          setVehicleInfo({
-            make: vehicleData.make || '',
-            model: vehicleData.model || '',
-            year: vehicleData.year || '',
-            color: vehicleData.color || vehicleData.colour || '',
-            licensePlate: vehicleData.licensePlate || vehicleData.license || '',
-            seats: vehicleData.seats || 4,
-          });
+      const data = driverSnap.exists() ? driverSnap.data() : {};
+      let applicationData: any = {};
+
+      if (data.applicationId) {
+        const applicationSnap = await getDoc(
+          doc(firestore, 'driverApplications', String(data.applicationId)),
+        );
+        if (applicationSnap.exists()) applicationData = applicationSnap.data();
+      }
+      if (!Object.keys(applicationData).length) {
+        try {
+          const uidApplication = await getDoc(doc(firestore, 'driverApplications', uid));
+          if (uidApplication.exists()) applicationData = uidApplication.data();
+        } catch {}
+      }
+
+      if (!Object.keys(applicationData).length) {
+        const email = firebaseAuth.currentUser?.email;
+        const lookups = [
+          query(collection(firestore, 'driverApplications'), where('userUid', '==', uid), limit(1)),
+          ...(email
+            ? [query(
+                collection(firestore, 'driverApplications'),
+                where('personalInfo.email', '==', email),
+                limit(1),
+              )]
+            : []),
+        ];
+
+        for (const lookup of lookups) {
+          try {
+            const snapshot = await getDocs(lookup);
+            if (!snapshot.empty) {
+              applicationData = snapshot.docs[0].data();
+              break;
+            }
+          } catch {}
         }
       }
+
+      const applicationVehicle = applicationData.vehicleInfo || {};
+      const storedVehicle = data.vehicleInfo || {};
+      const vd = { ...applicationVehicle, ...storedVehicle };
+      const makeModelParts = String(vd.makeModel || '').trim().split(/\s+/).filter(Boolean);
+      const makeModelHasYear = /^\d{4}$/.test(makeModelParts[0] || '');
+      const parsedYear = makeModelHasYear ? makeModelParts[0] : '';
+      const parsedMake = makeModelParts[makeModelHasYear ? 1 : 0] || '';
+      const parsedModel = makeModelParts.slice(makeModelHasYear ? 2 : 1).join(' ');
+
+      setDriverData({ ...applicationData, ...data, vehicleInfo: vd });
+      setVehicleInfo({
+        make: vd.make || parsedMake,
+        model: vd.model || parsedModel,
+        year: String(vd.year || parsedYear),
+        color: vd.color || vd.colour || '',
+        licensePlate: vd.licensePlate || vd.license || '',
+        seats: Number(vd.seats || 3),
+        amenities: Array.isArray(vd.amenities) ? vd.amenities : [],
+        imageUrl:
+          vd.imageUrl ||
+          vd.vehicleImageUrl ||
+          (Array.isArray(vd.imageList) ? vd.imageList[0] : vd.imageList) ||
+          '',
+        imagePath: vd.imagePath || '',
+      });
     } catch (error) {
       console.error('Error loading vehicle info:', error);
       Alert.alert('Error', 'Failed to load vehicle information');
@@ -92,366 +180,382 @@ export default function VehicleInfoScreen() {
       setLoading(false);
     }
   };
-
   const saveVehicleInfo = async () => {
     const user = firebaseAuth.currentUser;
     if (!user) return;
 
     try {
       setSaving(true);
-      
-      const driverRef = doc(firestore, 'drivers', user.uid);
-      const payload = {
-        vehicleInfo: {
-          make: vehicleInfo.make?.trim() || '',
-          model: vehicleInfo.model?.trim() || '',
-          year: vehicleInfo.year?.trim() || '',
-          color: vehicleInfo.color?.trim() || '',
-          licensePlate: vehicleInfo.licensePlate?.trim() || '',
-          seats: vehicleInfo.seats || 4,
-        },
-      };
+      let imageUrl = vehicleInfo.imageUrl || '';
+      let imagePath = vehicleInfo.imagePath || '';
 
-      try {
-        await updateDoc(driverRef, payload);
-      } catch {
-        await setDoc(driverRef, payload, { merge: true });
+      if (pendingImageUri) {
+        const uploaded = await uploadVehicleImageFile(
+          pendingImageUri,
+          user.uid,
+          await user.getIdToken(),
+        );
+        imageUrl = uploaded.imageUrl;
+        imagePath = uploaded.imagePath;
       }
 
-      Alert.alert('Success', 'Vehicle information updated successfully');
-      setEditMode(false);
+      const year = vehicleInfo.year?.trim() || '';
+      const make = vehicleInfo.make?.trim() || '';
+      const model = vehicleInfo.model?.trim() || '';
+      const licensePlate = vehicleInfo.licensePlate?.trim() || '';
+      const savedVehicle = {
+        ...(driverData?.vehicleInfo || {}),
+        makeModel: [year, make, model].filter(Boolean).join(' '),
+        make,
+        model,
+        year,
+        color: vehicleInfo.color?.trim() || '',
+        license: licensePlate,
+        licensePlate,
+        seats: vehicleInfo.seats || 3,
+        amenities: vehicleInfo.amenities || [],
+        imageUrl,
+        imagePath,
+      };
+
+      await setDoc(
+        doc(firestore, 'drivers', user.uid),
+        { vehicleInfo: savedVehicle },
+        { merge: true },
+      );
+
+      setVehicleInfo(savedVehicle);
+      setDriverData((current: any) => ({ ...(current || {}), vehicleInfo: savedVehicle }));
+      setPendingImageUri(null);
+      Alert.alert('Saved', 'Vehicle information and amenities were updated.');
     } catch (error: any) {
-      console.error('Error saving vehicle info:', error);
       Alert.alert('Error', error?.message || 'Failed to save vehicle information');
     } finally {
       setSaving(false);
     }
   };
 
+  const chooseVehicleImage = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Photo access needed', 'Allow photo access to choose a vehicle image.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.9,
+      });
+      const selectedUri = result.canceled ? null : result.assets[0]?.uri;
+      if (!selectedUri) return;
+
+      const user = firebaseAuth.currentUser;
+      if (!user) throw new Error('You must be signed in to update your vehicle photo.');
+
+      setPendingImageUri(selectedUri);
+      setUploadingImage(true);
+
+      const { imageUrl, imagePath } = await uploadVehicleImageFile(
+        selectedUri,
+        user.uid,
+        await user.getIdToken(),
+      );
+
+      const savedVehicle = {
+        ...(driverData?.vehicleInfo || {}),
+        ...vehicleInfo,
+        imageUrl,
+        imagePath,
+        amenities: vehicleInfo.amenities || [],
+      };
+      await setDoc(
+        doc(firestore, 'drivers', user.uid),
+        { vehicleInfo: savedVehicle },
+        { merge: true },
+      );
+
+      setVehicleInfo(savedVehicle);
+      setDriverData((current: any) => ({ ...(current || {}), vehicleInfo: savedVehicle }));
+      setPendingImageUri(null);
+    } catch (error: any) {
+      Alert.alert('Image unavailable', error?.message || 'Could not save that vehicle image.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+  const toggleAmenity = (a: string) => {
+    setVehicleInfo((prev) => ({
+      ...prev,
+      amenities: prev.amenities?.includes(a)
+        ? prev.amenities.filter((x) => x !== a)
+        : [...(prev.amenities || []), a],
+    }));
+  };
+
+  const displayName = `${vehicleInfo.year || ''} ${vehicleInfo.make || ''} ${vehicleInfo.model || ''}`.trim() || 'Your Vehicle';
+
+  const vehicleImage = pendingImageUri || vehicleInfo.imageUrl || null;
   if (loading) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: '#F8FAFC' }]}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.colors.primary} />
-        </View>
+      <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
+        <View style={s.loadingWrap}><ActivityIndicator size="large" color={ORANGE} /></View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: '#F8FAFC' }]}>
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => router.canGoBack() ? router.back() : router.push('/settings')}
-        >
-          <ArrowLeft size={24} color={theme.colors.secondary} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.colors.secondary }]}>
-          Vehicle Information
-        </Text>
-        {!editMode && (
-          <TouchableOpacity 
-            style={styles.editButton}
-            onPress={() => setEditMode(true)}
-          >
-            <Edit2 size={20} color={theme.colors.primary} />
-          </TouchableOpacity>
-        )}
-      </View>
+    <View style={s.root}>
+      <StatusBar barStyle="dark-content" />
+      <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.content}>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        <Card style={styles.infoCard}>
-          {/* Make */}
-          <View style={styles.infoItem}>
-            <View style={[styles.iconContainer, { backgroundColor: theme.colors.primary + '20' }]}>
-              <Car size={20} color={theme.colors.primary} />
-            </View>
-            <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>Make</Text>
-              {editMode ? (
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g., Toyota, Honda, Ford"
-                  value={vehicleInfo.make}
-                  onChangeText={(text) => setVehicleInfo({ ...vehicleInfo, make: text })}
-                />
-              ) : (
-                <Text style={[styles.infoValue, { color: theme.colors.secondary }]}>
-                  {vehicleInfo.make || 'Not specified'}
-                </Text>
-              )}
-            </View>
-          </View>
-
-          {/* Model */}
-          <View style={styles.infoItem}>
-            <View style={[styles.iconContainer, { backgroundColor: theme.colors.primary + '20' }]}>
-              <Car size={20} color={theme.colors.primary} />
-            </View>
-            <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>Model</Text>
-              {editMode ? (
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g., Camry, Civic, F-150"
-                  value={vehicleInfo.model}
-                  onChangeText={(text) => setVehicleInfo({ ...vehicleInfo, model: text })}
-                />
-              ) : (
-                <Text style={[styles.infoValue, { color: theme.colors.secondary }]}>
-                  {vehicleInfo.model || 'Not specified'}
-                </Text>
-              )}
-            </View>
-          </View>
-
-          {/* Year */}
-          <View style={styles.infoItem}>
-            <View style={[styles.iconContainer, { backgroundColor: '#F0F9FF' }]}>
-              <Hash size={20} color="#3B82F6" />
-            </View>
-            <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>Year</Text>
-              {editMode ? (
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g., 2020"
-                  value={vehicleInfo.year}
-                  onChangeText={(text) => setVehicleInfo({ ...vehicleInfo, year: text })}
-                  keyboardType="numeric"
-                />
-              ) : (
-                <Text style={[styles.infoValue, { color: '#64748B' }]}>
-                  {vehicleInfo.year || 'Not specified'}
-                </Text>
-              )}
-            </View>
-          </View>
-
-          <View style={styles.divider} />
-
-          {/* Color */}
-          <View style={styles.infoItem}>
-            <View style={[styles.iconContainer, { backgroundColor: '#FEF3E2' }]}>
-              <Palette size={20} color="#F97316" />
-            </View>
-            <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>Color</Text>
-              {editMode ? (
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g., Silver, Black, White"
-                  value={vehicleInfo.color}
-                  onChangeText={(text) => setVehicleInfo({ ...vehicleInfo, color: text })}
-                />
-              ) : (
-                <Text style={[styles.infoValue, { color: '#64748B' }]}>
-                  {vehicleInfo.color || 'Not specified'}
-                </Text>
-              )}
-            </View>
-          </View>
-
-          {/* License Plate */}
-          <View style={styles.infoItem}>
-            <View style={[styles.iconContainer, { backgroundColor: '#F8FAFC' }]}>
-              <Hash size={20} color="#64748B" />
-            </View>
-            <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>License Plate</Text>
-              {editMode ? (
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g., ABC1234"
-                  value={vehicleInfo.licensePlate}
-                  onChangeText={(text) => setVehicleInfo({ ...vehicleInfo, licensePlate: text })}
-                  autoCapitalize="characters"
-                />
-              ) : (
-                <Text style={[styles.infoValue, { color: '#64748B' }]}>
-                  {vehicleInfo.licensePlate || 'Not specified'}
-                </Text>
-              )}
-            </View>
-          </View>
-
-          {/* Seats */}
-          <View style={styles.infoItem}>
-            <View style={[styles.iconContainer, { backgroundColor: '#F3E8FF' }]}>
-              <Users size={20} color="#8B5CF6" />
-            </View>
-            <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>Passenger Seats</Text>
-              {editMode ? (
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g., 4"
-                  value={vehicleInfo.seats?.toString() || '4'}
-                  onChangeText={(text) => setVehicleInfo({ ...vehicleInfo, seats: parseInt(text) || 4 })}
-                  keyboardType="numeric"
-                />
-              ) : (
-                <Text style={[styles.infoValue, { color: '#64748B' }]}>
-                  {vehicleInfo.seats || 'Not specified'}
-                </Text>
-              )}
-            </View>
-          </View>
-        </Card>
-
-        {editMode && (
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity 
-              style={[styles.cancelButton, { borderColor: theme.colors.secondary + '30' }]}
-              onPress={() => {
-                setEditMode(false);
-                if (firebaseAuth.currentUser) {
-                  loadVehicleInfo(firebaseAuth.currentUser.uid);
-                }
-              }}
+          {/* Header */}
+          <View style={s.hdr}>
+            <TouchableOpacity
+              style={s.backBtn}
+              onPress={goBack}
             >
-              <Text style={[styles.cancelButtonText, { color: theme.colors.secondary }]}>
-                Cancel
+              <Ionicons name="chevron-back" size={22} color={NAVY} />
+            </TouchableOpacity>
+            <Text style={s.hdrTitle}>Vehicle</Text>
+            <View style={{ width: 40 }} />
+          </View>
+
+          {/* Vehicle hero card */}
+          <View style={s.heroCard}>
+            <TouchableOpacity
+              style={s.vehicleImageButton}
+              onPress={chooseVehicleImage}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Change vehicle photo"
+            >
+              {vehicleImage ? (
+                <Image source={{ uri: vehicleImage }} style={s.vehicleImage} resizeMode="cover" />
+              ) : (
+                <View style={s.vehiclePlaceholder}>
+                  <Ionicons name="car-outline" size={44} color={MUTED} />
+                </View>
+              )}
+              <View style={s.editImageBadge}>
+                {uploadingImage ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="camera" size={16} color="#FFF" />}
+              </View>
+            </TouchableOpacity>
+            <Text style={s.heroName}>{displayName}</Text>
+            {vehicleInfo.color ? <Text style={s.heroSub}>{vehicleInfo.color}</Text> : null}
+            <TouchableOpacity onPress={chooseVehicleImage} disabled={uploadingImage} activeOpacity={0.75}>
+              <Text style={s.changePhotoText}>
+                {vehicleImage ? 'Change vehicle photo' : 'Add vehicle photo'}
               </Text>
             </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={[styles.saveButton, { backgroundColor: theme.colors.primary }]}
-              onPress={saveVehicleInfo}
-              disabled={saving}
-            >
-              {saving ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <>
-                  <Save size={20} color="white" />
-                  <Text style={styles.saveButtonText}>Save</Text>
-                </>
-              )}
-            </TouchableOpacity>
           </View>
-        )}
-      </ScrollView>
-    </SafeAreaView>
+
+          {/* BASICS */}
+          <Text style={s.sectionLabel}>BASICS</Text>
+          <View style={s.sectionCard}>
+            <View style={s.fieldRow}>
+              <View style={[s.fieldWrap, { flex: 0.4 }]}>
+                <Text style={s.fieldLabel}>YEAR</Text>
+                <TextInput
+                  style={s.input}
+                  value={vehicleInfo.year}
+                  onChangeText={(t) => setVehicleInfo((p) => ({ ...p, year: t }))}
+                  placeholder="2021"
+                  placeholderTextColor={MUTED}
+                  keyboardType="numeric"
+                  maxLength={4}
+                />
+              </View>
+              <View style={[s.fieldWrap, { flex: 0.3 }]}>
+                <Text style={s.fieldLabel}>MAKE</Text>
+                <TextInput
+                  style={s.input}
+                  value={vehicleInfo.make}
+                  onChangeText={(t) => setVehicleInfo((p) => ({ ...p, make: t }))}
+                  placeholder="Honda"
+                  placeholderTextColor={MUTED}
+                />
+              </View>
+              <View style={[s.fieldWrap, { flex: 0.3 }]}>
+                <Text style={s.fieldLabel}>MODEL</Text>
+                <TextInput
+                  style={s.input}
+                  value={vehicleInfo.model}
+                  onChangeText={(t) => setVehicleInfo((p) => ({ ...p, model: t }))}
+                  placeholder="Civic"
+                  placeholderTextColor={MUTED}
+                />
+              </View>
+            </View>
+            <View style={s.fieldWrap}>
+              <Text style={s.fieldLabel}>LICENSE PLATE</Text>
+              <TextInput
+                style={s.input}
+                value={vehicleInfo.licensePlate}
+                onChangeText={(t) => setVehicleInfo((p) => ({ ...p, licensePlate: t }))}
+                placeholder="TX 8RZP-129"
+                placeholderTextColor={MUTED}
+                autoCapitalize="characters"
+              />
+            </View>
+            <View style={s.fieldWrap}>
+              <Text style={s.fieldLabel}>COLOR</Text>
+              <TextInput
+                style={s.input}
+                value={vehicleInfo.color}
+                onChangeText={(t) => setVehicleInfo((p) => ({ ...p, color: t }))}
+                placeholder="Silver"
+                placeholderTextColor={MUTED}
+              />
+            </View>
+          </View>
+
+          {/* SEATS AVAILABLE */}
+          <Text style={s.sectionLabel}>SEATS AVAILABLE</Text>
+          <View style={s.sectionCard}>
+            <View style={s.pillRow}>
+              {SEAT_OPTIONS.map((n) => (
+                <TouchableOpacity
+                  key={n}
+                  style={[s.seatPill, vehicleInfo.seats === n && s.seatPillActive]}
+                  onPress={() => setVehicleInfo((p) => ({ ...p, seats: n }))}
+                >
+                  <Text style={[s.seatPillText, vehicleInfo.seats === n && s.seatPillTextActive]}>{n}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {/* AMENITIES */}
+          <Text style={s.sectionLabel}>AMENITIES</Text>
+          <View style={s.sectionCard}>
+            <View style={s.chipsWrap}>
+              {AMENITY_OPTIONS.map((a) => {
+                const active = vehicleInfo.amenities?.includes(a);
+                return (
+                  <TouchableOpacity
+                    key={a}
+                    style={[s.chip, active && s.chipActive]}
+                    onPress={() => toggleAmenity(a)}
+                  >
+                    <Text style={[s.chipText, active && s.chipTextActive]}>{a}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+          {/* Save */}
+          <TouchableOpacity style={s.saveBtn} onPress={saveVehicleInfo} disabled={saving || uploadingImage}>
+            {saving ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={s.saveBtnText}>Save</Text>
+            )}
+          </TouchableOpacity>
+
+          <View style={{ height: 24 }} />
+        </ScrollView>
+      </SafeAreaView>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
+const s = StyleSheet.create({
+  root:        { flex: 1, backgroundColor: BG },
+  safe:        { flex: 1 },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  content:     { paddingBottom: 40 },
+
+  hdr:       { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10 },
+  backBtn:   { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  hdrTitle:  { color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+
+  heroCard: {
+    marginHorizontal: 20,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: '#F3EFE8',
+    padding: 24,
     alignItems: 'center',
+    marginBottom: 24,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    paddingBottom: 8,
+  vehicleImageButton: {
+    width: '100%', aspectRatio: 16 / 9, marginBottom: 14,
+    borderRadius: 12, overflow: 'visible',
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'white',
-    justifyContent: 'center',
-    alignItems: 'center',
+  vehicleImage: {
+    width: '100%', height: '100%', borderRadius: 12,
+    backgroundColor: '#EDE9E2',
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    flex: 1,
-    marginLeft: 12,
+  vehiclePlaceholder: {
+    width: '100%', height: '100%', borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#EDE9E2', borderWidth: 1, borderColor: BORDER,
   },
-  editButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'white',
-    justifyContent: 'center',
-    alignItems: 'center',
+  editImageBadge: {
+    position: 'absolute', right: 10, bottom: 10,
+    width: 34, height: 34, borderRadius: 17,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: ORANGE, borderWidth: 2, borderColor: '#FFF',
   },
-  content: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  infoCard: {
-    backgroundColor: 'white',
-    padding: 16,
-    marginBottom: 16,
-  },
-  infoItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+  heroName:    { color: NAVY, fontSize: 18, fontWeight: '700', textAlign: 'center' },
+  heroSub:     { color: MUTED, fontSize: 14, marginTop: 4, textAlign: 'center' },
+  changePhotoText: { color: ORANGE, fontSize: 13, fontWeight: '700', marginTop: 10 },
+
+  sectionLabel: { marginHorizontal: 20, marginBottom: 8, marginTop: 4, color: MUTED, fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
+  sectionCard: {
+    marginHorizontal: 20,
     marginBottom: 20,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: '#FFFFFF',
+    padding: 16,
+    shadowColor: NAVY,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 1,
   },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  infoContent: {
-    flex: 1,
-  },
-  infoLabel: {
-    fontSize: 14,
-    color: '#64748B',
-    marginBottom: 4,
-  },
-  infoValue: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
+  fieldRow:  { flexDirection: 'row', gap: 8 },
+  fieldWrap: { marginBottom: 12 },
+  fieldLabel:{ color: MUTED, fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 6 },
   input: {
-    fontSize: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: NAVY,
+    fontSize: 14,
     fontWeight: '500',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 8,
-    padding: 12,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#FAFAF8',
   },
-  divider: {
-    height: 1,
-    backgroundColor: '#E2E8F0',
-    marginVertical: 12,
-  },
-  buttonContainer: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 32,
-  },
-  cancelButton: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: 'center',
-    backgroundColor: 'white',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  saveButton: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 12,
-    flexDirection: 'row',
+
+  pillRow:        { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  seatPill:       { height: 40, minWidth: 48, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FAFAF8', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
+  seatPillActive: { backgroundColor: NAVY, borderColor: NAVY },
+  seatPillText:   { color: MUTED, fontSize: 14, fontWeight: '600' },
+  seatPillTextActive: { color: '#FFFFFF' },
+
+  chipsWrap:    { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip:         { borderRadius: 16, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FAFAF8', paddingHorizontal: 12, paddingVertical: 8 },
+  chipActive:   { backgroundColor: NAVY, borderColor: NAVY },
+  chipText:     { color: MUTED, fontSize: 13, fontWeight: '600' },
+  chipTextActive: { color: '#FFFFFF' },
+
+  saveBtn: {
+    marginHorizontal: 20,
+    marginTop: 8,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: ORANGE,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
   },
-  saveButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
-  },
+  saveBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
 });

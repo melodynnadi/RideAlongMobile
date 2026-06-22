@@ -1,7 +1,8 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { firebaseAuth, firestore } from '@/constants/services';
+import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { updateProfile } from 'firebase/auth';
 
 export type AvatarUploadResult = { canceled: true } | { canceled: false; avatarUrl: string; photoPath: string };
 
@@ -36,7 +37,7 @@ export async function pickAndUploadAvatar(): Promise<AvatarUploadResult> {
   );
   if (!manipulated.base64) throw new Error('Missing base64');
 
-  const apiBase = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4001';
+  const apiBase = getApiBaseUrl();
   const idToken = await user.getIdToken();
   const resp = await fetch(`${apiBase}/api/upload-avatar`, {
     method: 'POST',
@@ -46,15 +47,16 @@ export async function pickAndUploadAvatar(): Promise<AvatarUploadResult> {
     },
     body: JSON.stringify({ base64: manipulated.base64, oldPhotoPath }),
   });
-  if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
-  const json = await resp.json();
+  const json = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(json.error || `Upload failed: ${resp.status}`);
   if (!json.success) throw new Error(json.error || 'Upload failed');
 
-  await setDoc(
-    userRef,
-    { avatarUrl: json.photoURL, photoPath: json.photoPath, updatedAt: serverTimestamp() },
-    { merge: true }
-  );
+  const avatarUpdate = { avatarUrl: json.photoURL, photoURL: json.photoURL, photoPath: json.photoPath, updatedAt: serverTimestamp() };
+  await Promise.all([
+    setDoc(userRef, avatarUpdate, { merge: true }),
+    setDoc(doc(firestore, 'users', user.uid), avatarUpdate, { merge: true }),
+    updateProfile(user, { photoURL: json.photoURL }).catch(() => undefined),
+  ]);
 
   return { canceled: false, avatarUrl: json.photoURL, photoPath: json.photoPath };
 }

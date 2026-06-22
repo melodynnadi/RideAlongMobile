@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, ViewProps } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
+import { surfaceShadow } from '@/theme/designSystem';
 
 interface CardProps extends ViewProps {
   variant?: 'default' | 'elevated';
@@ -13,7 +14,7 @@ export function Card({ variant = 'default', style, children, ...props }: CardPro
     const baseStyles = {
       backgroundColor: theme.colors.card,
       borderRadius: theme.borderRadius['2xl'],
-      padding: theme.spacing.md,
+      padding: theme.spacing.lg,
     };
 
     const variantStyles = {
@@ -22,7 +23,9 @@ export function Card({ variant = 'default', style, children, ...props }: CardPro
         borderColor: theme.colors.muted + '20',
       },
       elevated: {
-        ...theme.shadows.md,
+        ...surfaceShadow,
+        borderWidth: 1,
+        borderColor: theme.colors.muted + '18',
       },
     };
 

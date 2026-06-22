@@ -1,8 +1,9 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { View, Text, Modal, TouchableOpacity, TextInput, StyleSheet, ScrollView, Platform, Keyboard } from 'react-native';
-import { X, Calendar, Clock, MapPin, DollarSign, Users } from 'lucide-react-native';
+import { X, Calendar, MapPin } from 'lucide-react-native';
 import { TimeBucket, type RideFilterOptions, getDefaultFilters } from '@/utils/rideFilters';
 import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
+import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
 
 type Suggestion = { description: string; place_id: string; mainText: string; secondaryText: string };
 
@@ -22,6 +23,10 @@ export function RideFiltersModal({
   showSeatsFilter = false
 }: RideFiltersModalProps) {
   const [filters, setFilters] = useState<RideFilterOptions>(initialFilters);
+
+  useEffect(() => {
+    if (visible) setFilters(initialFilters);
+  }, [initialFilters, visible]);
 
   // Autocomplete state for pickup and dropoff
   const [pickupSuggestions, setPickupSuggestions] = useState<Suggestion[]>([]);
@@ -94,23 +99,27 @@ export function RideFiltersModal({
       transparent={true}
       onRequestClose={onClose}
     >
-      <View style={styles.modalOverlay}>
+      <KeyboardAwareModalView style={styles.modalOverlay}>
         <View style={styles.modalContent}>
+          <View style={styles.dragHandle} />
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>Filter Rides</Text>
+            <View style={styles.headerCopy}>
+              <Text style={styles.headerTitle}>Filter rides</Text>
+              <Text style={styles.headerSubtitle}>Narrow results by trip details</Text>
+            </View>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <X size={24} color="#2D3748" />
+              <X size={20} color="#15233A" />
             </TouchableOpacity>
           </View>
 
           {/* Scrollable Content */}
-          <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {/* Date Filter */}
             <View style={styles.filterGroup}>
               <Text style={styles.filterLabel}>Date</Text>
               <View style={styles.inputContainer}>
-                <Calendar size={20} color="#718096" style={styles.inputIcon} />
+                <Calendar size={19} color="#8B94A6" style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
                   placeholder="YYYY-MM-DD"
@@ -124,7 +133,7 @@ export function RideFiltersModal({
 
             {/* Time of Day Filter */}
             <View style={styles.filterGroup}>
-              <Text style={styles.filterLabel}>Time of Day</Text>
+              <Text style={styles.filterLabel}>Time of day</Text>
               <View style={styles.timeBucketContainer}>
                 <TouchableOpacity
                   style={[
@@ -220,9 +229,9 @@ export function RideFiltersModal({
 
             {/* Pickup Location */}
             <View style={[styles.filterGroup, { zIndex: 12 }]}>
-              <Text style={styles.filterLabel}>Pickup Location</Text>
+              <Text style={styles.filterLabel}>Pickup location</Text>
               <View style={styles.inputContainer}>
-                <MapPin size={20} color="#718096" style={styles.inputIcon} />
+                <MapPin size={19} color="#8B94A6" style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
                   placeholder="Enter pickup location"
@@ -260,9 +269,9 @@ export function RideFiltersModal({
 
             {/* Dropoff Location */}
             <View style={[styles.filterGroup, { zIndex: 11 }]}>
-              <Text style={styles.filterLabel}>Dropoff Location</Text>
+              <Text style={styles.filterLabel}>Destination</Text>
               <View style={styles.inputContainer}>
-                <MapPin size={20} color="#718096" style={styles.inputIcon} />
+                <MapPin size={19} color="#8B94A6" style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
                   placeholder="Enter dropoff location"
@@ -300,7 +309,7 @@ export function RideFiltersModal({
 
             {/* Price Range */}
             <View style={styles.filterGroup}>
-              <Text style={styles.filterLabel}>Price Range</Text>
+              <Text style={styles.filterLabel}>Price per seat</Text>
               <View style={styles.priceRangeContainer}>
                 <View style={styles.priceInputWrapper}>
                   <Text style={styles.priceCurrency}>$</Text>
@@ -335,7 +344,7 @@ export function RideFiltersModal({
             {/* Seats Filter (only for riders) */}
             {showSeatsFilter && (
               <View style={styles.filterGroup}>
-                <Text style={styles.filterLabel}>Number of Seats</Text>
+                <Text style={styles.filterLabel}>Seats needed</Text>
                 <View style={styles.seatsContainer}>
                   <TouchableOpacity
                     style={[
@@ -377,16 +386,16 @@ export function RideFiltersModal({
           {/* Footer */}
           <View style={styles.footer}>
             <TouchableOpacity style={styles.clearButton} onPress={handleClearAll}>
-              <Text style={styles.clearButtonText}>Clear All</Text>
+              <Text style={styles.clearButtonText}>Reset</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.applyButton} onPress={handleApply}>
               <Text style={styles.applyButtonText}>
-                Apply {activeFilterCount() > 0 && `(${activeFilterCount()})`}
+                Show rides {activeFilterCount() > 0 && `(${activeFilterCount()})`}
               </Text>
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardAwareModalView>
     </Modal>
   );
 }
@@ -394,75 +403,110 @@ export function RideFiltersModal({
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(15, 23, 42, 0.38)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '90%',
+    backgroundColor: '#FBFAF7',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: '92%',
+    overflow: 'hidden',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
+        shadowOpacity: 0.14,
+        shadowRadius: 18,
       },
       android: {
         elevation: 8,
       },
     }),
   },
+  dragHandle: {
+    width: 42,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#D4CEC4',
+    alignSelf: 'center',
+    marginTop: 10,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EDF2F7',
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 18,
+  },
+  headerCopy: {
+    flex: 1,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#2D3748',
+    fontSize: 25,
+    lineHeight: 31,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+    color: '#15233A',
+  },
+  headerSubtitle: {
+    color: '#8B94A6',
+    fontSize: 13,
+    marginTop: 2,
   },
   closeButton: {
-    padding: 4,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E0D8',
   },
   scrollContent: {
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingBottom: 20,
   },
   filterGroup: {
-    marginBottom: 24,
+    marginBottom: 12,
+    padding: 16,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#E5E0D8',
+    backgroundColor: '#FFFFFF',
   },
   filterLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2D3748',
-    marginBottom: 12,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#15233A',
+    marginBottom: 10,
   },
   helperText: {
-    fontSize: 12,
-    color: '#718096',
+    fontSize: 11,
+    color: '#8B94A6',
     marginTop: 6,
   },
   inputContainer: {
+    minHeight: 50,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 8,
-    backgroundColor: '#FFFFFF',
+    borderColor: '#D7DCE3',
+    borderRadius: 14,
+    backgroundColor: '#FCFCFB',
   },
   inputIcon: {
-    marginLeft: 12,
+    marginLeft: 14,
   },
   textInput: {
     flex: 1,
-    padding: 12,
-    fontSize: 16,
-    color: '#2D3748',
+    height: 50,
+    paddingHorizontal: 12,
+    paddingVertical: 0,
+    fontSize: 15,
+    color: '#15233A',
   },
   timeBucketContainer: {
     flexDirection: 'row',
@@ -470,22 +514,24 @@ const styles = StyleSheet.create({
   },
   timeBucketButton: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderWidth: 2,
-    borderColor: '#E2E8F0',
-    borderRadius: 8,
-    backgroundColor: '#FFFFFF',
+    minHeight: 62,
+    paddingVertical: 10,
+    paddingHorizontal: 5,
+    borderWidth: 1,
+    borderColor: '#D7DCE3',
+    borderRadius: 14,
+    backgroundColor: '#FCFCFB',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   timeBucketButtonActive: {
-    borderColor: '#E05E1A',
-    backgroundColor: '#E05E1A',
+    borderColor: '#15233A',
+    backgroundColor: '#15233A',
   },
   timeBucketText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#2D3748',
+    color: '#15233A',
     marginBottom: 2,
     textAlign: 'center',
   },
@@ -494,7 +540,7 @@ const styles = StyleSheet.create({
   },
   timeBucketSubtext: {
     fontSize: 11,
-    color: '#718096',
+    color: '#8B94A6',
     textAlign: 'center',
   },
   timeBucketSubtextActive: {
@@ -507,28 +553,31 @@ const styles = StyleSheet.create({
   },
   priceInputWrapper: {
     flex: 1,
+    minHeight: 50,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 8,
-    backgroundColor: '#FFFFFF',
+    borderColor: '#D7DCE3',
+    borderRadius: 14,
+    backgroundColor: '#FCFCFB',
   },
   priceCurrency: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#718096',
-    marginLeft: 12,
+    color: '#8B94A6',
+    marginLeft: 14,
   },
   priceInput: {
     flex: 1,
-    padding: 12,
-    fontSize: 16,
-    color: '#2D3748',
+    height: 50,
+    paddingHorizontal: 10,
+    paddingVertical: 0,
+    fontSize: 15,
+    color: '#15233A',
   },
   priceSeparator: {
     fontSize: 14,
-    color: '#718096',
+    color: '#8B94A6',
     fontWeight: '500',
   },
   seatsContainer: {
@@ -537,52 +586,59 @@ const styles = StyleSheet.create({
   },
   seatButton: {
     flex: 1,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: '#E2E8F0',
-    borderRadius: 8,
-    backgroundColor: '#FFFFFF',
+    minHeight: 48,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#D7DCE3',
+    borderRadius: 24,
+    backgroundColor: '#FCFCFB',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   seatButtonActive: {
-    borderColor: '#E05E1A',
-    backgroundColor: '#E05E1A',
+    borderColor: '#15233A',
+    backgroundColor: '#15233A',
   },
   seatButtonText: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#2D3748',
+    color: '#15233A',
   },
   seatButtonTextActive: {
     color: '#FFFFFF',
   },
   footer: {
     flexDirection: 'row',
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 18,
     gap: 12,
     borderTopWidth: 1,
-    borderTopColor: '#EDF2F7',
+    borderTopColor: '#E5E0D8',
+    backgroundColor: '#FFFFFF',
   },
   clearButton: {
-    flex: 1,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: '#E2E8F0',
-    borderRadius: 8,
+    minWidth: 104,
+    height: 52,
+    borderWidth: 1,
+    borderColor: '#D7DCE3',
+    borderRadius: 26,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   clearButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#2D3748',
+    color: '#15233A',
   },
   applyButton: {
     flex: 1,
-    padding: 16,
-    borderRadius: 8,
-    backgroundColor: '#E05E1A',
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#DE5D20',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   applyButtonText: {
     fontSize: 16,
@@ -596,9 +652,10 @@ const styles = StyleSheet.create({
     right: 0,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 8,
-    marginTop: 2,
+    borderColor: '#D7DCE3',
+    borderRadius: 14,
+    marginTop: 6,
+    overflow: 'hidden',
     ...Platform.select({
       ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 6 },
       android: { elevation: 6 },
@@ -608,16 +665,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: '#EEEAE3',
   },
   suggestionMainText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#2D3748',
+    color: '#15233A',
   },
   suggestionSecondaryText: {
     fontSize: 13,
-    color: '#718096',
+    color: '#8B94A6',
     marginTop: 1,
   },
 });

@@ -4,20 +4,12 @@ import {
   ActivityIndicator, Alert, Image, Share, Linking, Dimensions,
   RefreshControl, useColorScheme, StatusBar, Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import MapView, { Marker, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
-import { useAppTheme as useThemeContext } from '@/hooks/ThemeContext';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import MapView, { Marker, Circle, PROVIDER_GOOGLE } from '@/components/platform/NativeMaps';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
-import {
-  X, MapPin, User, Star, DollarSign, Share2, Music,
-  Thermometer, MessageCircle, Cigarette, Heart, Flag, Phone,
-} from 'lucide-react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { firestore, firebaseAuth, storage, getApiBaseUrl } from '@/constants/services';
-import { theme } from '@/theme';
 import { listenDriverCompletedRides, ConfirmedRide } from '@/src/services/ridesData';
 import {
   confirmPickup as actionConfirmPickup,
@@ -26,12 +18,9 @@ import {
   flagRide, groupPickup, groupComplete, groupFlag,
 } from '@/src/services/rideActions';
 import { getDownloadURL, ref as storageRef } from 'firebase/storage';
-import DriverRatingModal from '@/components/DriverRatingModal';
 import FlagRideModal from '@/components/FlagRideModal';
 import { Button } from '@/components/ui/Button';
-import { submitRating } from '@/src/services/functions';
-import { computeFilteredAverageRating } from '@/src/services/ratings';
-import { PromotionCard } from '@/components/PromotionCard';
+import { computeFilteredAverageRating, hasUserRatedRide } from '@/src/services/ratings';
 import { PromotionDetailsModal } from '@/components/PromotionDetailsModal';
 import { usePromotions } from '@/hooks/usePromotions';
 import { Promotion } from '@/types';
@@ -44,64 +33,350 @@ import {
   updateDoc, setDoc, addDoc, serverTimestamp, documentId,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { DriverBottomNav } from '@/components/DriverBottomNav';
+import { DriverHomeUtilityBar } from '@/components/reference/DriverReferenceScreens';
 
-// ─── Design Tokens ────────────────────────────────────────────────────────────
+// ─── Design Tokens (rider palette) ───────────────────────────────────────────
+const NAVY   = '#15233A';
+const ORANGE = '#DE5D20';
+const SECONDARY = '#0D1B48';
+const BG     = '#FBFAF7';
+const BORDER = '#E5E0D8';
+const MUTED  = '#8B94A6';
+
 const COLORS = {
-  orange: '#F4621F',
-  orangeLight: '#FF8C4A',
-  orangeDeep: '#E64A12',
-  orangeGlow: 'rgba(244,98,31,0.15)',
-  orangeBorder: 'rgba(244,98,31,0.40)',
+  orange: '#DE5D20',
+  orangeLight: '#F08050',
+  orangeDeep: '#C44D10',
+  orangeGlow: 'rgba(222,93,32,0.12)',
+  orangeBorder: 'rgba(222,93,32,0.28)',
 
-  navy: '#0D1B2A',
+  navy: '#15233A',
   green: '#10B981',
   red: '#EF4444',
   amber: '#F59E0B',
   blue: '#3B82F6',
   violet: '#8B5CF6',
 
-  darkBg: '#080E17',
-  darkBg2: '#0A1628',
-  darkBg3: '#0D1F3C',
-  darkCard: 'rgba(255,255,255,0.07)',
-  darkCardStrong: 'rgba(255,255,255,0.10)',
-  darkInput: 'rgba(255,255,255,0.055)',
-  darkBorder: 'rgba(255,255,255,0.12)',
-  darkText: '#F0F4FF',
-  darkSub: '#7A8FA8',
-
-  lightBg: '#EEF1F7',
-  lightBg2: '#F8FAFC',
-  lightBg3: '#E9EEF8',
-  lightCard: 'rgba(255,255,255,0.88)',
-  lightCardStrong: '#FFFFFF',
-  lightInput: 'rgba(13,27,42,0.045)',
-  lightBorder: 'rgba(13,27,42,0.08)',
-  lightText: '#0D1B2A',
-  lightSub: '#5A6A7E',
+  bg: '#FBFAF7',
+  bg2: '#FFFFFF',
+  bg3: '#F3EFE8',
+  card: '#FFFFFF',
+  cardStrong: '#FFFFFF',
+  input: 'rgba(21,35,58,0.045)',
+  border: '#E5E0D8',
+  text: '#15233A',
+  sub: '#8B94A6',
 };
 
 function useDriverHomeTheme() {
-  const { colors, isDark } = useThemeContext();
-
   return {
-    dark: isDark,
-    bg: colors.bg,
-    bg2: isDark ? COLORS.darkBg2 : COLORS.lightBg2,
-    bg3: isDark ? COLORS.darkBg3 : COLORS.lightBg3,
-    card: colors.bgCard,
-    cardStrong: colors.bgCard,
-    input: colors.bgInput,
-    border: colors.borderMid,
-    text: colors.textPrimary,
-    sub: colors.textSecondary,
-    statusBar: colors.statusBar,
-    blurTint: isDark ? 'dark' as const : 'light' as const,
-    pageGradient: colors.gradientBg as unknown as readonly [string, string, ...string[]],
+    dark: false,
+    bg: BG,
+    bg2: '#FFFFFF',
+    bg3: '#F3EFE8',
+    card: '#FFFFFF',
+    cardStrong: '#FFFFFF',
+    input: 'rgba(21,35,58,0.045)',
+    border: BORDER,
+    text: NAVY,
+    sub: MUTED,
+    statusBar: 'dark-content' as const,
+    blurTint: 'light' as const,
+    pageGradient: [BG, BG] as unknown as readonly [string, string, ...string[]],
   };
 }
 
 // ─── Types (UNCHANGED) ────────────────────────────────────────────────────────
+function DriverUberStylePromotionCard({
+  promotion,
+  onPress,
+  width,
+  secondary = false,
+}: {
+  promotion: Promotion;
+  onPress: () => void;
+  width: number;
+  secondary?: boolean;
+}) {
+  const icon: keyof typeof Ionicons.glyphMap = promotion.type === 'referral'
+    ? 'people-outline'
+    : promotion.type === 'informational'
+      ? 'information-circle-outline'
+      : promotion.type === 'reward'
+        ? 'gift-outline'
+        : 'pricetag-outline';
+  const action = promotion.linkText || (promotion.type === 'referral' ? 'Refer now' : 'View offer');
+
+  return (
+    <TouchableOpacity
+      style={[s.uberPromoCard, { width }]}
+      onPress={onPress}
+      activeOpacity={0.88}
+      accessibilityRole="button"
+      accessibilityLabel={`${promotion.title}. ${action}`}
+    >
+      <View style={s.uberPromoCopy}>
+        <Text style={s.uberPromoTitle} numberOfLines={3}>{promotion.title}</Text>
+        <Text style={s.uberPromoDescription} numberOfLines={2}>{promotion.description}</Text>
+        <View style={s.uberPromoCta}>
+          <Text style={s.uberPromoCtaText}>{action}</Text>
+        </View>
+      </View>
+      <View style={[s.uberPromoVisual, secondary && s.uberPromoVisualSecondary]}>
+        <View style={[s.promoBubble, s.promoBubbleTop, secondary && s.promoBubbleSecondary]} />
+        <View style={[s.promoBubble, s.promoBubbleBottom, secondary && s.promoBubbleSecondary]} />
+        <View style={[s.promoIconLarge, secondary && s.promoIconLargeSecondary]}>
+          <Ionicons name={icon} size={40} color="#FFFFFF" />
+        </View>
+        <View style={s.promoIconSmall}>
+          <Ionicons name="car-outline" size={22} color={secondary ? SECONDARY : ORANGE} />
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function DriverHomePostRideCard() {
+  return (
+    <View style={s.driverHomeSearchCard}>
+      <View style={s.driverHomeRouteRow}>
+        <View style={s.driverHomeRouteRail}>
+          <View style={s.driverHomeNavyDot} />
+          <View style={s.driverHomeDashedLine} />
+          <View style={s.driverHomeOrangeDot} />
+        </View>
+        <View style={s.driverHomeRouteInputs}>
+          <View style={s.driverHomeInputPill}>
+            <Text style={s.driverHomeInputText}>Austin, TX</Text>
+          </View>
+          <View style={s.driverHomeInputPill}>
+            <Text style={s.driverHomeInputText}>Houston, TX</Text>
+          </View>
+        </View>
+      </View>
+      <View style={s.driverHomeMetaRow}>
+        <View style={s.driverHomeMetaPill}>
+          <Text style={s.driverHomeMetaText}>Fri, Nov 20</Text>
+        </View>
+        <View style={s.driverHomeMetaPill}>
+          <Text style={s.driverHomeMetaText}>Anytime</Text>
+        </View>
+      </View>
+      <TouchableOpacity
+        style={s.driverHomePrimaryBtn}
+        onPress={() => router.push('/(driver)/book' as any)}
+        activeOpacity={0.88}
+        accessibilityRole="button"
+        accessibilityLabel="Post a ride"
+      >
+        <Text style={s.driverHomePrimaryText}>{'Post a ride ->'}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRideCard; hasOfferReceived?: boolean }) {
+  const [pickingUp,   setPickingUp]   = React.useState(false);
+  const [completing,  setCompleting]  = React.useState(false);
+  const [flagVisible, setFlagVisible] = React.useState(false);
+  const dateText = ride.dateTime ? formatDate(ride.dateTime) : (ride.dateStr || 'Date pending');
+  const rawStatus = String(ride.confirmedStatus || ride.status || '').toLowerCase();
+  const isConfirmedOnly = rawStatus === 'confirmed';
+  const isInProgress    = rawStatus === 'in_progress';
+  const isConfirmed     = isConfirmedOnly || isInProgress;
+  const isOfferSent     = rawStatus.includes('offer') || rawStatus === 'sent';
+  const isPosting       = ride.type === 'ridePosting';
+
+  const statusLabel = isInProgress ? 'IN PROGRESS'
+    : isConfirmedOnly ? 'CONFIRMED'
+    : (isPosting && hasOfferReceived) ? 'OFFER RECEIVED'
+    : isOfferSent ? 'OFFER SENT'
+    : prettyStatus(rawStatus).toUpperCase();
+  const statusColor = isInProgress ? ORANGE
+    : isConfirmedOnly ? '#16A34A'
+    : (isPosting && hasOfferReceived) ? '#D97706'
+    : isOfferSent ? ORANGE
+    : MUTED;
+  const statusBg    = isInProgress ? 'rgba(222,93,32,0.08)'
+    : isConfirmedOnly ? '#EDFAF3'
+    : (isPosting && hasOfferReceived) ? 'rgba(245,158,11,0.12)'
+    : isOfferSent ? 'rgba(222,93,32,0.08)'
+    : '#F1F3F6';
+
+  const openRequest = () => {
+    if (ride.type === 'ridePosting') router.push('/(driver)/my-postings' as any);
+    else router.push({ pathname: '/(driver)/request/[id]', params: { id: ride.id, returnTo: '/(driver)' } } as any);
+  };
+
+  const handlePickup = async () => {
+    setPickingUp(true);
+    try {
+      await actionConfirmPickup({
+        confirmedId: ride.confirmedId,
+        rideRequestId: ride.type === 'rideRequest' ? ride.id : undefined,
+        ridePostingId: ride.type === 'ridePosting' ? ride.id : undefined,
+        riderId: ride.riderId,
+      });
+    } finally {
+      setPickingUp(false);
+    }
+  };
+
+  const handleComplete = async () => {
+    const confirmedId = ride.confirmedId;
+    if (!confirmedId) return;
+
+    const doComplete = async () => {
+      setCompleting(true);
+      try {
+        await actionCompleteRide({ confirmedId });
+      } finally {
+        setCompleting(false);
+      }
+    };
+
+    // Check how far driver is from dropoff — warn if > 0.5 miles
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const raw = ride.raw || {};
+        const dropoffRaw = raw.dropoff ?? raw.dropoffLocation ?? raw.dropoffCoords ?? null;
+        let dropoffCoords: { latitude: number; longitude: number } | null = null;
+        if (dropoffRaw?.latitude) dropoffCoords = { latitude: dropoffRaw.latitude, longitude: dropoffRaw.longitude };
+        else if (dropoffRaw?.lat) dropoffCoords = { latitude: dropoffRaw.lat, longitude: dropoffRaw.lng };
+        else if (dropoffRaw?.location?.lat) dropoffCoords = { latitude: dropoffRaw.location.lat, longitude: dropoffRaw.location.lng };
+
+        if (dropoffCoords) {
+          const dLat = ((dropoffCoords.latitude - loc.coords.latitude) * Math.PI) / 180;
+          const dLng = ((dropoffCoords.longitude - loc.coords.longitude) * Math.PI) / 180;
+          const h = Math.sin(dLat / 2) ** 2 + Math.cos((loc.coords.latitude * Math.PI) / 180) * Math.cos((dropoffCoords.latitude * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+          const distMi = 3958.8 * 2 * Math.asin(Math.sqrt(h));
+          if (distMi > 0.5) {
+            Alert.alert(
+              'Not at dropoff yet',
+              `You appear to be ${distMi.toFixed(1)} mi from the dropoff. Complete the ride anyway?`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Complete anyway', style: 'destructive', onPress: doComplete },
+              ],
+            );
+            return;
+          }
+        }
+      }
+    } catch {}
+    doComplete();
+  };
+
+  const openChat = async () => {
+    // Chats are keyed by confirmedRides doc ID (rideId field), created by Cloud Function on confirmation
+    const confirmedId = ride.confirmedId || (isConfirmed ? ride.id : null);
+    if (!confirmedId) { Alert.alert('Not available', 'The chat opens once the ride is confirmed.'); return; }
+    try {
+      const chatSnap = await getDocs(query(collection(firestore, 'chats'), where('rideId', '==', confirmedId)));
+      if (!chatSnap.empty) {
+        router.push(`/(driver)/messages/${chatSnap.docs[0].id}` as any);
+      } else {
+        Alert.alert('Not available', 'The chat will be available shortly after confirmation.');
+      }
+    } catch { Alert.alert('Error', 'Could not open chat. Please try again.'); }
+  };
+
+  return (
+    <View style={[s.driverActivityCard, { minHeight: undefined }]}>
+      {/* Status row */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: statusBg, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 }}>
+          <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: statusColor }} />
+          <Text style={{ color: statusColor, fontSize: 11, fontWeight: '800', letterSpacing: 0.5 }}>{statusLabel}</Text>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {ride.priceText ? <Text style={{ color: NAVY, fontSize: 15, fontWeight: '800' }}>{ride.priceText}</Text> : null}
+          {isConfirmed && ride.confirmedId ? (
+            <TouchableOpacity onPress={() => setFlagVisible(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="flag-outline" size={18} color="#DC2626" />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </View>
+
+      {/* Route */}
+      <TouchableOpacity activeOpacity={0.7} onPress={isInProgress && ride.confirmedId ? () => router.push(`/(driver)/trip/${ride.confirmedId}` as any) : openRequest}>
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <View style={{ alignItems: 'center', paddingTop: 4, gap: 4 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: NAVY }} />
+            <View style={{ width: 1, flex: 1, minHeight: 16, backgroundColor: BORDER }} />
+            <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: ORANGE }} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: NAVY, fontSize: 15, fontWeight: '600', marginBottom: 4 }} numberOfLines={1}>{ride.from || 'Pickup pending'}</Text>
+            <Text style={{ color: MUTED, fontSize: 12, marginBottom: 4 }}>{dateText}</Text>
+            <Text style={{ color: NAVY, fontSize: 15, fontWeight: '600' }} numberOfLines={1}>{ride.to || 'Destination pending'}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+
+      {/* Actions */}
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: BORDER }}>
+        {ride.riderId && (
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: '#F3EFE8', borderRadius: 20, paddingVertical: 10, alignItems: 'center' }}
+            onPress={openChat}
+            activeOpacity={0.75}
+          >
+            <Text style={{ color: NAVY, fontSize: 13, fontWeight: '700' }}>Message Rider</Text>
+          </TouchableOpacity>
+        )}
+        {isConfirmedOnly && (
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: ORANGE, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: pickingUp ? 0.6 : 1 }}
+            onPress={handlePickup}
+            disabled={pickingUp}
+            activeOpacity={0.8}
+          >
+            {pickingUp
+              ? <ActivityIndicator size="small" color="#FFF" />
+              : <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>Pick Up</Text>}
+          </TouchableOpacity>
+        )}
+        {isInProgress && (
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: NAVY, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: completing ? 0.6 : 1 }}
+            onPress={handleComplete}
+            disabled={completing}
+            activeOpacity={0.8}
+          >
+            {completing
+              ? <ActivityIndicator size="small" color="#FFF" />
+              : <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>Complete Ride</Text>}
+          </TouchableOpacity>
+        )}
+        {!isConfirmedOnly && !isInProgress && (
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: NAVY, borderRadius: 20, paddingVertical: 10, alignItems: 'center' }}
+            onPress={openRequest}
+            activeOpacity={0.8}
+          >
+            <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>View Details</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {ride.confirmedId ? (
+        <FlagRideModal
+          visible={flagVisible}
+          onClose={() => setFlagVisible(false)}
+          rideId={ride.confirmedId}
+          role="driver"
+          onFlagged={() => setFlagVisible(false)}
+        />
+      ) : null}
+    </View>
+  );
+}
+
 type UpcomingRideCard = {
   id: string;
   type: 'ride' | 'rideRequest' | 'ridePostingRequest' | 'ridePosting';
@@ -129,6 +404,7 @@ type UpcomingRideCard = {
   riderName?: string;
   riderAvatarUrl?: string | null;
   riderRating?: number | null;
+  raw?: Record<string, any>;
 };
 
 type OfferInfo = {
@@ -201,6 +477,7 @@ function zoneNameFromPickup(pickup: string) {
 }
 
 export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
   const [selectedRide, setSelectedRide] = useState<UpcomingRideCard | null>(null);
   // Enriched passengers (avatars + phones) for group ride modal
   const [modalPassengers, setModalPassengers] = useState<any[]>([]);
@@ -218,13 +495,13 @@ export default function HomeScreen() {
 
   const [upcoming, setUpcoming] = useState<UpcomingRideCard[]>([]);
   const [recentConfirmed, setRecentConfirmed] = useState<ConfirmedRide[]>([]);
-  const [ratingModalVisible, setRatingModalVisible] = useState(false);
-  const [ratingModalRide, setRatingModalRide] = useState<ConfirmedRide | null>(null);
-  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+
+
+
   const [flagModalVisible, setFlagModalVisible] = useState(false);
   const [flaggingRideRef, setFlaggingRideRef] = useState<any | null>(null);
   const [flaggingLoading, setFlaggingLoading] = useState(false);
-  const [ratingError, setRatingError] = useState<string | null>(null);
+
   const [rideActionLoading, setRideActionLoading] = useState<Record<string, boolean>>({});
   const [waitingAfterComplete, setWaitingAfterComplete] = useState<Record<string, boolean>>({});
   const [waitingAfterPickup, setWaitingAfterPickup] = useState<Record<string, boolean>>({});
@@ -251,6 +528,7 @@ export default function HomeScreen() {
   const [userName, setUserName] = useState<string | null>(null);
   const [userPhoto, setUserPhoto] = useState<string | null>(null);
   const [driverAvatarUrl, setDriverAvatarUrl] = useState<string | null>(null);
+  const [driverUniversity, setDriverUniversity] = useState<string | undefined>(undefined);
   const [stats, setStats] = useState({ totalRides: 0, totalEarnings: 0, avgRating: null as number | null, ratingCount: null as number | null });
   const [offersByRideId, setOffersByRideId] = useState<Record<string, OfferInfo>>({});
   // Map postingId -> pending request info (to flip posting card to Offer Received)
@@ -259,7 +537,7 @@ export default function HomeScreen() {
   const notifReadMapRef = useRef<Record<string, boolean>>({});
   const [confirmedByReqId, setConfirmedByReqId] = useState<Record<string, boolean>>({});
   const [confirmedByPostingId, setConfirmedByPostingId] = useState<Record<string, boolean>>({});
-  const [ratedByMe, setRatedByMe] = useState<Record<string, boolean>>({});
+
   const [currentPromotionIndex, setCurrentPromotionIndex] = useState(0);
   const promotionScrollRef = useRef<ScrollView | null>(null);
 
@@ -271,8 +549,8 @@ export default function HomeScreen() {
   const [liveRequestMarkers, setLiveRequestMarkers] = useState<LiveRequestMarker[]>([]);
   const [mapReady, setMapReady] = useState(false);
   // Queue ratings per rider (seat) so group rides are rated individually
-  const [ratingQueue, setRatingQueue] = useState<Array<{ rideId: string; riderName?: string }>>([]);
-  const [ratingIdx, setRatingIdx] = useState<number>(0);
+
+
 
   useEffect(() => {
     let mounted = true;
@@ -369,27 +647,6 @@ export default function HomeScreen() {
     return () => unsub();
   }, []);
 
-  // Check if the current driver has already rated this ride
-  async function hasUserRated(rideId: string, userId: string): Promise<boolean> {
-    try {
-      const d = await getDoc(doc(firestore, 'rideRatings', `${rideId}_${userId}`));
-      return d.exists();
-    } catch {
-      return false;
-    }
-  }
-
-  // Preload ratedByMe flags for recent rides (limit to 10 to reduce reads)
-  async function hydrateRatedByMe(userId: string, rides: ConfirmedRide[], set: React.Dispatch<React.SetStateAction<Record<string, boolean>>>) {
-    try {
-      const recent = [...rides].slice(0, 10);
-      const results = await Promise.all(recent.map((r) => hasUserRated(r.id, userId)));
-      const next: Record<string, boolean> = {};
-      recent.forEach((r, i) => { next[r.id] = results[i]; });
-      set((prev) => ({ ...prev, ...next }));
-    } catch {}
-  }
-
   // Refresh driver rating stat card reading aggregates from drivers/{uid}
   async function refreshDriverRatingStatCard(userId: string, set: React.Dispatch<React.SetStateAction<{ totalRides: number; totalEarnings: number; avgRating: number | null; ratingCount: number | null }>>) {
     try {
@@ -399,98 +656,6 @@ export default function HomeScreen() {
   }
 
   // average rating helper moved to src/services/ratings
-
-  // Show the rating modal for a specific confirmed ride after re-checking not already rated
-  async function showDriverRatingModal(ride: ConfirmedRide) {
-    if (!uid) return;
-    // Avoid duplicate prompts for already rated
-    const rated = await hasUserRated(ride.id, uid);
-    if (rated) {
-      setRatedByMe((prev) => ({ ...prev, [ride.id]: true }));
-      return;
-    }
-    setRatingModalRide(ride);
-    setRatingError(null);
-    setRatingModalVisible(true);
-  }
-
-  // Open rating modal for a grouped card: build a per-seat queue and prompt sequentially
-  async function showRatingForGroup(group: any) {
-    if (!uid) return;
-    console.log('showRatingForGroup called with group:', { 
-      id: group?.id, 
-      riderName: group?.riderName, 
-      hasChildren: Array.isArray(group?._groupChildren),
-      childrenCount: group?._groupChildren?.length,
-      children: group?._groupChildren 
-    });
-    
-    const children: Array<{ rideId: string; riderName?: string }> = Array.isArray(group?._groupChildren)
-      ? (group._groupChildren as any[]).map((c) => {
-          console.log('Mapping child:', { id: c.id, riderName: c.riderName });
-          return { rideId: String(c.id), riderName: c.riderName };
-        })
-      : [{ rideId: String(group?.id), riderName: (group as any)?.riderName }];
-    
-    console.log('Built children array:', children);
-    
-    // Filter out already-rated seats
-    const checks = await Promise.all(children.map((c) => hasUserRated(c.rideId, uid)));
-    const pending = children.filter((c, i) => !checks[i]);
-    
-    console.log('Pending ratings:', pending);
-    
-    if (pending.length === 0) {
-      // Nothing to rate; mark this logical group as rated
-      if (group?.id) setRatedByMe((prev) => ({ ...prev, [String(group.id)]: true }));
-      Alert.alert('All set', 'You have already rated these riders.');
-      return;
-    }
-    setRatingQueue(pending);
-    setRatingIdx(0);
-    setRatingModalRide(null); // Don't use group object with combined names
-    setRatingError(null);
-    setRatingModalVisible(true);
-  }
-
-  // Find the most recent COMPLETED, unrated ride and open modal
-  async function promptPendingRatingForDriver(userId: string, rides: ConfirmedRide[]) {
-    try {
-      if (!rides || rides.length === 0) return;
-      if (ratingModalVisible) return; // do not stack
-      // Sort by completedAt desc
-      const sorted = [...rides].sort((a, b) => {
-  const ad = toDateField((a as any)?.completedAt) || getDateFromConfirmed(a) || null;
-  const bd = toDateField((b as any)?.completedAt) || getDateFromConfirmed(b) || null;
-  const at = ad ? ad.getTime() : 0;
-  const bt = bd ? bd.getTime() : 0;
-        return bt - at;
-      });
-      for (const r of sorted) {
-        if (String(r.status || '').toUpperCase() !== 'COMPLETED') continue;
-        if (String(r.driverId) !== String(userId)) continue;
-        // Skip if we already know it's rated
-        if (ratedByMe[r.id]) continue;
-        
-        // Check if this is a grouped ride
-        if ((r as any)?._groupChildren && Array.isArray((r as any)._groupChildren)) {
-          // Use showRatingForGroup for group rides to handle individual ratings
-          showRatingForGroup(r);
-          break;
-        }
-        
-        const rated = await hasUserRated(r.id, userId);
-        if (!rated) {
-          setRatingModalRide(r);
-          setRatingError(null);
-          setRatingModalVisible(true);
-          break;
-        } else {
-          setRatedByMe((prev) => ({ ...prev, [r.id]: true }));
-        }
-      }
-    } catch {}
-  }
 
   // Open chat for a specific ride card
   const openChatForRide = async (card: UpcomingRideCard) => {
@@ -506,7 +671,7 @@ export default function HomeScreen() {
       if (!snapshot.empty) {
         // Navigate to existing chat
         const chatId = snapshot.docs[0].id;
-        router.push(`/messages/${chatId}`);
+        router.push({ pathname: '/(driver)/messages/[chatId]', params: { chatId, returnTo: '/(driver)' } } as any);
       } else {
         // Navigate to messages tab - chat will be auto-created when first message is sent
         router.push('/(driver)/messages');
@@ -717,6 +882,7 @@ export default function HomeScreen() {
             const pi = driverData?.personalInfo || driverData?.profile || {};
             const drvAvatar = driverData?.avatarUrl || pi?.avatarUrl || null;
             setDriverAvatarUrl(typeof drvAvatar === 'string' && drvAvatar ? drvAvatar : null);
+            setDriverUniversity(driverData?.university || pi?.university || undefined);
           } else {
             setDriverAvatarUrl(null);
           }
@@ -1338,6 +1504,7 @@ export default function HomeScreen() {
               riderId: r.riderId || r.userId || r.requesterId || r.ownerId || r.user?.id,
         confirmedDriverComplete: r.driverCompleteConfirmed === true,
               confirmedDriverPickup: r.driverPickupConfirmed === true,
+              raw: r,
             };
           } else if (r.ridePostingId) {
             cards[`ridePosting-${String(r.ridePostingId)}`] = {
@@ -1355,6 +1522,7 @@ export default function HomeScreen() {
               riderId: r.riderId || r.userId || r.requesterId || r.ownerId || r.user?.id,
         confirmedDriverComplete: r.driverCompleteConfirmed === true,
               confirmedDriverPickup: r.driverPickupConfirmed === true,
+              raw: r,
             };
           }
         });
@@ -1546,6 +1714,39 @@ export default function HomeScreen() {
   items.forEach((it) => { next[it.id] = it; });
   setUpcPostingsDriver(next);
   setCombinedUpcoming({ postingsDriver: next });
+
+  // Also query ridePostingRequests by ridePostingId directly — more reliable
+  // than relying on driverId being set, since the rider writes that field
+  const activeIds = items.map((it) => it.id).filter(Boolean);
+  if (activeIds.length > 0) {
+    const chunks: string[][] = [];
+    for (let i = 0; i < activeIds.length; i += 30) chunks.push(activeIds.slice(i, i + 30));
+    Promise.all(
+      chunks.map((chunk) =>
+        getDocs(query(
+          collection(firestore, 'ridePostingRequests'),
+          where('ridePostingId', 'in', chunk),
+        )).catch(() => null)
+      )
+    ).then((snaps) => {
+      const byPosting: Record<string, { id: string; status: string }> = {};
+      const inactive = new Set(['rejected','declined','cancelled','canceled','completed','accepted','confirmed']);
+      snaps.forEach((reqSnap) => {
+        if (!reqSnap) return;
+        reqSnap.forEach((d) => {
+          const r = d.data() as any;
+          const status = String(r?.status || 'pending').toLowerCase();
+          const pid = String(r?.ridePostingId || r?.rideId || '');
+          if (pid && !inactive.has(status)) {
+            byPosting[pid] = { id: d.id, status };
+          }
+        });
+      });
+      if (Object.keys(byPosting).length > 0) {
+        setPostingReqByPostingId((prev) => ({ ...prev, ...byPosting }));
+      }
+    }).catch(() => {});
+  }
       }, (err) => console.warn('ridePostings(driverId) listener error', err));
       unsubs.push(unsubPostings);
     } catch (e) {
@@ -1669,10 +1870,6 @@ export default function HomeScreen() {
                 return bt - at;
               });
               setRecentConfirmed(grouped as any);
-              // Hydrate rated flags using underlying seat docs
-              try { await hydrateRatedByMe(uid, data.slice(0, 10) as any, setRatedByMe); } catch {}
-              // Prompt using seat-level rides for correctness
-              await promptPendingRatingForDriver(uid, data as any);
             },
             (err) => {
               if (String(err?.code) === 'failed-precondition' && useOrder) {
@@ -1696,6 +1893,47 @@ export default function HomeScreen() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
+
+  // Live listener: watch ridePostingRequests by ridePostingId so "Offer Received"
+  // badge updates the moment a rider books, without waiting for the posting to change.
+  const _postingIdsKey = useMemo(
+    () => Object.keys(upcPostingsDriver).sort().join(','),
+    [upcPostingsDriver],
+  );
+  useEffect(() => {
+    const ids = _postingIdsKey ? _postingIdsKey.split(',') : [];
+    if (ids.length === 0) return;
+
+    const terminal = new Set(['rejected','declined','cancelled','canceled','completed','accepted','confirmed']);
+    const innerUnsubs: Array<() => void> = [];
+
+    for (let i = 0; i < ids.length; i += 30) {
+      const chunk = ids.slice(i, i + 30);
+      const unsub = onSnapshot(
+        query(collection(firestore, 'ridePostingRequests'), where('ridePostingId', 'in', chunk)),
+        (snap) => {
+          const byPosting: Record<string, { id: string; status: string }> = {};
+          snap.forEach((d) => {
+            const r = d.data() as any;
+            const status = String(r?.status || 'pending').toLowerCase();
+            const pid = String(r?.ridePostingId || '');
+            if (pid && !terminal.has(status)) {
+              byPosting[pid] = { id: d.id, status };
+            }
+          });
+          setPostingReqByPostingId((prev) => {
+            const next = { ...prev };
+            chunk.forEach((id) => delete next[id]);
+            return { ...next, ...byPosting };
+          });
+        },
+        () => {},
+      );
+      innerUnsubs.push(unsub);
+    }
+
+    return () => innerUnsubs.forEach((u) => u());
+  }, [_postingIdsKey]);
 
   // Pull-to-refresh handler
   const onRefresh = useCallback(async () => {
@@ -1755,14 +1993,6 @@ export default function HomeScreen() {
     }, [loading, uid, email])
   );
 
-  // On first auth/load, also prompt for any pending rating
-  useEffect(() => {
-    if (uid && recentConfirmed) {
-  hydrateRatedByMe(uid, recentConfirmed.slice(0, 3), setRatedByMe).catch(() => {});
-  promptPendingRatingForDriver(uid, recentConfirmed).catch(() => {});
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid]);
 
   // Fetch total earnings from earnings API (match Earnings page)
   useEffect(() => {
@@ -1806,13 +2036,34 @@ export default function HomeScreen() {
   // Dedupe across sources (rideRequest vs ridePosting) by route + time bucket, preferring rideRequest
   // Filter out any items that are cancelled so we do not render cancelled cards in Upcoming
   const displayUpcoming = useMemo(() => {
+    const inactiveStatuses = new Set(['cancelled', 'canceled', 'expired', 'completed', 'complete', 'finished', 'rejected', 'declined']);
     return (sortedUpcoming || []).filter((r) => {
       const s = String((r as any)?.status || '').replace(/[-\s]/g, '_').toLowerCase();
       const cs = String((r as any)?.confirmedStatus || '').replace(/[-\s]/g, '_').toLowerCase();
-      return s !== 'cancelled' && s !== 'canceled' && s !== 'expired'
-        && cs !== 'cancelled' && cs !== 'canceled';
+      const statusAtFlag = String((r as any)?.statusAtFlag || '').replace(/[-\s]/g, '_').toLowerCase();
+      return !inactiveStatuses.has(s) && !inactiveStatuses.has(cs) && statusAtFlag !== 'completed';
     });
   }, [sortedUpcoming]);
+
+  // Navigate to rate-trip when a confirmed ride reaches COMPLETED (rider confirmed arrival)
+  const driverRatingNavRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    Object.entries(upcConfirmed).forEach(async ([, card]) => {
+      const cs = String((card as any).confirmedStatus || '').toUpperCase();
+      const id = (card as any).confirmedId;
+      if (cs === 'COMPLETED' && id && !driverRatingNavRef.current.has(id)) {
+        driverRatingNavRef.current.add(id);
+        try {
+          const snap = await getDoc(doc(firestore, 'confirmedRides', id));
+          const alreadyRated = !!snap.data()?.driverRated || !!(uid && await hasUserRatedRide(id, uid));
+          if (alreadyRated) return;
+        } catch {}
+        setTimeout(() => {
+          router.push({ pathname: '/(driver)/rate-trip', params: { confirmedRideId: id } } as any);
+        }, 500);
+      }
+    });
+  }, [upcConfirmed, uid]);
 
   // Auto-capture is now server-driven. Client effect removed; server will sweep on completion.
 
@@ -1849,8 +2100,14 @@ export default function HomeScreen() {
         return !isFull; // show Posted until all seats are filled
       }),
       // Confirmed at the end so it overrides placeholders with the same (type-id)
-  // Include only non-completed confirmed rides in Upcoming; completed are shown in Recent
-  ...Object.values(upcConfirmed || {}).filter((c) => String(c.status || '').toLowerCase() !== 'completed'),
+  // Include only active confirmed rides in Upcoming.
+  ...Object.values(upcConfirmed || {}).filter((c) => {
+    const inactiveStatuses = new Set(['completed', 'complete', 'finished', 'cancelled', 'canceled', 'expired', 'rejected', 'declined']);
+    const s = String(c.status || '').replace(/[-\s]/g, '_').toLowerCase();
+    const cs = String(c.confirmedStatus || '').replace(/[-\s]/g, '_').toLowerCase();
+    const statusAtFlag = String((c as any).statusAtFlag || '').replace(/[-\s]/g, '_').toLowerCase();
+    return !inactiveStatuses.has(s) && !inactiveStatuses.has(cs) && statusAtFlag !== 'completed';
+  }),
     ];
     const uniq = new Map<string, UpcomingRideCard>();
     for (const it of arr) uniq.set(`${it.type}-${it.id}`, it);
@@ -2482,8 +2739,8 @@ export default function HomeScreen() {
     const interval = setInterval(() => {
       setCurrentPromotionIndex((prevIndex) => {
         const nextIndex = (prevIndex + 1) % promotions.length;
-        const cardWidth = Dimensions.get('window').width - 36;
-        const scrollPosition = nextIndex * cardWidth;
+        const cardWidth = Math.min(Dimensions.get('window').width, 430) - 52;
+        const scrollPosition = nextIndex * (cardWidth + 12);
         
         // Scroll to the next promotion using scrollTo
         if (promotionScrollRef.current) {
@@ -2524,14 +2781,11 @@ export default function HomeScreen() {
     return () => { p1.stop(); p2.stop(); p3.stop(); glow.stop(); };
   }, []);
 
-// Component casts — props exist at runtime but TypeScript declarations are incomplete
-   const AnyPromotionCard = PromotionCard as any;
-
   // ─── RENDER ─────────────────────────────────────────────────────────────
-  const appTheme = useDriverHomeTheme();
-  const dk = appTheme.dark;
+
   const { width: SW } = Dimensions.get('window');
-  const themed = useMemo(() => createThemedStyles(appTheme), [appTheme]);
+  const promotionCardWidth = Math.min(SW, 430) - 44;
+  const promotionSnapInterval = promotionCardWidth + 12;
 
   const badgeProps = (
     isOfferReceived: boolean, isOfferSent: boolean, isPosted: boolean,
@@ -2542,8 +2796,8 @@ export default function HomeScreen() {
     if (isOfferSent)     return { bg: 'rgba(59,130,246,0.15)',  txt: COLORS.blue,  label: 'Offer Sent' };
     if (isInProgress)    return { bg: 'rgba(16,185,129,0.15)',  txt: COLORS.green, label: 'In Progress' };
     if (isConfirmed)     return { bg: 'rgba(16,185,129,0.15)',  txt: COLORS.green, label: 'Confirmed' };
-    if (isPosted)        return { bg: 'rgba(150,170,190,0.12)', txt: appTheme.sub, label: 'Posted' };
-    return                      { bg: 'rgba(150,170,190,0.12)', txt: appTheme.sub, label: prettyStatus(undefined) };
+    if (isPosted)        return { bg: 'rgba(150,170,190,0.12)', txt: MUTED, label: 'Posted' };
+    return                      { bg: 'rgba(150,170,190,0.12)', txt: MUTED, label: prettyStatus(undefined) };
   };
 
 
@@ -2598,65 +2852,33 @@ export default function HomeScreen() {
       .slice(0, 6);
   }, [driverLocation, liveRequestMarkers]);
 
-  return (
-    <View style={[s.root, { backgroundColor: appTheme.bg }]}>
-      <StatusBar barStyle={appTheme.statusBar} />
+  const firstName = userName ? capitalize(userName) : 'Driver';
+  const driverHeroPrompt = useMemo(() => {
+    const next = displayUpcoming[0];
+    if (!next) return 'ready to drive?';
 
-      {/* ── Deep background gradient ── */}
-      <LinearGradient
-        colors={appTheme.pageGradient}
-        style={StyleSheet.absoluteFillObject}
-      />
+    const status = String(next.confirmedStatus || next.status || '').toLowerCase();
+    if (status.includes('progress') || status.includes('driver_completed') || status.includes('rider_completed')) return 'your ride is in progress.';
+    if (status.includes('confirmed')) return 'your ride has been confirmed!';
+    if (next.type === 'ridePosting') return 'your ride is posted.';
+    if (status.includes('offer_sent') || status === 'sent') return 'your offer has been sent!';
+    if (next.type === 'ridePostingRequest' || status.includes('offer') || status.includes('pending')) return 'you have a ride request!';
+
+    return 'your next ride is coming up.';
+  }, [displayUpcoming]);
+
+  return (
+    <View style={[s.root, { backgroundColor: BG }]}>
+      <StatusBar barStyle="dark-content" />
 
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
 
-        {/* ══════════════════════════════════════════════════════════
-            HEADER
-        ══════════════════════════════════════════════════════════ */}
-        <View style={s.hdr}>
-          <TouchableOpacity onPress={() => router.push('/driver/profile')} style={s.avatarWrap}>
-            <Animated.View style={[s.avatarGlowRing, { opacity: glowAnim }]} />
-            {(driverAvatarUrl || userPhoto)
-              ? <Image source={{ uri: (driverAvatarUrl || userPhoto) as string }} style={s.avatarImg}
-                  onError={() => { if (driverAvatarUrl) setDriverAvatarUrl(null); else setUserPhoto(null); }} />
-              : <LinearGradient colors={[COLORS.orange, '#FF4500']} style={s.avatarImg}>
-                  <Text style={s.avatarInitial}>{userName ? userName[0].toUpperCase() : 'D'}</Text>
-                </LinearGradient>
-            }
-            {isVerified && (
-              <View style={s.verifiedDot}><Ionicons name="checkmark" size={8} color="white" /></View>
-            )}
-          </TouchableOpacity>
-
-          <View style={{ flex: 1, marginLeft: 12 }}>
-           <Text style={themed.hdrSub}>Good to see you, {userName ? capitalize(userName) : 'Driver'}</Text>
-            <Text style={themed.hdrName}>Campus demand</Text>
-            <Text style={themed.hdrAccent}>is moving now.</Text>
-          </View>
-
-          <View style={{ alignItems: 'flex-end', gap: 6 }}>
-            {stats.totalRides >= 2 && (
-              <View style={s.streakBadge}>
-                <Text style={s.streakText}>🔥 {stats.totalRides} rides</Text>
-              </View>
-            )}
-            <TouchableOpacity
-              style={themed.notifBtn}
-              onPress={() => router.push('/(driver)/notifications' as any)}
-            >
-              <Ionicons name="notifications-outline" size={20} color={appTheme.text} />
-              {unreadCount > 0 && (
-                <View style={s.notifBadge}>
-                  <Text style={s.notifBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-
         <ScrollView
+          style={s.scroll}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 60 }}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          contentContainerStyle={{ paddingBottom: 72 + insets.bottom }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing} onRefresh={onRefresh}
@@ -2664,19 +2886,54 @@ export default function HomeScreen() {
             />
           }
         >
+          <DriverHomeUtilityBar
+            university={driverUniversity}
+            initial={firstName.charAt(0).toUpperCase()}
+            avatarUrl={driverAvatarUrl || userPhoto}
+          />
+          <View style={s.heroCopy}>
+            <Text style={s.heroTitle}>
+              Hey {firstName} - <Text style={s.heroAccent}>{driverHeroPrompt}</Text>
+            </Text>
+          </View>
+
           {/* Verification Banner */}
           <StudentVerificationBanner />
+
+          <View style={[s.section, s.homePrimaryBlock]}>
+            {loading ? (
+              <View style={s.driverHomeSearchCard}>
+                <ActivityIndicator color={ORANGE} />
+              </View>
+            ) : displayUpcoming.length > 0 ? (
+              <DriverHomeActivityCard
+                ride={displayUpcoming[0]}
+                hasOfferReceived={
+                  displayUpcoming[0]?.type === 'ridePosting'
+                    ? !!postingReqByPostingId[displayUpcoming[0].id]
+                    : false
+                }
+              />
+            ) : (
+              <DriverHomePostRideCard />
+            )}
+          </View>
 
           {/* ══════════════════════════════════════════════════════════
               HERO MAP
           ══════════════════════════════════════════════════════════ */}
-          <View style={themed.mapWrap}>
+          {false && <View style={s.mapWrap}>
+            {MapView && Marker ? (
             <MapView
               style={StyleSheet.absoluteFillObject}
               provider={PROVIDER_GOOGLE}
               showsUserLocation
               showsMyLocationButton={false}
               showsCompass={false}
+              scrollEnabled={false}
+              zoomEnabled={false}
+              rotateEnabled={false}
+              pitchEnabled={false}
               toolbarEnabled={false}
               onMapReady={() => setMapReady(true)}
               initialRegion={{
@@ -2692,7 +2949,7 @@ export default function HomeScreen() {
                 longitudeDelta: 0.045,
               } : undefined}
             >
-              {driverLocation && (
+              {driverLocation && Circle && (
                 <Circle
                   center={driverLocation}
                   radius={1800}
@@ -2708,7 +2965,7 @@ export default function HomeScreen() {
                     latitude: request.latitude,
                     longitude: request.longitude,
                   }}
-                  onPress={() => router.push(`/request/${request.id}` as any)}
+                  onPress={() => router.push({ pathname: '/(driver)/request/[id]', params: { id: request.id, returnTo: '/(driver)' } } as any)}
                 >
                   <View style={s.liveRequestMarker}>
                     <View style={s.liveRequestMarkerDot} />
@@ -2719,8 +2976,16 @@ export default function HomeScreen() {
                 </Marker>
               ))}
             </MapView>
+            ) : (
+              <View style={s.webMapFallback}>
+                <Ionicons name="map-outline" size={30} color={MUTED} />
+                <Text style={[s.mapFallbackText, { color: MUTED }]}>
+                  Map preview is available on iOS and Android
+                </Text>
+              </View>
+            )}
 
-            {!mapReady && (
+            {MapView && !mapReady && (
               <View style={s.mapLoadingOverlay}>
                 <ActivityIndicator color={COLORS.orange} />
               </View>
@@ -2731,12 +2996,12 @@ export default function HomeScreen() {
               <Text style={s.liveText}>LIVE CAMPUS</Text>
             </View>
 
-            <BlurView intensity={60} tint={appTheme.blurTint} style={themed.mapOverlay}>
+            <View style={s.mapOverlay}>
               <View style={{ flex: 1 }}>
-                <Text style={themed.mapOverlayHeadline}>
+                <Text style={s.mapOverlayHeadline}>
                   {liveRequestMarkers.length} live campus request{liveRequestMarkers.length === 1 ? '' : 's'}
                 </Text>
-                <Text style={themed.mapOverlaySub}>
+                <Text style={s.mapOverlaySub}>
                   Real pickup activity near your current location.
                 </Text>
               </View>
@@ -2745,119 +3010,74 @@ export default function HomeScreen() {
                 onPress={() => router.push('/(driver)/requests')}
                 style={s.goBtn}
               >
-                <LinearGradient colors={[COLORS.orange, '#FF4500']} style={s.goBtnInner}>
+                <View style={s.goBtnInner}>
                   <Ionicons name="navigate" size={16} color="white" />
                   <Text style={s.goBtnText}>View</Text>
-                </LinearGradient>
+                </View>
               </TouchableOpacity>
-            </BlurView>
-          </View>
+            </View>
+          </View>}
            {/* ══════════════════════════════════════════════════════════
               DRIVER PULSE — floating widgets
           ══════════════════════════════════════════════════════════ */}
           
-          <View style={s.driverSnapshotRow}>
-            {[
-              {
-                label: 'This month',
-                value: `$${Math.round(stats.totalEarnings || 0)}`,
-                color: COLORS.orange,
-              },
-              {
-                label: 'Rides done',
-                value: String(stats.totalRides || 0),
-                color: appTheme.text,
-              },
-              {
-                label: 'Rating',
-                value: stats.avgRating ? `★${stats.avgRating.toFixed(2)}` : '★—',
-                color: appTheme.text,
-              },
-            ].map((item) => (
-              <View key={item.label} style={themed.driverSnapshotCard}>
-                <Text style={[s.driverSnapshotValue, { color: item.color }]} numberOfLines={1}>
-                  {item.value}
-                </Text>
-                <Text style={themed.driverSnapshotLabel}>{item.label}</Text>
-              </View>
-            ))}
-          </View>
-
           {/* ══════════════════════════════════════════════════════════
               FIND NEARBY RIDERS CTA
           ══════════════════════════════════════════════════════════ */}
-          <View style={s.quickActions}>
-            <TouchableOpacity
-              style={themed.quickAction}
-              onPress={() => router.push('/(driver)/requests' as any)}
-              activeOpacity={0.86}
-            >
-              <Ionicons name="navigate-outline" size={18} color={COLORS.orange} />
-              <Text style={themed.quickActionText}>Find Riders</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={s.quickActionPrimary}
-              onPress={() => router.push('/(driver)/book' as any)}
-              activeOpacity={0.88}
-            >
-              <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
-              <Text style={s.quickActionPrimaryText}>Post Ride</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={themed.quickAction}
-              onPress={() => router.push('/(driver)/messages' as any)}
-              activeOpacity={0.86}
-            >
-              <Ionicons name="chatbubble-outline" size={18} color={COLORS.orange} />
-              <Text style={themed.quickActionText}>Messages</Text>
-            </TouchableOpacity>
-          </View>
-
           {/* ══════════════════════════════════════════════════════════
               PROMOTIONS
           ══════════════════════════════════════════════════════════ */}
-          {(promotions.length > 0 || promotionsLoading) && (
-            <View style={s.section}>
-              <Text style={themed.sectionTitle}>Promotions</Text>
-              {promotionsLoading && promotions.length === 0
-                ? <ActivityIndicator color={COLORS.orange} style={{ marginTop: 12 }} />
-                : <>
-                    <ScrollView
-                      ref={promotionScrollRef}
-                      horizontal showsHorizontalScrollIndicator={false}
-                      snapToInterval={SW - 40} decelerationRate="fast"
-                      onScroll={(e) => {
-                        const idx = Math.round(e.nativeEvent.contentOffset.x / (SW - 40));
-                        setCurrentPromotionIndex(Math.max(0, Math.min(idx, promotions.length - 1)));
-                      }}
-                      scrollEventThrottle={16}
-                    >
-                      {promotions.map((item, index) => (
-                        <AnyPromotionCard
-                          key={item.id}
-                          promotion={item}
-                          variant={index === 0 ? 'primary' : index === 1 ? 'secondary' : 'tertiary'}
-                          onPress={() => { setSelectedPromotion(item); setPromotionModalVisible(true); }}
-                        />
-                      ))}
-                    </ScrollView>
-                    {promotions.length > 1 && (
-                      <View style={s.dotsRow}>
-                        {promotions.map((_, i) => (
-                          <View key={i} style={[s.dot, i === currentPromotionIndex && s.dotActive]} />
-                        ))}
-                      </View>
-                    )}
-                  </>
-              }
-            </View>
-          )}
-
           <View style={s.section}>
+            {promotionsLoading && promotions.length === 0 ? (
+              <View style={s.promotionLoading}><ActivityIndicator color={COLORS.orange} /></View>
+            ) : promotions.length > 0 ? (
+              <>
+                <ScrollView
+                  ref={promotionScrollRef}
+                  horizontal showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={s.promotionList}
+                  snapToInterval={promotionSnapInterval}
+                  snapToAlignment="start"
+                  decelerationRate="fast"
+                  disableIntervalMomentum
+                  onScroll={(e) => {
+                    const idx = Math.round(e.nativeEvent.contentOffset.x / promotionSnapInterval);
+                    setCurrentPromotionIndex(Math.max(0, Math.min(idx, promotions.length - 1)));
+                  }}
+                  scrollEventThrottle={16}
+                >
+                  {promotions.map((item, index) => (
+                    <DriverUberStylePromotionCard
+                      key={item.id}
+                      promotion={item}
+                      onPress={() => router.push('/(driver)/profile' as any)}
+                      width={promotionCardWidth}
+                      secondary={index % 2 === 1}
+                    />
+                  ))}
+                </ScrollView>
+                {promotions.length > 1 && (
+                  <View style={s.dotsRow}>
+                    {promotions.map((_, i) => (
+                      <View key={i} style={[s.dot, i === currentPromotionIndex && s.dotActive]} />
+                    ))}
+                  </View>
+                )}
+              </>
+            ) : (
+              <View style={s.promotionEmptyCard}>
+                <Ionicons name="gift-outline" size={24} color={COLORS.orange} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.promotionEmptyTitle}>No active promotions</Text>
+                  <Text style={s.promotionEmptyText}>Check back soon for new driver offers.</Text>
+                </View>
+              </View>
+            )}
+          </View>
+
+          {false && <View style={s.section}>
   <View style={s.sectionHdrRow}>
-    <Text style={themed.sectionTitle}>Hot Zones</Text>
+    <Text style={s.sectionTitle}>Hot Zones</Text>
     <Text style={s.sectionSub}>Live from requests</Text>
   </View>
 
@@ -2870,7 +3090,7 @@ export default function HomeScreen() {
                     style={[s.heatCard, { borderColor: `${zone.heat}40` }]}
                     activeOpacity={0.8}
                   >
-                    <LinearGradient colors={[zone.bg, 'rgba(255,255,255,0.02)']} style={StyleSheet.absoluteFillObject} />
+                    <View style={[StyleSheet.absoluteFillObject, { backgroundColor: zone.bg }]} />
 
                     <View style={[s.heatPill, { backgroundColor: `${zone.heat}22` }]}>
                       <View style={[s.heatDot, { backgroundColor: zone.heat }]} />
@@ -2879,8 +3099,8 @@ export default function HomeScreen() {
                       </Text>
                     </View>
 
-                    <Text style={themed.heatName} numberOfLines={2}>{zone.name}</Text>
-                    <Text style={themed.heatDist}>{zone.dist} away</Text>
+                    <Text style={s.heatName} numberOfLines={2}>{zone.name}</Text>
+                    <Text style={s.heatDist}>{zone.dist} away</Text>
 
                     <View style={s.heatEarnRow}>
                       <Ionicons name="wallet-outline" size={11} color={zone.heat} />
@@ -2890,23 +3110,23 @@ export default function HomeScreen() {
                 ))}
               </ScrollView>
             ) : (
-              <View style={themed.emptyHotZones}>
+              <View style={s.emptyHotZones}>
                 <Ionicons name="radio-outline" size={18} color={COLORS.orange} />
-                <Text style={themed.emptyHotZonesText}>
+                <Text style={s.emptyHotZonesText}>
                   Hot zones appear when nearby riders request pickups.
                 </Text>
               </View>
             )}
-          </View>
+          </View>}
 
 
          {/* ══════════════════════════════════════════════════════════
               UPCOMING RIDES
           ══════════════════════════════════════════════════════════ */}
-          <View style={s.section}>
+          {false && <View style={s.section}>
             <View style={s.sectionHdrRow}>
-              <Text style={themed.sectionTitle}>Upcoming Rides</Text>
-              <TouchableOpacity onPress={() => router.push('/settings/ride-history')}>
+              <Text style={s.sectionTitle}>Upcoming Rides</Text>
+              <TouchableOpacity onPress={() => router.push('/(driver)/settings/driver-ride-history')}>
                 <Text style={s.viewAll}>View All</Text>
               </TouchableOpacity>
             </View>
@@ -2966,8 +3186,7 @@ export default function HomeScreen() {
 
                 return (
                   <View key={`groupRide-${postingId}`} style={s.rideCard}>
-                   {appTheme.dark && <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />}
-                    <View style={s.rideCardInner}>
+                     <View style={s.rideCardInner}>
                       <View style={s.rideCardTop}>
                         <View style={[s.statusBadge, { backgroundColor: badge.bg }]}>
                           <Text style={[s.statusBadgeText, { color: badge.txt }]}>{badge.label}</Text>
@@ -2999,7 +3218,7 @@ export default function HomeScreen() {
                               setFlagModalVisible(true);
                             }
                           }} style={s.iconBtn}>
-                            <Flag size={16} color={COLORS.red} />
+                            <Ionicons name="flag" size={16} color={COLORS.red} />
                           </TouchableOpacity>
                         )}
                         {aggStatus === 'CONFIRMED' && !waitingGroupAfterComplete[postingId] && (
@@ -3046,7 +3265,6 @@ export default function HomeScreen() {
 
               return (
                 <View key={`${r.type}-${r.id}`} style={s.rideCard}>
-                  {appTheme.dark && <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />}
                   <View style={s.rideCardInner}>
                     <View style={s.rideCardTop}>
                       <View style={[s.statusBadge, { backgroundColor: bp.bg }]}>
@@ -3094,7 +3312,7 @@ export default function HomeScreen() {
 
                     {hasConfirmedRide && confirmedStatusKey === 'CONFIRMED' && !isIncomingPendingOffer && !isOfferReceivedForPosting && !isOwnPendingOffer && !waitingAfterPickup[cardKey] && !waitingAfterComplete[cardKey] && (
                       <View style={s.actionRow}>
-                        <TouchableOpacity onPress={() => { setFlaggingRideRef(r); setFlagModalVisible(true); }} style={s.iconBtn}><Flag size={16} color={COLORS.red}/></TouchableOpacity>
+                        <TouchableOpacity onPress={() => { setFlaggingRideRef(r); setFlagModalVisible(true); }} style={s.iconBtn}><Ionicons name="flag-outline" size={16} color={COLORS.red}/></TouchableOpacity>
                         <TouchableOpacity onPress={() => openChatForRide(r)} style={s.iconBtn}><Ionicons name="chatbubble-outline" size={16} color={COLORS.orange}/></TouchableOpacity>
                         <Button size="sm" variant="primary"
                           loading={!!rideActionLoading[`pickup-${r.type}-${r.id}`]}
@@ -3116,7 +3334,7 @@ export default function HomeScreen() {
 
                     {hasConfirmedRide && isInProgress && !isIncomingPendingOffer && !isOfferReceivedForPosting && !isOwnPendingOffer && !isWaiting && (
                       <View style={s.actionRow}>
-                        <TouchableOpacity onPress={() => { setFlaggingRideRef(r); setFlagModalVisible(true); }} style={s.iconBtn}><Flag size={16} color={COLORS.red}/></TouchableOpacity>
+                        <TouchableOpacity onPress={() => { setFlaggingRideRef(r); setFlagModalVisible(true); }} style={s.iconBtn}><Ionicons name="flag-outline" size={16} color={COLORS.red}/></TouchableOpacity>
                         <TouchableOpacity onPress={() => openChatForRide(r)} style={s.iconBtn}><Ionicons name="chatbubble-outline" size={16} color={COLORS.orange}/></TouchableOpacity>
                         <Button size="sm" variant="primary"
                           loading={!!rideActionLoading[`complete-${r.type}-${r.id}`]}
@@ -3172,38 +3390,30 @@ export default function HomeScreen() {
                 </View>
               );
             })}
-          </View>
+          </View>}
 
           {/* ══════════════════════════════════════════════════════════
               CAMPUS LIVE FEED
           ══════════════════════════════════════════════════════════ */}
           <View style={s.section}>
             <View style={s.sectionHdrRow}>
-              <Text style={themed.sectionTitle}>Campus Insights</Text>
-              <View style={s.livePillSmall}>
-                <View style={s.liveDot} />
-                <Text style={s.livePillText}>Active now</Text>
-              </View>
+              <Text style={s.sectionTitle}>Campus Insights</Text>
             </View>
-            <View style={themed.activityCard}>
-              {appTheme.dark && (
-                <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
-              )}
+            <View style={s.activityCard}>
               {[
-                { icon: 'time-outline' as const, text: 'Evening windows usually convert faster near housing and dining.', time: 'Pattern', color: COLORS.green },
-                { icon: 'wallet-outline' as const, text: 'Short routes with clear pickup notes tend to get accepted sooner.', time: 'Tip', color: COLORS.amber },
-                { icon: 'school-outline' as const, text: 'Verified student rides help keep the marketplace trusted.', time: 'Trust', color: COLORS.blue },
-                { icon: 'flash-outline' as const, text: 'Keep filters light to catch campus demand as it appears.', time: 'Now', color: COLORS.orange },
+                { icon: 'time-outline' as const, text: 'Evening windows usually convert faster near housing and dining.', time: 'Pattern' },
+                { icon: 'wallet-outline' as const, text: 'Short routes with clear pickup notes tend to get accepted sooner.', time: 'Tip' },
+                { icon: 'school-outline' as const, text: 'Verified student rides help keep the marketplace trusted.', time: 'Trust' },
               ].map((item, i, arr) => (
                 <View key={i} style={[
                   s.activityRow,
-                  i < arr.length - 1 && { borderBottomWidth: 1, borderBottomColor: appTheme.border },
+                  i < arr.length - 1 && { borderBottomWidth: 1, borderBottomColor: BORDER },
                 ]}>
-                  <View style={[s.activityIconWrap, { backgroundColor: `${item.color}18` }]}>
-                    <Ionicons name={item.icon} size={16} color={item.color} />
+                  <View style={s.activityIconWrap}>
+                    <Ionicons name={item.icon} size={16} color={ORANGE} />
                   </View>
-                  <Text style={themed.activityText} numberOfLines={2}>{item.text}</Text>
-                  <Text style={themed.activityTime}>{item.time}</Text>
+                  <Text style={s.activityText} numberOfLines={2}>{item.text}</Text>
+                  <Text style={s.activityTime}>{item.time}</Text>
                 </View>
               ))}
             </View>
@@ -3213,26 +3423,20 @@ export default function HomeScreen() {
               DRIVER CHALLENGE
           ══════════════════════════════════════════════════════════ */}
           <View style={[s.section, { marginBottom: 8 }]}>
-            <LinearGradient colors={['#0A1A30', '#112244', '#0D1B35']} style={s.challengeCard}>
-              <LinearGradient
-                colors={['rgba(244,98,31,0.08)', 'transparent']}
-                style={StyleSheet.absoluteFillObject}
-              />
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+            <View style={s.challengeCard}>
+              <View style={s.challengeHeaderRow}>
                 <View style={s.challengeIconWrap}>
-                  <Ionicons name="trophy-outline" size={24} color={COLORS.orange} />
+                  <Ionicons name="checkmark-circle-outline" size={22} color={ORANGE} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.challengeLabel}>DRIVER GOAL</Text>
+                  <Text style={s.challengeLabel}>{"Today's goal"}</Text>
                   <Text style={s.challengeTitle}>Complete 2 rides today</Text>
                   <Text style={s.challengeSub}>Build trust, earnings, and campus momentum.</Text>
                 </View>
               </View>
               <View style={s.challengeProgressBg}>
-                <LinearGradient
-                  colors={[COLORS.orange, '#FF4500']}
-                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                  style={[s.challengeProgressFill, { width: `${Math.min(Math.round((stats.totalRides / 2) * 100), 100)}%` as any }]}
+                <View
+                  style={[s.challengeProgressFill, { width: `${Math.min(Math.round((stats.totalRides / 2) * 100), 100)}%` as any, backgroundColor: COLORS.orange }]}
                 />
               </View>
               <Text style={s.challengeStatus}>
@@ -3240,16 +3444,16 @@ export default function HomeScreen() {
                   ? 'Challenge complete. Great work.'
                   : `${Math.max(2 - stats.totalRides, 0)} ride${Math.max(2 - stats.totalRides, 0) !== 1 ? 's' : ''} to go. Keep momentum.`}
               </Text>
-            </LinearGradient>
+            </View>
           </View>
 
           {/* ══════════════════════════════════════════════════════════
               RECENT RIDES
           ══════════════════════════════════════════════════════════ */}
-          <View style={s.section}>
+          {false && <View style={s.section}>
             <View style={s.sectionHdrRow}>
-              <Text style={themed.sectionTitle}>Recent Rides</Text>
-              <TouchableOpacity onPress={() => router.push('/settings/ride-history')}>
+              <Text style={s.sectionTitle}>Recent Rides</Text>
+              <TouchableOpacity onPress={() => router.push('/(driver)/settings/driver-ride-history')}>
                 <Text style={s.viewAll}>View All</Text>
               </TouchableOpacity>
             </View>
@@ -3264,7 +3468,6 @@ export default function HomeScreen() {
                   const seatCount = (cr as any)?._seatCount;
                   return (
                     <View key={key} style={s.rideCard}>
-                      {appTheme.dark && <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />}
                       <View style={s.rideCardInner}>
                         <View style={s.rideCardTop}>
                           <View style={[s.statusBadge, { backgroundColor: 'rgba(150,170,190,0.15)' }]}>
@@ -3279,7 +3482,7 @@ export default function HomeScreen() {
                         </View>
                         <View style={s.rideFooter}>
                           <Text style={s.ridePrice}>{price}{seatCount > 1 ? ` · ${seatCount} seats` : ''}</Text>
-                          <TouchableOpacity style={s.detailsBtn} onPress={() => router.push('/settings/ride-history')}>
+                          <TouchableOpacity style={s.detailsBtn} onPress={() => router.push('/(driver)/settings/driver-ride-history')}>
                             <Text style={s.detailsBtnText}>History</Text>
                             <Ionicons name="chevron-forward" size={14} color={COLORS.orange} />
                           </TouchableOpacity>
@@ -3289,7 +3492,7 @@ export default function HomeScreen() {
                   );
                 })
             }
-          </View>
+          </View>}
 
           <View style={{ height: 20 }} />
         </ScrollView>
@@ -3302,13 +3505,11 @@ export default function HomeScreen() {
         <Modal animationType="slide" transparent visible={modalVisible} onRequestClose={closeModal}>
           <View style={s.modalOverlay}>
             <View style={s.modalSheet}>
-              <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFillObject} />
-              <LinearGradient colors={['#0D1B2A', '#091526']} style={StyleSheet.absoluteFillObject} />
               <View style={s.modalHandle} />
               <View style={s.modalHdr}>
                 <Text style={s.modalTitle}>Ride Details</Text>
                 <TouchableOpacity onPress={closeModal} style={s.modalCloseBtn}>
-                  <Ionicons name="close" size={20} color="white" />
+                  <Ionicons name="close" size={20} color={NAVY} />
                 </TouchableOpacity>
               </View>
               {selectedRide && (
@@ -3352,7 +3553,7 @@ export default function HomeScreen() {
                                 </View>
                               </View>
                               <TouchableOpacity
-                                style={[s.callBtn, { backgroundColor: p?.phone ? COLORS.orange : 'rgba(255,255,255,0.08)' }]}
+                                style={[s.callBtn, { backgroundColor: p?.phone ? COLORS.orange : '#F3EFE8' }]}
                                 disabled={!p?.phone}
                                 onPress={() => p?.phone && Linking.openURL(`tel:${String(p.phone).replace(/[^0-9+]/g, '')}`).catch(() => {})}
                               >
@@ -3371,7 +3572,7 @@ export default function HomeScreen() {
                           <Text style={s.modalSectionTitle}>Rider</Text>
                           <View style={s.passengerRow}>
                             <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
-                              onPress={() => riderId && router.push({ pathname: '/rider/[id]', params: { id: String(riderId) } })}>
+                              onPress={() => riderId && router.push({ pathname: '/(driver)/rider/[id]', params: { id: String(riderId), returnTo: '/(driver)' } } as any)}>
                               {modalRider?.avatarUrl
                                 ? <Image source={{ uri: modalRider.avatarUrl }} style={s.passengerAvatar} />
                                 : <View style={[s.passengerAvatar, { backgroundColor: COLORS.orangeGlow, alignItems: 'center', justifyContent: 'center' }]}><Ionicons name="person" size={20} color={COLORS.orange}/></View>
@@ -3385,7 +3586,7 @@ export default function HomeScreen() {
                               </View>
                             </TouchableOpacity>
                             <TouchableOpacity
-                              style={[s.callBtn, { backgroundColor: phone ? COLORS.orange : 'rgba(255,255,255,0.08)' }]}
+                              style={[s.callBtn, { backgroundColor: phone ? COLORS.orange : '#F3EFE8' }]}
                               disabled={!phone}
                               onPress={() => phone && Linking.openURL(`tel:${String(phone).replace(/[^0-9+]/g, '')}`).catch(() => {})}
                             >
@@ -3414,9 +3615,9 @@ export default function HomeScreen() {
                     <View style={s.infoGrid}>
                       {[
                         { label: 'Price',    value: selectedRide.priceText ?? '—',   color: COLORS.green },
-                        { label: 'Date',     value: selectedRide.dateTime ? selectedRide.dateTime.toLocaleDateString() : '—', color: '#F0F4FF' },
-                        { label: 'Time',     value: selectedRide.dateTime ? formatTime(selectedRide.dateTime) : '—', color: '#F0F4FF' },
-                        { label: 'Distance', value: (selectedRide as any).__modalDistanceText ?? selectedRide.distanceText ?? '—', color: '#F0F4FF' },
+                        { label: 'Date',     value: selectedRide.dateTime ? selectedRide.dateTime.toLocaleDateString() : '—', color: NAVY },
+                        { label: 'Time',     value: selectedRide.dateTime ? formatTime(selectedRide.dateTime) : '—', color: NAVY },
+                        { label: 'Distance', value: (selectedRide as any).__modalDistanceText ?? selectedRide.distanceText ?? '—', color: NAVY },
                       ].map(({ label, value, color }) => (
                         <View key={label} style={s.infoCell}>
                           <Text style={s.infoCellLabel}>{label}</Text>
@@ -3456,39 +3657,6 @@ export default function HomeScreen() {
         }}
       />
 
-      {/* Rating Modal */}
-      <DriverRatingModal
-        visible={ratingModalVisible}
-        riderName={ratingQueue.length > 0 && ratingIdx < ratingQueue.length ? ratingQueue[ratingIdx]?.riderName : (ratingModalRide?.riderName || undefined)}
-        onClose={() => { setRatingModalVisible(false); setRatingModalRide(null); setRatingError(null); setRatingQueue([]); setRatingIdx(0); }}
-        onSubmit={async ({ stars, comment }) => {
-          const target = ratingQueue.length > 0 ? ratingQueue[ratingIdx] : (ratingModalRide ? { rideId: ratingModalRide.id, riderName: ratingModalRide.riderName } : null);
-          if (!target) return;
-          try {
-            setRatingSubmitting(true); setRatingError(null);
-            await submitRating({ rideId: target.rideId, stars, comment });
-            setRatedByMe((prev) => ({ ...prev, [target.rideId]: true }));
-            setRatingModalVisible(false);
-            Alert.alert('Thanks!', 'Your rating was submitted.');
-            if (uid) await refreshDriverRatingStatCard(uid, setStats);
-            if (ratingQueue.length > 0 && ratingIdx < ratingQueue.length - 1) {
-              setTimeout(() => { setRatingIdx((i) => i + 1); setRatingError(null); setRatingModalVisible(true); }, 500);
-            } else { setRatingModalRide(null); setRatingQueue([]); setRatingIdx(0); }
-          } catch (e: any) {
-            const code = e?.code || e?.message;
-            const map: Record<string, string> = {
-              'already-exists': 'You already rated this ride.',
-              'permission-denied': 'Only participants can rate.',
-              'failed-precondition': 'Ride must be completed before rating.',
-              'out-of-range': 'Rating must be 1–5.',
-            };
-            setRatingError(map[String(code)] || (e?.message || 'Failed to submit rating.'));
-          } finally { setRatingSubmitting(false); }
-        }}
-        submitting={ratingSubmitting}
-        errorText={ratingError}
-      />
-
       {/* Promotion Details Modal */}
       <PromotionDetailsModal
         promotion={selectedPromotion}
@@ -3501,6 +3669,8 @@ export default function HomeScreen() {
         }}
         isClaimed={false}
       />
+
+      <DriverBottomNav activeTab="home" />
     </View>
   );
 }
@@ -3991,173 +4161,7 @@ function isGenericName(v: any): boolean {
 }
 
 
-type LocalTheme = ReturnType<typeof useDriverHomeTheme>;
 
-const createThemedStyles = (t: LocalTheme) =>
-  StyleSheet.create({
-    hdrSub: {
-      fontSize: 13,
-      color: t.sub,
-      fontWeight: '600',
-    },
-    hdrName: {
-      fontSize: 24,
-      fontWeight: '800',
-      color: t.text,
-      letterSpacing: -0.5,
-      lineHeight: 28,
-    },
-    hdrAccent: {
-      fontSize: 24,
-      fontWeight: '800',
-      color: COLORS.orange,
-      letterSpacing: -0.5,
-    },
-    notifBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: t.input,
-      borderWidth: 1,
-      borderColor: t.border,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    mapWrap: {
-      marginHorizontal: 16,
-      marginBottom: 16,
-      height: 250,
-      borderRadius: 26,
-      overflow: 'hidden',
-      borderWidth: 1,
-      borderColor: t.dark ? 'rgba(59,130,246,0.22)' : 'rgba(13,27,42,0.08)',
-      backgroundColor: t.card,
-      shadowColor: '#0D1B2A',
-      shadowOffset: { width: 0, height: 10 },
-      shadowOpacity: t.dark ? 0.18 : 0.08,
-      shadowRadius: 22,
-      elevation: 4,
-    },
-    mapOverlay: {
-      position: 'absolute',
-      bottom: 0,
-      left: 0,
-      right: 0,
-      flexDirection: 'row',
-      alignItems: 'center',
-      padding: 16,
-      borderTopWidth: 1,
-      borderTopColor: t.border,
-      backgroundColor: t.dark ? 'rgba(8,14,23,0.62)' : 'rgba(255,255,255,0.76)',
-      overflow: 'hidden',
-    },
-    mapOverlayHeadline: {
-      color: t.text,
-      fontSize: 16,
-      fontWeight: '800',
-      letterSpacing: -0.3,
-    },
-    mapOverlaySub: {
-      color: t.sub,
-      fontSize: 12,
-      marginTop: 2,
-      fontWeight: '500',
-    },
-    sectionTitle: {
-      fontSize: 18,
-      fontWeight: '800',
-      color: t.text,
-      letterSpacing: -0.3,
-    },
-
-    driverSnapshotCard: {
-      flex: 1,
-      backgroundColor: t.cardStrong,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: t.border,
-      paddingHorizontal: 14,
-      paddingVertical: 14,
-    },
-    
-    driverSnapshotLabel: {
-      color: t.sub,
-      fontSize: 12,
-      marginTop: 4,
-      fontWeight: '500',
-    },
-
-
-    heatName: {
-      fontSize: 13,
-      fontWeight: '800',
-      color: t.text,
-      marginBottom: 3,
-    },
-
-    heatDist: {
-      fontSize: 11,
-      color: t.sub,
-      marginBottom: 6,
-    },
-
-    emptyHotZones: {
-      marginTop: 12,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: t.border,
-      backgroundColor: t.cardStrong,
-      padding: 14,
-    },
-
-    emptyHotZonesText: {
-      flex: 1,
-      color: t.sub,
-      fontSize: 12,
-      fontWeight: '500',
-    },
-    quickAction: {
-      flex: 1,
-      minHeight: 50,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: t.border,
-      backgroundColor: t.card,
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 4,
-    },
-    quickActionText: {
-      color: t.text,
-      fontSize: 12,
-      fontWeight: '800',
-    },
-    activityCard: {
-      borderRadius: 20,
-      borderWidth: 1,
-      borderColor: t.border,
-      overflow: 'hidden',
-      marginTop: 4,
-      backgroundColor: t.card,
-    },
-    activityText: {
-      flex: 1,
-      fontSize: 13,
-      color: t.sub,
-      lineHeight: 18,
-      fontWeight: '500',
-    },
-    activityTime: {
-      fontSize: 11,
-      color: t.sub,
-      fontWeight: '700',
-      minWidth: 42,
-      textAlign: 'right',
-    },
-  });
 const s = StyleSheet.create({
 
   // ── Header ────────────────────────────────────────────────────────────────
@@ -4166,18 +4170,18 @@ const s = StyleSheet.create({
   avatarGlowRing:   { position:'absolute', width:58, height:58, borderRadius:29, borderWidth:2, borderColor:COLORS.orange },
   avatarImg:        { width:46, height:46, borderRadius:23, alignItems:'center', justifyContent:'center' },
   avatarInitial:    { fontSize:20, fontWeight:'800', color:'white' },
-  verifiedDot:      { position:'absolute', bottom:0, right:0, width:14, height:14, borderRadius:7, backgroundColor:COLORS.green, borderWidth:2, borderColor:'#060D18', alignItems:'center', justifyContent:'center' },
-  hdrSub:           { fontSize:13, color:'#7A8FA8', fontWeight:'500' },
-  hdrName:          { fontSize:24, fontWeight:'800', color:'#F0F4FF', letterSpacing:-0.5, lineHeight:28 },
+  verifiedDot:      { position:'absolute', bottom:0, right:0, width:14, height:14, borderRadius:7, backgroundColor:COLORS.green, borderWidth:2, borderColor:BG, alignItems:'center', justifyContent:'center' },
+  hdrSub:           { fontSize:13, color:MUTED, fontWeight:'500' },
+  hdrName:          { fontSize:24, fontWeight:'800', color:NAVY, letterSpacing:-0.5, lineHeight:28 },
   hdrAccent:        { fontSize:24, fontWeight:'800', color:COLORS.orange, letterSpacing:-0.5 },
-  streakBadge:      { backgroundColor:'rgba(244,98,31,0.18)', borderRadius:20, paddingHorizontal:10, paddingVertical:4, borderWidth:1, borderColor:'rgba(244,98,31,0.3)' },
+  streakBadge:      { backgroundColor:COLORS.orangeGlow, borderRadius:20, paddingHorizontal:10, paddingVertical:4, borderWidth:1, borderColor:COLORS.orangeBorder },
   streakText:       { color:COLORS.orange, fontSize:11, fontWeight:'700' },
-  notifBtn:         { width:40, height:40, borderRadius:20, backgroundColor:'rgba(255,255,255,0.08)', alignItems:'center', justifyContent:'center' },
+  notifBtn:         { width:40, height:40, borderRadius:20, backgroundColor:'rgba(21,35,58,0.06)', alignItems:'center', justifyContent:'center' },
   notifBadge:       { position:'absolute', top:-2, right:-2, backgroundColor:COLORS.red, minWidth:16, height:16, borderRadius:8, alignItems:'center', justifyContent:'center', paddingHorizontal:3 },
   notifBadgeText:   { color:'white', fontSize:10, fontWeight:'700' },
 
   // ── Hero Map ──────────────────────────────────────────────────────────────
-  mapWrap:          { marginHorizontal:16, marginBottom:20, height:250, borderRadius:28, overflow:'hidden', borderWidth:1.5, borderColor:'rgba(59,130,246,0.2)' },
+  mapWrap:          { marginHorizontal:16, marginBottom:20, height:250, borderRadius:28, overflow:'hidden', borderWidth:1, borderColor:BORDER },
   mapBase:          { ...StyleSheet.absoluteFillObject as any },
   gridH:            { position:'absolute', left:0, right:0, height:1, backgroundColor:'rgba(59,130,246,0.07)' },
   gridV:            { position:'absolute', top:0, bottom:0, width:1, backgroundColor:'rgba(59,130,246,0.07)' },
@@ -4193,21 +4197,45 @@ const s = StyleSheet.create({
   liveBadge:        { position:'absolute', top:14, left:14, flexDirection:'row', alignItems:'center', gap:6, backgroundColor:'rgba(16,185,129,0.18)', paddingHorizontal:10, paddingVertical:5, borderRadius:20, borderWidth:1, borderColor:'rgba(16,185,129,0.3)' },
   liveDot:          { width:7, height:7, borderRadius:3.5, backgroundColor:COLORS.green },
   liveText:         { color:COLORS.green, fontSize:10, fontWeight:'800', letterSpacing:1.5 },
-  mapOverlay:       { position:'absolute', bottom:0, left:0, right:0, flexDirection:'row', alignItems:'center', padding:16, borderTopWidth:1, borderTopColor:'rgba(255,255,255,0.06)' },
-  mapOverlayHeadline: { color:'white', fontSize:16, fontWeight:'800', letterSpacing:-0.3 },
-  mapOverlaySub:    { color:'rgba(255,255,255,0.55)', fontSize:12, marginTop:2 },
+  heroCopy:         { paddingHorizontal:20, marginBottom:18 },
+  heroTitle:        { color:NAVY, fontSize:30, lineHeight:36, fontWeight:'600' },
+  heroAccent:       { color:COLORS.orange, fontStyle:'italic', fontWeight:'600' },
+  heroSub:          { color:MUTED, fontSize:15, lineHeight:21, marginTop:5 },
+  mapOverlay:       { position:'absolute', bottom:0, left:0, right:0, flexDirection:'row', alignItems:'center', padding:16, borderTopWidth:1, borderTopColor:BORDER, backgroundColor:'rgba(255,255,255,0.96)' },
+  mapOverlayHeadline: { color:NAVY, fontSize:16, fontWeight:'800', letterSpacing:-0.3 },
+  mapOverlaySub:    { color:MUTED, fontSize:12, marginTop:2 },
   goBtn:            { marginLeft:12 },
-  goBtnInner:       { flexDirection:'row', alignItems:'center', gap:6, paddingHorizontal:18, paddingVertical:10, borderRadius:20 },
+  goBtnInner:       { flexDirection:'row', alignItems:'center', gap:6, paddingHorizontal:18, paddingVertical:10, borderRadius:20, backgroundColor:COLORS.orange },
   goBtnText:        { color:'white', fontSize:15, fontWeight:'800' },
 
   // ── Sections ──────────────────────────────────────────────────────────────
   section:          { paddingHorizontal:16, marginBottom:24 },
+  homePrimaryBlock: { marginBottom: 34 },
   sectionHdrRow:    { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:14 },
-  sectionTitle:     { fontSize:18, fontWeight:'800', color:'#F0F4FF', letterSpacing:-0.3 },
-  sectionSub:       { fontSize:12, color:'#7A8FA8', fontWeight:'500' },
+  sectionTitle:     { fontSize:18, fontWeight:'800', color:NAVY, letterSpacing:-0.3 },
+  sectionSub:       { fontSize:12, color:MUTED, fontWeight:'500' },
   viewAll:          { fontSize:13, color:COLORS.orange, fontWeight:'600' },
-  livePillSmall:    { flexDirection:'row', alignItems:'center', gap:5, backgroundColor:'rgba(16,185,129,0.12)', paddingHorizontal:8, paddingVertical:3, borderRadius:12 },
-  livePillText:     { color:COLORS.green, fontSize:11, fontWeight:'600' },
+  livePillSmall:    { flexDirection:'row', alignItems:'center', gap:5, backgroundColor:'#F9E8DB', paddingHorizontal:9, paddingVertical:4, borderRadius:12 },
+  livePillText:     { color:ORANGE, fontSize:11, fontWeight:'700' },
+
+  driverHomeSearchCard: { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1, borderColor: BORDER, padding: 14, shadowColor: NAVY, shadowOpacity: 0.06, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 2 },
+  driverHomeRouteRow: { flexDirection: 'row' },
+  driverHomeRouteRail: { width: 28, alignItems: 'center', paddingTop: 16, paddingBottom: 16 },
+  driverHomeNavyDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: NAVY },
+  driverHomeOrangeDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: ORANGE },
+  driverHomeDashedLine: { flex: 1, width: 1, borderLeftWidth: 1, borderStyle: 'dashed', borderColor: '#CBD5E1', marginVertical: 7 },
+  driverHomeRouteInputs: { flex: 1, gap: 9 },
+  driverHomeInputPill: { height: 48, borderRadius: 13, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', paddingHorizontal: 14, justifyContent: 'center' },
+  driverHomeInputText: { color: NAVY, fontSize: 15, fontWeight: '500' },
+  driverHomeMetaRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  driverHomeMetaPill: { flex: 1, height: 44, borderRadius: 13, borderWidth: 1, borderColor: '#D7DCE3', justifyContent: 'center', paddingHorizontal: 13 },
+  driverHomeMetaText: { color: NAVY, fontSize: 13, fontWeight: '500' },
+  driverHomePrimaryBtn: { height: 48, borderRadius: 24, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
+  driverHomePrimaryText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
+  driverActivityCard: { borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 18, minHeight: 150, shadowColor: NAVY, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 14, elevation: 2 },
+  driverActivityRoute: { color: NAVY, fontSize: 18, lineHeight: 24, fontWeight: '800', marginBottom: 16 },
+  activityBadge: { alignSelf: 'flex-start', backgroundColor: COLORS.orangeGlow, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: COLORS.orangeBorder },
+  activityBadgeText: { color: COLORS.orange, fontSize: 11, fontWeight: '800', textTransform: 'capitalize' },
 
   
   driverSnapshotRow: {
@@ -4233,86 +4261,114 @@ const s = StyleSheet.create({
 
   // ── Dots ──────────────────────────────────────────────────────────────────
   dotsRow:          { flexDirection:'row', justifyContent:'center', marginTop:12, gap:6 },
-  dot:              { width:6, height:6, borderRadius:3, backgroundColor:'rgba(255,255,255,0.15)' },
-  dotActive:        { backgroundColor:COLORS.orange, width:20, borderRadius:3 },
+  dot:              { width:6, height:6, borderRadius:3, backgroundColor:'#D6D0C7' },
+  dotActive:        { backgroundColor:SECONDARY, width:20, borderRadius:3 },
 
   // ── Hot Zones ─────────────────────────────────────────────────────────────
-  heatCard:         { width:145, borderRadius:20, borderWidth:1.5, overflow:'hidden', padding:14, marginRight:12, justifyContent:'flex-start' },
+  promotionList: { paddingBottom: 12, paddingRight: 8 },
+  promotionLoading: { minHeight: 120, alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
+  promotionEmptyCard: { minHeight: 92, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 18 },
+  promotionEmptyTitle: { color: NAVY, fontSize: 15, fontWeight: '700' },
+  promotionEmptyText: { color: MUTED, fontSize: 13, lineHeight: 18, marginTop: 3 },
+  uberPromoCard: { height: 174, marginRight: 12, flexDirection: 'row', overflow: 'hidden', borderRadius: 20, borderWidth: 1, borderColor: '#E3DED6', backgroundColor: '#FFFFFF', shadowColor: NAVY, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 12, elevation: 2 },
+  uberPromoCopy: { width: '62%', paddingHorizontal: 18, paddingVertical: 17, justifyContent: 'space-between' },
+  uberPromoTitle: { color: NAVY, fontSize: 21, lineHeight: 25, fontWeight: '800', letterSpacing: -0.35 },
+  uberPromoDescription: { color: MUTED, fontSize: 12, lineHeight: 17, marginTop: 6 },
+  uberPromoCta: { alignSelf: 'flex-start', minHeight: 34, borderRadius: 17, backgroundColor: '#F3EFE8', paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  uberPromoCtaText: { color: NAVY, fontSize: 13, fontWeight: '700' },
+  uberPromoVisual: { flex: 1, backgroundColor: '#F6D8C6', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  uberPromoVisualSecondary: { backgroundColor: '#DDE5F2' },
+  promoBubble: { position: 'absolute', borderRadius: 999, backgroundColor: '#F2B994' },
+  promoBubbleSecondary: { backgroundColor: '#B8C6DE' },
+  promoBubbleTop: { width: 108, height: 108, top: -45, right: -32 },
+  promoBubbleBottom: { width: 92, height: 92, bottom: -32, left: -26 },
+  promoIconLarge: { width: 76, height: 76, borderRadius: 24, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-6deg' }], shadowColor: ORANGE, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.22, shadowRadius: 12, elevation: 4 },
+  promoIconLargeSecondary: { backgroundColor: SECONDARY, shadowColor: SECONDARY },
+  promoIconSmall: { position: 'absolute', right: 13, bottom: 14, width: 42, height: 42, borderRadius: 21, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '8deg' }] },
+
+  heatCard:         { width:145, borderRadius:20, borderWidth:1, overflow:'hidden', padding:14, marginRight:12, justifyContent:'flex-start', backgroundColor:'#FFFFFF' },
   heatEmoji:        { fontSize:26, marginBottom:10 },
   heatPill:         { flexDirection:'row', alignItems:'center', gap:5, paddingHorizontal:8, paddingVertical:3, borderRadius:12, alignSelf:'flex-start', marginBottom:8 },
   heatDot:          { width:5, height:5, borderRadius:2.5 },
   heatRiders:       { fontSize:11, fontWeight:'700' },
-  heatName:         { fontSize:13, fontWeight:'700', color:'white', marginBottom:2 },
-  heatDist:         { fontSize:11, color:'rgba(255,255,255,0.5)', marginBottom:6 },
+  heatName:         { fontSize:13, fontWeight:'700', color:NAVY, marginBottom:2 },
+  heatDist:         { fontSize:11, color:MUTED, marginBottom:6 },
+  emptyHotZones:    { marginTop:12, flexDirection:'row', alignItems:'center', gap:8, borderRadius:16, borderWidth:1, borderColor:BORDER, backgroundColor:'#FFFFFF', padding:14 },
+  emptyHotZonesText:{ flex:1, color:MUTED, fontSize:12, fontWeight:'500' },
   heatEarnRow:      { flexDirection:'row', alignItems:'center', gap:4 },
   heatEarn:         { fontSize:11, fontWeight:'600' },
 
   // ── Ride Cards ────────────────────────────────────────────────────────────
-  rideCard:         { borderRadius:20, borderWidth:1.5, borderColor:'rgba(255,255,255,0.08)', overflow:'hidden', marginBottom:12, backgroundColor:'rgba(255,255,255,0.04)' },
+  rideCard:         { borderRadius:20, borderWidth:1, borderColor:BORDER, overflow:'hidden', marginBottom:12, backgroundColor:'#FFFFFF', shadowColor:NAVY, shadowOffset:{width:0,height:2}, shadowOpacity:0.06, shadowRadius:12, elevation:2 },
   rideCardInner:    { padding:16 },
   rideCardTop:      { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:12 },
-  rideDateText:     { fontSize:12, color:'#7A8FA8', fontWeight:'500' },
+  rideDateText:     { fontSize:12, color:MUTED, fontWeight:'500' },
   statusBadge:      { paddingHorizontal:10, paddingVertical:4, borderRadius:50 },
   statusBadgeText:  { fontSize:12, fontWeight:'600' },
   routeWrap:        { marginBottom:12 },
   routeRow:         { flexDirection:'row', alignItems:'center', marginBottom:5 },
-  routeConnector:   { width:2, height:10, backgroundColor:'rgba(255,255,255,0.12)', marginLeft:3, marginBottom:5 },
+  routeConnector:   { width:2, height:10, backgroundColor:BORDER, marginLeft:3, marginBottom:5 },
   dotOrange:        { width:8, height:8, borderRadius:4, backgroundColor:COLORS.orange, marginRight:10, flexShrink:0 },
-  dotGray:          { width:8, height:8, borderRadius:4, backgroundColor:'#475569', marginRight:10, flexShrink:0 },
-  routeFrom:        { fontSize:14, fontWeight:'600', flex:1, color:'#F0F4FF' },
-  routeTo:          { fontSize:14, fontWeight:'400', flex:1, color:'#7A8FA8' },
+  dotGray:          { width:8, height:8, borderRadius:4, backgroundColor:MUTED, marginRight:10, flexShrink:0 },
+  routeFrom:        { fontSize:14, fontWeight:'600', flex:1, color:NAVY },
+  routeTo:          { fontSize:14, fontWeight:'400', flex:1, color:MUTED },
   rideFooter:       { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
   ridePrice:        { fontSize:15, fontWeight:'700', color:COLORS.orange },
-  rideMeta:         { fontSize:12, color:'#7A8FA8' },
+  rideMeta:         { fontSize:12, color:MUTED },
   detailsBtn:       { flexDirection:'row', alignItems:'center', gap:2 },
   detailsBtnText:   { fontSize:13, color:COLORS.orange, fontWeight:'600' },
   actionRow:        { flexDirection:'row', justifyContent:'flex-end', alignItems:'center', gap:8, marginTop:12, flexWrap:'wrap' },
-  iconBtn:          { width:36, height:36, borderRadius:18, alignItems:'center', justifyContent:'center', backgroundColor:'rgba(255,255,255,0.08)' },
-  waitingText:      { fontSize:12, color:'#7A8FA8', textAlign:'right', marginTop:8, fontStyle:'italic' },
+  iconBtn:          { width:36, height:36, borderRadius:18, alignItems:'center', justifyContent:'center', backgroundColor:'#F3EFE8' },
+  waitingText:      { fontSize:12, color:MUTED, textAlign:'right', marginTop:8, fontStyle:'italic' },
 
   // ── Campus Activity ───────────────────────────────────────────────────────
-  activityCard:     { borderRadius:20, borderWidth:1.5, borderColor:'rgba(255,255,255,0.08)', overflow:'hidden', marginTop:4, backgroundColor:'rgba(255,255,255,0.03)' },
-  activityRow:      { flexDirection:'row', alignItems:'center', padding:14, gap:10 },
-  activityIconWrap: { width:34, height:34, borderRadius:10, alignItems:'center', justifyContent:'center', flexShrink:0 },
-  activityText:     { flex:1, fontSize:13, color:'rgba(255,255,255,0.65)', lineHeight:18 },
-  activityTime:     { fontSize:11, color:'rgba(255,255,255,0.28)', fontWeight:'500', minWidth:38, textAlign:'right' },
+  activityCard:     { borderRadius:18, borderWidth:1, borderColor:BORDER, overflow:'hidden', marginTop:2, backgroundColor:'#FFFFFF' },
+  activityRow:      { flexDirection:'row', alignItems:'center', paddingHorizontal:14, paddingVertical:13, gap:12 },
+  activityIconWrap: { width:34, height:34, borderRadius:17, backgroundColor:'#F9E8DB', alignItems:'center', justifyContent:'center', flexShrink:0 },
+  activityText:     { flex:1, fontSize:13, color:NAVY, lineHeight:18, fontWeight:'500' },
+  activityTime:     { fontSize:11, color:MUTED, fontWeight:'700', minWidth:42, textAlign:'right' },
 
   // ── Challenge ─────────────────────────────────────────────────────────────
-  challengeCard:        { borderRadius:22, padding:20, overflow:'hidden', borderWidth:1.5, borderColor:'rgba(244,98,31,0.2)' },
-  challengeIconWrap:    { width:52, height:52, borderRadius:16, backgroundColor:'rgba(244,98,31,0.15)', alignItems:'center', justifyContent:'center' },
-  challengeLabel:       { color:COLORS.orange, fontSize:10, fontWeight:'800', letterSpacing:1.2, textTransform:'uppercase', marginBottom:3 },
-  challengeTitle:       { color:'white', fontSize:16, fontWeight:'800', letterSpacing:-0.3 },
-  challengeSub:         { color:'rgba(255,255,255,0.5)', fontSize:12, marginTop:2 },
-  challengeProgressBg:  { height:5, backgroundColor:'rgba(255,255,255,0.08)', borderRadius:3, marginBottom:10, overflow:'hidden' },
+  challengeCard:        { borderRadius:18, padding:16, overflow:'hidden', borderWidth:1, borderColor:BORDER, backgroundColor:'#FFFFFF' },
+  challengeHeaderRow:   { flexDirection:'row', alignItems:'center', gap:12, marginBottom:14 },
+  challengeIconWrap:    { width:42, height:42, borderRadius:21, backgroundColor:'#F9E8DB', alignItems:'center', justifyContent:'center' },
+  challengeLabel:       { color:ORANGE, fontSize:12, fontWeight:'700', marginBottom:3 },
+  challengeTitle:       { color:NAVY, fontSize:17, fontWeight:'800' },
+  challengeSub:         { color:MUTED, fontSize:12, lineHeight:17, marginTop:2 },
+  challengeProgressBg:  { height:6, backgroundColor:'#EFE9E1', borderRadius:3, marginBottom:10, overflow:'hidden' },
   challengeProgressFill:{ height:'100%' as any, borderRadius:3 },
-  challengeStatus:      { color:'rgba(255,255,255,0.55)', fontSize:12, lineHeight:17 },
+  challengeStatus:      { color:NAVY, fontSize:12, lineHeight:17, fontWeight:'600' },
 
   // ── Empty State ───────────────────────────────────────────────────────────
   emptyBox:         { alignItems:'center', paddingVertical:32, gap:8 },
-  emptyIconWrap:    { width:56, height:56, borderRadius:18, backgroundColor:'rgba(244,98,31,0.1)', alignItems:'center', justifyContent:'center', marginBottom:4 },
-  emptyTitle:       { fontSize:15, fontWeight:'700', color:'#F0F4FF' },
-  emptyText:        { fontSize:13, color:'#7A8FA8', textAlign:'center' },
+  emptyIconWrap:    { width:56, height:56, borderRadius:18, backgroundColor:COLORS.orangeGlow, alignItems:'center', justifyContent:'center', marginBottom:4 },
+  emptyTitle:       { fontSize:15, fontWeight:'700', color:NAVY },
+  emptyText:        { fontSize:13, color:MUTED, textAlign:'center' },
 
   // ── Modal ─────────────────────────────────────────────────────────────────
-  modalOverlay:     { flex:1, backgroundColor:'rgba(0,0,0,0.7)', justifyContent:'flex-end' },
-  modalSheet:       { borderTopLeftRadius:28, borderTopRightRadius:28, maxHeight:'92%', overflow:'hidden', paddingBottom:40, borderTopWidth:1, borderColor:'rgba(255,255,255,0.08)' },
-  modalHandle:      { width:40, height:4, borderRadius:2, backgroundColor:'rgba(255,255,255,0.15)', alignSelf:'center', marginTop:12, marginBottom:4 },
+  modalOverlay:     { flex:1, backgroundColor:'rgba(0,0,0,0.45)', justifyContent:'flex-end' },
+  modalSheet:       { borderTopLeftRadius:28, borderTopRightRadius:28, maxHeight:'92%', overflow:'hidden', paddingBottom:40, backgroundColor:BG, borderTopWidth:1, borderColor:BORDER },
+  modalHandle:      { width:40, height:4, borderRadius:2, backgroundColor:BORDER, alignSelf:'center', marginTop:12, marginBottom:4 },
   modalHdr:         { flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingHorizontal:24, paddingVertical:16 },
-  modalTitle:       { fontSize:18, fontWeight:'800', color:'#F0F4FF', letterSpacing:-0.3 },
-  modalCloseBtn:    { width:34, height:34, borderRadius:17, backgroundColor:'rgba(255,255,255,0.08)', alignItems:'center', justifyContent:'center' },
+  modalTitle:       { fontSize:18, fontWeight:'800', color:NAVY, letterSpacing:-0.3 },
+  modalCloseBtn:    { width:34, height:34, borderRadius:17, backgroundColor:'#F3EFE8', alignItems:'center', justifyContent:'center' },
   modalSection:     { marginBottom:20, marginTop:4 },
-  modalSectionTitle:{ fontSize:11, fontWeight:'700', letterSpacing:1, textTransform:'uppercase', color:'#7A8FA8', marginBottom:10 },
-  passengerRow:     { flexDirection:'row', alignItems:'center', backgroundColor:'rgba(255,255,255,0.05)', borderRadius:14, padding:12, marginBottom:8 },
+  modalSectionTitle:{ fontSize:11, fontWeight:'700', letterSpacing:1, textTransform:'uppercase', color:MUTED, marginBottom:10 },
+  passengerRow:     { flexDirection:'row', alignItems:'center', backgroundColor:'#F3EFE8', borderRadius:14, padding:12, marginBottom:8 },
   passengerAvatar:  { width:44, height:44, borderRadius:22 },
-  passengerName:    { fontSize:15, fontWeight:'700', color:'#F0F4FF', marginBottom:2 },
-  passengerRating:  { fontSize:13, color:'#7A8FA8', fontWeight:'500' },
+  passengerName:    { fontSize:15, fontWeight:'700', color:NAVY, marginBottom:2 },
+  passengerRating:  { fontSize:13, color:MUTED, fontWeight:'500' },
   callBtn:          { width:40, height:40, borderRadius:20, alignItems:'center', justifyContent:'center' },
-  routeCard:        { borderRadius:14, borderWidth:1, borderColor:'rgba(255,255,255,0.08)', padding:16, backgroundColor:'rgba(255,255,255,0.03)' },
+  routeCard:        { borderRadius:14, borderWidth:1, borderColor:BORDER, padding:16, backgroundColor:'#FFFFFF' },
   infoGrid:         { flexDirection:'row', flexWrap:'wrap', gap:10 },
-  infoCell:         { flex:1, minWidth:'44%', borderRadius:12, borderWidth:1, borderColor:'rgba(255,255,255,0.08)', padding:12, alignItems:'center', backgroundColor:'rgba(255,255,255,0.03)' },
-  infoCellLabel:    { fontSize:10, fontWeight:'700', letterSpacing:0.5, textTransform:'uppercase', color:'#7A8FA8', marginBottom:4 },
+  infoCell:         { flex:1, minWidth:'44%', borderRadius:12, borderWidth:1, borderColor:BORDER, padding:12, alignItems:'center', backgroundColor:'#F3EFE8' },
+  infoCellLabel:    { fontSize:10, fontWeight:'700', letterSpacing:0.5, textTransform:'uppercase', color:MUTED, marginBottom:4 },
   infoCellValue:    { fontSize:15, fontWeight:'700' },
     root: {
+    flex: 1,
+  },
+
+  scroll: {
     flex: 1,
   },
 
@@ -4385,5 +4441,19 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(8,14,23,0.35)',
+  },
+
+  webMapFallback: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#F3EFE8',
+  },
+
+  mapFallbackText: {
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
   },
 });

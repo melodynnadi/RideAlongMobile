@@ -1,102 +1,34 @@
-import { Tabs } from 'expo-router';
-import { Platform } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-
-import { HapticTab } from '@/components/HapticTab';
-import TabBarBackground from '@/components/ui/TabBarBackground';
-import { useTheme } from '@/hooks/useTheme';
-import { useUnreadMessages } from '@/hooks/useUnreadMessages';
+﻿import { Tabs } from 'expo-router';
 
 export default function DriverTabLayout() {
-  const theme = useTheme();
-  const totalUnread = useUnreadMessages();
-
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: theme.colors.primary,
-        tabBarInactiveTintColor: theme.colors.muted,
         headerShown: false,
-        tabBarButton: HapticTab,
-        tabBarBackground: TabBarBackground,
-        tabBarStyle: {
-          backgroundColor: '#101826',
-          borderTopColor: '#1E2D45',
-          borderTopWidth: 1,
-          height: Platform.OS === 'ios' ? 90 : 80,
-          paddingBottom: Platform.OS === 'ios' ? 25 : 15,
-          paddingTop: 10,
-        },
+        tabBarStyle: { display: 'none' },
       }}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size || 24} color={color} />
-          ),
-        }}
-      />
-
-      <Tabs.Screen
-        name="book"
-        options={{
-          title: 'Offer',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="car" size={size || 24} color={color} />
-          ),
-        }}
-      />
-
-      <Tabs.Screen
-        name="requests"
-        options={{
-          title: 'Requests',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="map" size={size || 24} color={color} />
-          ),
-        }}
-      />
-
-      <Tabs.Screen
-        name="messages"
-        options={{
-          title: 'Messages',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="chatbubbles" size={size || 24} color={color} />
-          ),
-          tabBarBadge: totalUnread > 0 ? totalUnread : undefined,
-          tabBarBadgeStyle: {
-            backgroundColor: '#EF4444',
-            color: '#FFFFFF',
-            fontSize: 12,
-            fontWeight: 'bold',
-          },
-        }}
-      />
-
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person" size={size || 24} color={color} />
-          ),
-        }}
-      />
+      <Tabs.Screen name="index" options={{ title: 'Home' }} />
+      <Tabs.Screen name="book" options={{ title: 'Offer' }} />
+      <Tabs.Screen name="requests" options={{ title: 'Requests' }} />
+      <Tabs.Screen name="messages" options={{ title: 'Messages' }} />
+      <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
 
       {/* Hidden from bottom nav, still routable */}
       <Tabs.Screen name="notifications" options={{ href: null }} />
       <Tabs.Screen name="earnings" options={{ href: null }} />
       <Tabs.Screen name="invite" options={{ href: null }} />
-      <Tabs.Screen name="settings" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings" options={{ href: null }} />
       <Tabs.Screen name="legal" options={{ href: null }} />
       <Tabs.Screen name="legal/privacy" options={{ href: null }} />
       <Tabs.Screen name="legal/terms" options={{ href: null }} />
       <Tabs.Screen name="messages/[chatId]" options={{ href: null }} />
       <Tabs.Screen name="request/[id]" options={{ href: null }} />
+      <Tabs.Screen name="trip/[confirmedRideId]" options={{ href: null }} />
       <Tabs.Screen name="rider/[id]" options={{ href: null }} />
+      <Tabs.Screen name="rate-trip" options={{ href: null }} />
+      <Tabs.Screen name="my-postings" options={{ href: null }} />
+      <Tabs.Screen name="edit-posting" options={{ href: null }} />
     </Tabs>
   );
 }

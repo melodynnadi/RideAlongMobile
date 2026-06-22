@@ -1,0 +1,475 @@
+env: load .env
+env: export EXPO_PUBLIC_FIREBASE_API_KEY EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN EXPO_PUBLIC_FIREBASE_PROJECT_ID EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID EXPO_PUBLIC_FIREBASE_APP_ID EXPO_PUBLIC_GOOGLE_MAPS_API_KEY EXPO_PUBLIC_API_URL
+Starting project at C:\Users\melod\OneDrive\Desktop\RideAlongMobile
+Starting Metro Bundler
+The following packages should be updated for best compatibility with the installed expo version:
+  @react-native-picker/picker@2.11.4 - expected version: 2.11.1
+  babel-preset-expo@55.0.19 - expected version: ~54.0.10
+  expo@54.0.34 - expected version: ~54.0.35
+  expo-file-system@19.0.22 - expected version: ~19.0.23
+  expo-font@14.0.11 - expected version: ~14.0.12
+  expo-router@6.0.23 - expected version: ~6.0.24
+  expo-updates@29.0.17 - expected version: ~29.0.18
+  react-native-safe-area-context@5.7.0 - expected version: ~5.6.0
+Your project may not work correctly until you install the expected versions of the packages.
+Waiting on http://localhost:8090
+Logs for your project will appear below.
+Web .\index.tsx ▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 89.2% (2676/2833)
+λ node_modules\expo-router\node\render.js ▓▓▓▓▓▓▓▓░░░░░░░░ 54.2% ( 738/2591)
+λ Bundled 4103ms node_modules\expo-router\node\render.js (3586 modules)
+Web Bundled 5129ms index.tsx (3380 modules)
+[expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+"shadow*" style props are deprecated. Use "boxShadow".
+λ  WARN  [Layout children]: No route named "legal" exists in nested children: [
+  'book',              'earnings',
+  'index',             'invite',
+  'messages',          'notifications',
+  'profile',           'requests',
+  'legal/privacy',     'legal/terms',
+  'messages/[chatId]', 'request/[id]',
+  'rider/[id]',        'settings'
+] 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  map (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:69:21)
+  getSortedChildren (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:62:10)
+  useSortedScreens (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:121:38)
+  Component (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\layouts\withLayoutContext.js:151:57)
+  Object.callComponentInDEV [as react-stack-bottom-frame] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:8970:18)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:4699:19)
+  run (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5539:39)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5899:31)
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  warnOnce (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\warnOnce\index.js:24:13)
+  createDOMProps (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\createDOMProps\index.js:805:13)
+  createElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\createElement\index.js:23:32)
+  Component (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\View\index.js:111:23)
+  Object.callComponentInDEV [as react-stack-bottom-frame] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:8970:18)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:4699:19)
+  run (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5539:39)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5899:31)
+  renderNodeDestructive (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5849:11)
+λ  LOG  [StudentVerificationBanner] State: { isVerified: false, verificationStatus: null, bannerDismissed: false }
+Error initializing settings: ReferenceError: window is not defined
+    at getValue (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\@react-native-async-storage\async-storage\lib\commonjs\AsyncStorage.js:63:52)
+    at C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\@react-native-async-storage\async-storage\lib\commonjs\AsyncStorage.js:39:21
+    at new Promise (<anonymous>)
+    at createPromise (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\@react-native-async-storage\async-storage\lib\commonjs\AsyncStorage.js:37:10)
+    at Object.getItem (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\@react-native-async-storage\async-storage\lib\commonjs\AsyncStorage.js:63:12)
+    at SettingsService.initialize (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:23:41)
+    at SettingsService.getSettings (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:39:18)
+    at SettingsService.isPushNotificationsEnabled (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:60:33)
+    at updateNotificationHandler (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\notificationService.ts:70:45)
+    at C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\notificationService.ts:103:1
+Web .\index.tsx ▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 92.4% (2821/2951)
+λ Bundled 166ms node_modules\expo-router\node\render.js (1 module)
+Web Bundled 6135ms index.tsx (3412 modules)
+Web Bundled 2370ms index.tsx (1 module)
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+[expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+"shadow*" style props are deprecated. Use "boxShadow".
+λ  WARN  [Layout children]: No route named "legal" exists in nested children: [
+  'book',              'earnings',
+  'index',             'invite',
+  'messages',          'notifications',
+  'profile',           'requests',
+  'legal/privacy',     'legal/terms',
+  'messages/[chatId]', 'request/[id]',
+  'rider/[id]',        'settings'
+] 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  map (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:69:21)
+  getSortedChildren (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:62:10)
+  useSortedScreens (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:121:38)
+  Component (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\layouts\withLayoutContext.js:151:57)
+  Object.callComponentInDEV [as react-stack-bottom-frame] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:8970:18)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:4699:19)
+  run (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5539:39)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5899:31)
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  warnOnce (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\warnOnce\index.js:24:13)
+  createDOMProps (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\createDOMProps\index.js:805:13)
+  createElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\createElement\index.js:23:32)
+  Component (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\View\index.js:111:23)
+  Object.callComponentInDEV [as react-stack-bottom-frame] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:8970:18)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:4699:19)
+  run (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5539:39)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5899:31)
+  renderNodeDestructive (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5849:11)
+λ  LOG  [StudentVerificationBanner] State: { isVerified: false, verificationStatus: null, bannerDismissed: false }
+Error initializing settings: ReferenceError: window is not defined
+    at getValue (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\@react-native-async-storage\async-storage\lib\commonjs\AsyncStorage.js:63:52)
+    at C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\@react-native-async-storage\async-storage\lib\commonjs\AsyncStorage.js:39:21
+    at new Promise (<anonymous>)
+    at createPromise (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\@react-native-async-storage\async-storage\lib\commonjs\AsyncStorage.js:37:10)
+    at Object.getItem (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\@react-native-async-storage\async-storage\lib\commonjs\AsyncStorage.js:63:12)
+    at SettingsService.initialize (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:23:41)
+    at SettingsService.getSettings (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:39:18)
+    at SettingsService.isPushNotificationsEnabled (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:60:33)
+    at updateNotificationHandler (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\notificationService.ts:70:45)
+    at C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\notificationService.ts:103:1
+ LOG  [web] Logs will appear in the browser console
+Error: Asset not found: C:\Users\melod\OneDrive\Desktop\RideAlongMobile\assets\logo text - Edited.png for platform: (unspecified)
+    at getAbsoluteAssetRecord (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\metro\src\Assets.js:129:11)
+    at getAsset (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\metro\src\Assets.js:224:18)
+    at Server._processSingleAssetRequest (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\metro\src\Server.js:436:20)
+    at Server._processRequest (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\metro\src\Server.js:535:7)
+› Detected a change in metro.config.js. Restart the server to see the new results.
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+λ Bundled 2156ms node_modules\expo-router\node\render.js (1 module)
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 7304ms index.tsx (1 module)
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+[expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+"shadow*" style props are deprecated. Use "boxShadow".
+λ  WARN  [Layout children]: No route named "legal" exists in nested children: [
+  'book',              'earnings',
+  'index',             'invite',
+  'messages',          'notifications',
+  'profile',           'requests',
+  'legal/privacy',     'legal/terms',
+  'messages/[chatId]', 'request/[id]',
+  'rider/[id]',        'settings'
+] 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  map (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:69:21)
+  getSortedChildren (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:62:10)
+  useSortedScreens (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:121:38)
+  jsxChildrenParents (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\layouts\withLayoutContext.js:151:57)
+  Object.react-stack-bottom-frame (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server.node.development.js:82:13)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5079:19)
+  renderElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5779:37)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6185:33)
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  warnOnce (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\warnOnce\index.js:24:13)
+  createDOMProps (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\createDOMProps\index.js:805:13)
+  createElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\createElement\index.js:23:32)
+  jsxChildrenParents (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\View\index.js:111:23)
+  Object.react-stack-bottom-frame (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server.node.development.js:82:13)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5079:19)
+  renderElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5779:37)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6185:33)
+  renderNodeDestructive (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6154:25)
+λ  LOG  [StudentVerificationBanner] State: { isVerified: false, verificationStatus: null, bannerDismissed: false }
+Error initializing settings: ReferenceError: window is not defined
+    at args (C:/Users/melod/OneDrive/Desktop/RideAlongMobile/node_modules/expo-router/node/render.js.bundle?platform=web&dev=true&hot=false&transform.engine=hermes&transform.routerRoot=app&resolver.environment=node&transform.environment=node&unstable_transformProfile=hermes-stable:375013:54)
+    at getItem (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\@react-native-async-storage\async-storage\lib\commonjs\hooks.js:13:20)
+    at new Promise (<anonymous>)
+    at createPromise (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\@react-native-async-storage\async-storage\lib\commonjs\hooks.js:11:5)
+    at Object.getItem (C:/Users/melod/OneDrive/Desktop/RideAlongMobile/node_modules/expo-router/node/render.js.bundle?platform=web&dev=true&hot=false&transform.engine=hermes&transform.routerRoot=app&resolver.environment=node&transform.environment=node&unstable_transformProfile=hermes-stable:375013:14)
+    at SettingsService.isInitialized [as initialize] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:59:56)
+    at SettingsService.getSettings (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:76:10)
+    at SettingsService.isPushNotificationsEnabled (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\app\(driver)\messages\[chatId].tsx:1:1)
+    at updateNotificationHandler (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\notificationService.ts:195:38)
+    at C:/Users/melod/OneDrive/Desktop/RideAlongMobile/node_modules/expo-router/node/render.js.bundle?platform=web&dev=true&hot=false&transform.engine=hermes&transform.routerRoot=app&resolver.environment=node&transform.environment=node&unstable_transformProfile=hermes-stable:190638:3
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+λ Bundled 803ms node_modules\expo-router\node\render.js (1 module)
+[expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+"shadow*" style props are deprecated. Use "boxShadow".
+λ  WARN  [Layout children]: No route named "legal" exists in nested children: [
+  'book',              'earnings',
+  'index',             'invite',
+  'messages',          'notifications',
+  'profile',           'requests',
+  'legal/privacy',     'legal/terms',
+  'messages/[chatId]', 'request/[id]',
+  'rider/[id]',        'settings'
+] 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  map (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:69:21)
+  getSortedChildren (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:62:10)
+  useSortedScreens (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:121:38)
+  <unknown> (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\layouts\withLayoutContext.js:151:57)
+  Object.instance [as react-stack-bottom-frame] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server.node.development.js:87:18)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5105:17)
+  renderElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5780:73)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6190:41)
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  warnOnce (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\warnOnce\index.js:24:13)
+  createDOMProps (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\createDOMProps\index.js:805:13)
+  createElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\createElement\index.js:23:32)
+  View (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\View\index.js:111:23)
+  Object.instance [as react-stack-bottom-frame] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server.node.development.js:87:18)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5105:17)
+  renderElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5780:73)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6190:41)
+  renderNodeDestructive (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6168:42)
+λ  LOG  [StudentVerificationBanner] State: { isVerified: false, verificationStatus: null, bannerDismissed: false }
+Error initializing settings: ReferenceError: window is not defined
+    at C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:5:13
+    at C:/Users/melod/OneDrive/Desktop/RideAlongMobile/node_modules/expo-router/node/render.js.bundle?platform=web&dev=true&hot=false&transform.engine=hermes&transform.routerRoot=app&resolver.environment=node&transform.environment=node&unstable_transformProfile=hermes-stable:374994:23
+    at new Promise (<anonymous>)
+    at createPromise (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\@react-native-async-storage\async-storage\lib\commonjs\hooks.js:16:1)
+    at Object.getItem (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:5:1)
+    at SettingsService.isInitialized [as initialize] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:59:56)
+    at SettingsService.getSettings (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:76:10)
+    at SettingsService.isPushNotificationsEnabled (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\app\(driver)\messages\[chatId].tsx:1:1)
+    at updateNotificationHandler (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\notificationService.ts:195:38)
+    at C:/Users/melod/OneDrive/Desktop/RideAlongMobile/node_modules/expo-router/node/render.js.bundle?platform=web&dev=true&hot=false&transform.engine=hermes&transform.routerRoot=app&resolver.environment=node&transform.environment=node&unstable_transformProfile=hermes-stable:190638:3
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 3324ms index.tsx (1 module)
+› Detected a change in babel.config.js. Restart the server to see the new results. You may need to clear the bundler cache with the --clear flag for your changes to take effect.
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+λ Bundled 845ms node_modules\expo-router\node\render.js (1 module)
+[expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+"shadow*" style props are deprecated. Use "boxShadow".
+λ  WARN  [Layout children]: No route named "legal" exists in nested children: [
+  'book',              'earnings',
+  'index',             'invite',
+  'messages',          'notifications',
+  'profile',           'requests',
+  'legal/privacy',     'legal/terms',
+  'messages/[chatId]', 'request/[id]',
+  'rider/[id]',        'settings'
+] 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  map (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:69:21)
+  getSortedChildren (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:62:10)
+  useSortedScreens (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:121:38)
+  <unknown> (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\layouts\withLayoutContext.js:151:57)
+  Object.instance [as react-stack-bottom-frame] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server.node.development.js:87:18)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5105:17)
+  renderElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5780:73)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6190:41)
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  warnOnce (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\warnOnce\index.js:24:13)
+  createDOMProps (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\createDOMProps\index.js:805:13)
+  createElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\createElement\index.js:23:32)
+  View (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\View\index.js:111:23)
+  Object.instance [as react-stack-bottom-frame] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server.node.development.js:87:18)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5105:17)
+  renderElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5780:73)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6190:41)
+  renderNodeDestructive (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6168:42)
+λ  LOG  [StudentVerificationBanner] State: { isVerified: false, verificationStatus: null, bannerDismissed: false }
+Error initializing settings: ReferenceError: window is not defined
+    at C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:5:13
+    at C:/Users/melod/OneDrive/Desktop/RideAlongMobile/node_modules/expo-router/node/render.js.bundle?platform=web&dev=true&hot=false&transform.engine=hermes&transform.routerRoot=app&resolver.environment=node&transform.environment=node&unstable_transformProfile=hermes-stable:374994:23
+    at new Promise (<anonymous>)
+    at createPromise (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\@react-native-async-storage\async-storage\lib\commonjs\hooks.js:16:1)
+    at Object.getItem (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:5:1)
+    at SettingsService.isInitialized [as initialize] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:59:56)
+    at SettingsService.getSettings (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:76:10)
+    at SettingsService.isPushNotificationsEnabled (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\app\(driver)\messages\[chatId].tsx:1:1)
+    at updateNotificationHandler (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\notificationService.ts:195:38)
+    at C:/Users/melod/OneDrive/Desktop/RideAlongMobile/node_modules/expo-router/node/render.js.bundle?platform=web&dev=true&hot=false&transform.engine=hermes&transform.routerRoot=app&resolver.environment=node&transform.environment=node&unstable_transformProfile=hermes-stable:190638:3
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 3460ms index.tsx (1 module)
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+λ Bundled 1733ms node_modules\expo-router\node\render.js (1 module)
+[expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+"shadow*" style props are deprecated. Use "boxShadow".
+λ  WARN  [Layout children]: No route named "legal" exists in nested children: [
+  'book',              'earnings',
+  'index',             'invite',
+  'messages',          'notifications',
+  'profile',           'requests',
+  'legal/privacy',     'legal/terms',
+  'messages/[chatId]', 'request/[id]',
+  'rider/[id]',        'settings'
+] 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  map (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:69:21)
+  getSortedChildren (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:62:10)
+  useSortedScreens (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:121:38)
+  <unknown> (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\layouts\withLayoutContext.js:151:57)
+  Object.react-stack-bottom-frame (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server.node.development.js:392:7)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5317:17)
+  renderElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6083:11)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6411:9)
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  warnOnce (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\warnOnce\index.js:24:13)
+  createDOMProps (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\createDOMProps\index.js:805:13)
+  createElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\createElement\index.js:23:32)
+  View (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\View\index.js:111:23)
+  Object.react-stack-bottom-frame (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server.node.development.js:392:7)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5317:17)
+  renderElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6083:11)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6411:9)
+  renderNodeDestructive (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6361:79)
+λ  LOG  [StudentVerificationBanner] State: { isVerified: false, verificationStatus: null, bannerDismissed: false }
+Error initializing settings: ReferenceError: window is not defined
+    at C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:112:3
+    at C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:92:5
+    at new Promise (<anonymous>)
+    at createPromise (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:90:10)
+    at Object.getItem (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:112:3)
+    at SettingsService.initialize (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:65:46)
+    at SettingsService.getSettings (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:82:18)
+    at SettingsService.isPushNotificationsEnabled (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\app\(driver)\messages\[chatId].tsx:66:16)
+    at updateNotificationHandler (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\notificationService.ts:248:11)
+    at C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\notificationService.ts:286:1
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 4274ms index.tsx (1 module)
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+λ Bundled 2411ms node_modules\expo-router\node\render.js (1 module)
+[expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+"shadow*" style props are deprecated. Use "boxShadow".
+λ  WARN  [Layout children]: No route named "legal" exists in nested children: [
+  'book',              'earnings',
+  'index',             'invite',
+  'messages',          'notifications',
+  'profile',           'requests',
+  'legal/privacy',     'legal/terms',
+  'messages/[chatId]', 'request/[id]',
+  'rider/[id]',        'settings'
+] 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  map (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:69:21)
+  getSortedChildren (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:62:10)
+  useSortedScreens (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:121:38)
+  <unknown> (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\layouts\withLayoutContext.js:151:57)
+  Object.newBoundary [as react-stack-bottom-frame] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server.node.development.js:530:14)
+  getComponentNameFromType (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5354:19)
+  renderElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6144:26)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6483:5)
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  warnOnce (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\warnOnce\index.js:24:13)
+  createDOMProps (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\createDOMProps\index.js:805:13)
+  createElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\createElement\index.js:23:32)
+  View (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\View\index.js:111:23)
+  Object.newBoundary [as react-stack-bottom-frame] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server.node.development.js:530:14)
+  getComponentNameFromType (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5354:19)
+  renderElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6144:26)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6483:5)
+  renderNodeDestructive (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6442:30)
+λ  LOG  [StudentVerificationBanner] State: { isVerified: false, verificationStatus: null, bannerDismissed: false }
+Error initializing settings: ReferenceError: window is not defined
+    at AbortController (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\event-target-shim\dist\event-target-shim.js:19:1)
+    at default (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:125:16)
+    at new Promise (<anonymous>)
+    at createPromise (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:122:9)
+    at Object._reactNativeWebDistExportsText [as getItem] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\event-target-shim\dist\event-target-shim.js:19:1)
+    at SettingsService.ActivityIndicator [as initialize] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\app\(driver)\messages\[chatId].tsx:2:73)
+    at SettingsService.chatId [as getSettings] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\app\(driver)\messages\[chatId].tsx:2:73)
+    at SettingsService.isPushNotificationsEnabled (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\app\(driver)\messages\[chatId].tsx:67:11)
+    at updateNotificationHandler (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\notificationService.ts:303:35)
+    at C:/Users/melod/OneDrive/Desktop/RideAlongMobile/node_modules/expo-router/node/render.js.bundle?platform=web&dev=true&hot=false&transform.engine=hermes&transform.routerRoot=app&resolver.environment=node&transform.environment=node&unstable_transformProfile=hermes-stable:190740:3
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 3996ms index.tsx (1 module)
+› Detected a change in metro.config.js. Restart the server to see the new results.
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+λ node_modules\expo-router\node\render.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+λ Bundled 2660ms node_modules\expo-router\node\render.js (1 module)
+Web Bundled 5151ms index.tsx (1 module)
+[expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+"shadow*" style props are deprecated. Use "boxShadow".
+λ  WARN  [Layout children]: No route named "legal" exists in nested children: [
+  'book',              'earnings',
+  'index',             'invite',
+  'messages',          'notifications',
+  'profile',           'requests',
+  'legal/privacy',     'legal/terms',
+  'messages/[chatId]', 'request/[id]',
+  'rider/[id]',        'settings'
+] 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  map (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:69:21)
+  getSortedChildren (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:62:10)
+  useSortedScreens (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:121:38)
+  <unknown> (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\layouts\withLayoutContext.js:151:57)
+  Object.lastPushedText [as react-stack-bottom-frame] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server.node.development.js:245:5)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5219:19)
+  renderElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5911:15)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6298:15)
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  warnOnce (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\warnOnce\index.js:24:13)
+  createDOMProps (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\createDOMProps\index.js:805:13)
+  createElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\createElement\index.js:23:32)
+  View (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\View\index.js:111:23)
+  Object.lastPushedText [as react-stack-bottom-frame] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server.node.development.js:245:5)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5219:19)
+  renderElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5911:15)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6298:15)
+  renderNodeDestructive (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6280:45)
+λ  LOG  [StudentVerificationBanner] State: { isVerified: false, verificationStatus: null, bannerDismissed: false }
+Error initializing settings: ReferenceError: window is not defined
+    at TypeError (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:52:34)
+    at C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:29:23
+    at new Promise (<anonymous>)
+    at createPromise (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:27:9)
+    at Object.getItem (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:52:34)
+    at SettingsService.initialize (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:26:11)
+    at SettingsService.pushNotificationsEnabled [as getSettings] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:40:5)
+    at SettingsService.isPushNotificationsEnabled (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:61:21)
+    at updateNotificationHandler (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\notificationService.ts:196:50)
+    at C:/Users/melod/OneDrive/Desktop/RideAlongMobile/node_modules/expo-router/node/render.js.bundle?platform=web&dev=true&hot=false&transform.engine=hermes&transform.routerRoot=app&resolver.environment=node&transform.environment=node&unstable_transformProfile=hermes-stable:190639:3
+› Detected a change in metro.config.js. Restart the server to see the new results.
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+λ Bundled 557ms node_modules\expo-router\node\render.js (1 module)
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 5651ms index.tsx (1 module)
+Web .\index.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+[expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+"shadow*" style props are deprecated. Use "boxShadow".
+λ  WARN  [Layout children]: No route named "legal" exists in nested children: [
+  'book',              'earnings',
+  'index',             'invite',
+  'messages',          'notifications',
+  'profile',           'requests',
+  'legal/privacy',     'legal/terms',
+  'messages/[chatId]', 'request/[id]',
+  'rider/[id]',        'settings'
+] 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  map (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:69:21)
+  getSortedChildren (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:62:10)
+  useSortedScreens (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\useScreens.js:121:38)
+  <unknown> (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo-router\build\layouts\withLayoutContext.js:151:57)
+  Object._prevKeyPath2 [as react-stack-bottom-frame] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server.node.development.js:247:18)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5221:13)
+  renderElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5914:17)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6300:11)
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+  console.warn (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  warnOnce (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\warnOnce\index.js:24:13)
+  createDOMProps (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\modules\createDOMProps\index.js:805:13)
+  createElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\createElement\index.js:23:32)
+  View (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-native-web\dist\exports\View\index.js:111:23)
+  Object._prevKeyPath2 [as react-stack-bottom-frame] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server.node.development.js:247:18)
+  renderWithHooks (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5221:13)
+  renderElement (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5914:17)
+  retryNode (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6300:11)
+  renderNodeDestructive (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:6282:59)
+Error initializing settings: ReferenceError: window is not defined
+    at C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:59:48
+    at C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:37:1
+    at new Promise (<anonymous>)
+    at defineProperties (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:35:1)
+    at Object.getItem (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\node_modules\abort-controller\dist\abort-controller.js:59:8)
+    at SettingsService.initialize (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:26:11)
+    at SettingsService.pushNotificationsEnabled [as getSettings] (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:40:5)
+    at SettingsService.isPushNotificationsEnabled (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\settingsService.ts:61:21)
+    at updateNotificationHandler (C:\Users\melod\OneDrive\Desktop\RideAlongMobile\src\services\notificationService.ts:196:50)
+    at C:/Users/melod/OneDrive/Desktop/RideAlongMobile/node_modules/expo-router/node/render.js.bundle?platform=web&dev=true&hot=false&transform.engine=hermes&transform.routerRoot=app&resolver.environment=node&transform.environment=node&unstable_transformProfile=hermes-stable:190639:3
+› Detected a change in babel.config.js. Restart the server to see the new results. You may need to clear the bundler cache with the --clear flag for your changes to take effect.
+› Detected a change in metro.config.js. Restart the server to see the new results.
+› Detected a change in babel.config.js. Restart the server to see the new results. You may need to clear the bundler cache with the --clear flag for your changes to take effect.
+› Detected a change in metro.config.js. Restart the server to see the new results.
+› Detected a change in babel.config.js. Restart the server to see the new results. You may need to clear the bundler cache with the --clear flag for your changes to take effect.
+› Detected a change in metro.config.js. Restart the server to see the new results.
+› Detected a change in babel.config.js. Restart the server to see the new results. You may need to clear the bundler cache with the --clear flag for your changes to take effect.
+› Detected a change in metro.config.js. Restart the server to see the new results.
+› Detected a change in babel.config.js. Restart the server to see the new results. You may need to clear the bundler cache with the --clear flag for your changes to take effect.
+› Detected a change in metro.config.js. Restart the server to see the new results.
+› Detected a change in metro.config.js. Restart the server to see the new results.
+› Detected a change in babel.config.js. Restart the server to see the new results. You may need to clear the bundler cache with the --clear flag for your changes to take effect.
+› Detected a change in metro.config.js. Restart the server to see the new results.
+› Detected a change in babel.config.js. Restart the server to see the new results. You may need to clear the bundler cache with the --clear flag for your changes to take effect.
+› Detected a change in metro.config.js. Restart the server to see the new results.
+› Detected a change in babel.config.js. Restart the server to see the new results. You may need to clear the bundler cache with the --clear flag for your changes to take effect.
+› Detected a change in metro.config.js. Restart the server to see the new results.
+› Detected a change in metro.config.js. Restart the server to see the new results.
+› Detected a change in metro.config.js. Restart the server to see the new results.
+› Detected a change in metro.config.js. Restart the server to see the new results.
+› Detected a change in babel.config.js. Restart the server to see the new results. You may need to clear the bundler cache with the --clear flag for your changes to take effect.
+› Detected a change in metro.config.js. Restart the server to see the new results.
+› Detected a change in metro.config.js. Restart the server to see the new results.
+› Detected a change in metro.config.js. Restart the server to see the new results.

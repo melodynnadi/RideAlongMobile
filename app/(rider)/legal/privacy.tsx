@@ -6,7 +6,7 @@ export default function PrivacyScreen() {
   return (
     <DynamicLegalDocument 
       documentType="privacy" 
-      onBack={() => router.push('/sign-up')}
+      onBack={() => router.back()}
     />
   );
 }

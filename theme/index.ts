@@ -1,9 +1,10 @@
 export * from './colors';
+export * from './designSystem';
 
 export const theme = {
   colors: {
-    primary: '#E05E1A',
-    secondary: '#1A2942',
+    primary: '#F97316',
+    secondary: '#0D1B48',
     accent: '#4F46E5',
     success: '#10B981',
     warning: '#F59E0B',

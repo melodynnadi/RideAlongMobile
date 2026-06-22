@@ -146,7 +146,7 @@ export const PromotionDetailsModal: React.FC<PromotionDetailsModalProps> = ({
     <>
       {/* Top colored section */}
       <View style={[styles.topSection, { backgroundColor: promotion.backgroundColor || '#F4621F' }]}>
-        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+        <TouchableOpacity onPress={onClose} style={styles.closeButton} accessibilityRole="button" accessibilityLabel="Close promotion details">
           <Ionicons name="close" size={24} color="#FFFFFF" />
         </TouchableOpacity>
 
@@ -286,7 +286,7 @@ const styles = StyleSheet.create({
   modalOverlay:        { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalSheet:          { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '90%' },
   topSection:          { paddingTop: 24, paddingHorizontal: 20, paddingBottom: 32, alignItems: 'center', position: 'relative', borderTopLeftRadius: 24, borderTopRightRadius: 24 },
-  closeButton:         { position: 'absolute', top: 12, right: 12, zIndex: 10, padding: 8, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 20, width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  closeButton:         { position: 'absolute', top: 12, right: 12, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.28)', borderRadius: 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   valueBadge:          { backgroundColor: 'rgba(255,255,255,0.25)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginBottom: 24 },
   valueBadgeText:      { color: '#FFFFFF', fontSize: 14, fontWeight: '700', letterSpacing: 0.5 },
   iconContainer:       { width: 96, height: 96, borderRadius: 48, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },

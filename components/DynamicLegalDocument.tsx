@@ -193,6 +193,7 @@ export function DynamicLegalDocument({ documentType, onBack }: DynamicLegalDocum
         <LinearGradient colors={bgGradient} style={StyleSheet.absoluteFillObject} />
         <FloatingOrb startX={-40} startY={height * 0.1} size={240} color={COLORS.orange} opacity={dark ? 0.10 : 0.06} driftX={20} driftY={16} duration={5510} />
         <SafeAreaView style={s.safe}>
+          <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
           <View style={s.topBar}>
             <TouchableOpacity onPress={handleBack} style={[s.iconBtn, { backgroundColor: backBtnBg }]}>
               <Ionicons name="arrow-back" size={20} color={theme.text} />
@@ -203,6 +204,7 @@ export function DynamicLegalDocument({ documentType, onBack }: DynamicLegalDocum
             <ActivityIndicator size="large" color={COLORS.orange} />
             <Text style={[s.loadingText, { color: theme.sub }]}>Loading {title}…</Text>
           </View>
+                  </ScrollView>
         </SafeAreaView>
       </View>
     );
@@ -217,7 +219,8 @@ export function DynamicLegalDocument({ documentType, onBack }: DynamicLegalDocum
       <FloatingOrb startX={width * 0.82} startY={height * 0.22} size={100} color={COLORS.orangeLight} opacity={dark ? 0.08 : 0.05} driftX={-10} driftY={16}  duration={7600} />
 
       <SafeAreaView style={s.safe}>
-        <Animated.View style={[s.topBar, { opacity: fadeIn, transform: [{ translateY: slideIn }] }]}>
+        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+          <Animated.View style={[s.topBar, { opacity: fadeIn, transform: [{ translateY: slideIn }] }]}>
           <TouchableOpacity onPress={handleBack} style={[s.iconBtn, { backgroundColor: backBtnBg }]}>
             <Ionicons name="arrow-back" size={20} color={theme.text} />
           </TouchableOpacity>
@@ -226,8 +229,6 @@ export function DynamicLegalDocument({ documentType, onBack }: DynamicLegalDocum
             <Ionicons name="refresh" size={18} color={isRefreshing ? theme.sub : theme.text} />
           </TouchableOpacity>
         </Animated.View>
-
-        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
           {/* Hero */}
           <Animated.View style={[s.hero, { opacity: fadeIn, transform: [{ translateY: slideIn }] }]}>
@@ -276,12 +277,12 @@ export function DynamicLegalDocument({ documentType, onBack }: DynamicLegalDocum
 const s = StyleSheet.create({
   root: { flex: 1 },
   safe: { flex: 1 },
-  topBar:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 22, paddingTop: 8, paddingBottom: 4 },
+  topBar:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 8, paddingBottom: 4 },
   iconBtn:     { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  logoImage:   { height: 52, width: 52, borderRadius: 14, flex: 1 },
+  logoImage:   { height: 52, width: 52, borderRadius: 14, marginRight: 'auto' },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
   loadingText: { fontSize: 15, fontWeight: '500' },
-  scroll:      { paddingHorizontal: 22, paddingBottom: 48 },
+  scroll:      { flexGrow: 1, paddingHorizontal: 22, paddingBottom: 48 },
   hero:        { paddingTop: 24, paddingBottom: 24 },
   docIcon:     { width: 60, height: 60, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   heroTitle:   { fontSize: 34, fontWeight: '800', letterSpacing: -1, lineHeight: 42, marginBottom: 6 },

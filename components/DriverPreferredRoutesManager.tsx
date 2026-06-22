@@ -1,12 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { MapPin, Navigation, Plus, Pencil, Trash2, ArrowRight, X } from 'lucide-react-native';
-import { useDriverPreferredRoutesStore } from '@/stores/preferredRoutesStore';
+import { useDriverPreferredRoutesStore, usePreferredRoutesStore } from '@/stores/preferredRoutesStore';
 import { CityAutocomplete } from './CityAutocomplete';
 import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
 
-export const DriverPreferredRoutesManager: React.FC = () => {
-  const { routes, load, add, update, remove, loading, saving, error, clearError } = useDriverPreferredRoutesStore();
+type PreferredRoutesManagerProps = {
+  role?: 'driver' | 'rider';
+};
+
+export const DriverPreferredRoutesManager: React.FC<PreferredRoutesManagerProps> = ({ role = 'driver' }) => {
+  const driverRoutes = useDriverPreferredRoutesStore();
+  const riderRoutes = usePreferredRoutesStore();
+  const routes = role === 'driver' ? driverRoutes.routes : riderRoutes.routes;
+  const load = role === 'driver' ? driverRoutes.load : riderRoutes.loadRoutes;
+  const add = role === 'driver' ? driverRoutes.add : riderRoutes.addRoute;
+  const update = role === 'driver' ? driverRoutes.update : riderRoutes.updateRoute;
+  const remove = role === 'driver' ? driverRoutes.remove : riderRoutes.deleteRoute;
+  const loading = role === 'driver' ? driverRoutes.loading : riderRoutes.loading;
+  const saving = role === 'driver' ? driverRoutes.saving : riderRoutes.isSaving;
+  const error = role === 'driver' ? driverRoutes.error : riderRoutes.error;
+  const clearError = role === 'driver' ? driverRoutes.clearError : riderRoutes.clearError;
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -36,7 +50,7 @@ export const DriverPreferredRoutesManager: React.FC = () => {
   return (
     <View style={styles.container}>
       <Text style={styles.heading}>Preferred Routes</Text>
-      <Text style={styles.subheading}>We notify you when riders request matching routes.</Text>
+      <Text style={styles.subheading}>{role === 'driver' ? 'We notify you when riders request matching routes.' : 'We notify you when drivers post matching routes.'}</Text>
 
       {/* Origin input */}
       <View style={styles.inputGroup}>

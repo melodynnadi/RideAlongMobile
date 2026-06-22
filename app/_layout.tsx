@@ -9,6 +9,7 @@ import '../global.css';
 
 import { useAuthStore } from '@/stores/authStore';
 import { ThemeProvider} from '@/hooks/ThemeContext';
+import DismissKeyboardView from '@/components/DismissKeyboardView';
 
 const queryClient = new QueryClient();
 
@@ -30,7 +31,7 @@ function AuthGate() {
     }
 
     if (!isEmailVerified) {
-      router.replace('/(auth)/verify-email');
+      if (segments[1] !== 'verify-email') router.replace('/(auth)/verify-email');
       return;
     }
 
@@ -81,7 +82,9 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <ThemeProvider>
-            <AppStack />
+            <DismissKeyboardView style={{ flex: 1 }}>
+              <AppStack />
+            </DismissKeyboardView>
           </ThemeProvider>
         </QueryClientProvider>
       </SafeAreaProvider>

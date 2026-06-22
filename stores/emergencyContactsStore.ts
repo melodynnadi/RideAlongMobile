@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { firestore, firebaseAuth } from '@/constants/services';
 import { useAuthStore } from '@/stores/authStore';
-import { EmergencyContact, UserProfile } from '@/types';
+import { EmergencyContact } from '@/types';
 
 interface EmergencyContactsState {
   contacts: EmergencyContact[];
@@ -40,8 +40,8 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
         throw new Error('User document not found');
       }
       
-      const userData = userDoc.data() as UserProfile;
-      const contacts = userData.emergencyContacts || [];
+      const userData = userDoc.data();
+      const contacts = Array.isArray(userData.emergencyContacts) ? userData.emergencyContacts as EmergencyContact[] : [];
       
       set({ contacts });
       return contacts;

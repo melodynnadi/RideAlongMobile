@@ -1,5 +1,10 @@
 import { create } from 'zustand';
 import {
+  listDriverPreferredRoutes,
+  createDriverPreferredRoute,
+  updateDriverPreferredRoute,
+  deleteDriverPreferredRoute,
+  DriverPreferredRoute,
   listRiderPreferredRoutes,
   createRiderPreferredRoute,
   updateRiderPreferredRoute,
@@ -107,3 +112,75 @@ export const usePreferredRoutesStore = create<PreferredRoutesState>((set, get) =
 export const usePreferredRoutes = () => usePreferredRoutesStore(s => s.routes);
 export const usePreferredRoutesLoading = () => usePreferredRoutesStore(s => s.loading || s.isSaving);
 export const usePreferredRoutesError = () => usePreferredRoutesStore(s => s.error);
+
+interface DriverPreferredRoutesState {
+  routes: DriverPreferredRoute[];
+  loading: boolean;
+  saving: boolean;
+  error: string | null;
+  load: () => Promise<void>;
+  add: (origin: string, destination: string) => Promise<DriverPreferredRoute | null>;
+  update: (id: string, origin: string, destination: string) => Promise<void>;
+  remove: (id: string) => Promise<void>;
+  clearError: () => void;
+}
+
+export const useDriverPreferredRoutesStore = create<DriverPreferredRoutesState>((set, get) => ({
+  routes: [],
+  loading: false,
+  saving: false,
+  error: null,
+
+  clearError: () => set({ error: null }),
+
+  load: async () => {
+    try {
+      set({ loading: true, error: null });
+      set({ routes: await listDriverPreferredRoutes() });
+    } catch (error: any) {
+      set({ error: error?.message || 'Failed to load routes' });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  add: async (origin, destination) => {
+    try {
+      set({ saving: true, error: null });
+      const route = await createDriverPreferredRoute(origin.trim(), destination.trim());
+      if (!route.duplicate && !get().routes.some((item) => item.id === route.id)) {
+        set({ routes: [...get().routes, route] });
+      }
+      return route;
+    } catch (error: any) {
+      set({ error: error?.message || 'Failed to add route' });
+      return null;
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  update: async (id, origin, destination) => {
+    try {
+      set({ saving: true, error: null });
+      const route = await updateDriverPreferredRoute(id, origin.trim(), destination.trim());
+      set({ routes: get().routes.map((item) => item.id === id ? { ...item, ...route } : item) });
+    } catch (error: any) {
+      set({ error: error?.message || 'Failed to update route' });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  remove: async (id) => {
+    try {
+      set({ saving: true, error: null });
+      await deleteDriverPreferredRoute(id);
+      set({ routes: get().routes.filter((item) => item.id !== id) });
+    } catch (error: any) {
+      set({ error: error?.message || 'Failed to delete route' });
+    } finally {
+      set({ saving: false });
+    }
+  },
+}));

@@ -1,6 +1,6 @@
 export const colors = {
-  primary: '#E05E1A',
-  secondary: '#1A2942',
+  primary: '#F97316',
+  secondary: '#0D1B48',
   accent: '#4F46E5',
   success: '#10B981',
   warning: '#F59E0B',
@@ -10,6 +10,12 @@ export const colors = {
   text: '#F8FAFC',
   muted: '#94A3B8',
   border: '#1E2D45',
+  surface: '#FFFFFF',
+  surfaceSubtle: '#F7F9FF',
+  textPrimary: '#0D1B48',
+  textSecondary: '#4A5D78',
+  textOnPrimary: '#FFFFFF',
+  focus: '#F97316',
 };
 
 export const spacing = {

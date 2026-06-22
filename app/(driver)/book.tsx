@@ -13,14 +13,12 @@ import {
   Modal,
   Platform,
   KeyboardAvoidingView,
-  TouchableWithoutFeedback,
   Share,
   ActivityIndicator,     // ← ADD
   StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAppTheme } from '@/hooks/ThemeContext';
-import { AppColors, BRAND } from '@/constants/theme';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+const BRAND = { orange: '#DE5D20' } as const;
 import { router } from 'expo-router';
 import { firestore, firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import { addDoc, collection, serverTimestamp, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
@@ -28,9 +26,8 @@ import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import * as Location from 'expo-location';
 import { computeMaxPrice } from '@/src/utils/pricing';
 import EmailTriggerService from '@/services/EmailTriggerService';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import { DriverBottomNav } from '@/components/DriverBottomNav';
 
 type Coords = { lat: number; lng: number };
 type Suggestion = { description: string; place_id: string; mainText: string; secondaryText: string };
@@ -406,8 +403,7 @@ function SeatsModal({ visible, selected, primaryColor, onClose, onSelect }: {
 }
 
 export default function BookScreen() {
-  const { colors, isDark } = useAppTheme();
-  const themed = createStyles(colors, isDark);
+  const insets = useSafeAreaInsets();
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -609,7 +605,7 @@ export default function BookScreen() {
         pickupAddress: pickupLocation || null,
         dropoffAddress: dropoffLocation || null,
 
-        pickupLocation: pickupCoords
+        pickupGeo: pickupCoords
           ? {
               address: pickupLocation || null,
               latitude: pickupCoords.lat,
@@ -619,7 +615,7 @@ export default function BookScreen() {
             }
           : null,
 
-        dropoffLocation: dropoffCoords
+        dropoffGeo: dropoffCoords
           ? {
               address: dropoffLocation || null,
               latitude: dropoffCoords.lat,
@@ -720,74 +716,10 @@ export default function BookScreen() {
         setNotes('');
 
         Alert.alert('Ride Posted!', 'Your ride is now visible to riders.');
-        router.push('/driver' as any);
+        router.replace('/(driver)' as any);
       } catch (apiError: any) {
         console.error('Ride posting API error:', apiError);
-        
-        // Fallback: Create directly in Firestore if API fails
-        console.log('Attempting fallback: Creating ride posting directly in Firestore');
-        const fallbackRef = await addDoc(collection(firestore, 'ridePostings'), payload);
-        const fallbackRideId = fallbackRef.id;
-
-        // Auto-save preferred route (fallback path)
-        try {
-          const pickup = (pickupLocation || '').trim().toLowerCase().replace(/\s+/g, ' ');
-          const dropoff = (dropoffLocation || '').trim().toLowerCase().replace(/\s+/g, ' ');
-          if (pickup && dropoff) {
-            const routeQuery = query(
-              collection(firestore, 'preferredRoutes'),
-              where('userId', '==', user.uid),
-              where('origin', '==', pickup),
-              where('destination', '==', dropoff)
-            );
-            const routeSnap = await getDocs(routeQuery);
-            if (routeSnap.empty) {
-              await addDoc(collection(firestore, 'preferredRoutes'), {
-                userId: user.uid,
-                userType: 'driver',
-                origin: pickup,
-                destination: dropoff,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-              });
-              console.log('Auto-saved preferred route for driver (fallback)');
-            }
-          }
-        } catch (routeErr) {
-          console.warn('Failed to auto-save preferred route:', routeErr);
-        }
-
-        // Send ride posted email (fallback path)
-        try {
-          const user = firebaseAuth.currentUser;
-          if (user && user.email) {
-            await EmailTriggerService.sendRidePostedEmail(
-              user.email,
-              user.displayName || 'Driver',
-              {
-                pickup: pickupLocation,
-                dropoff: dropoffLocation,
-                date: date,
-                time: time,
-                price: contribution,
-              }
-            );
-          }
-        } catch (emailErr) {
-          console.warn('[postRide] Email send error:', emailErr);
-        }
-
-        // Clear the form
-        setDate('');
-        setTime('');
-        setPickupLocation('');
-        setDropoffLocation('');
-        setContribution('');
-        setSeats(1);
-        setNotes('');
-
-        Alert.alert('Ride Posted!', 'Your ride is now visible to riders.');
-        router.push('/driver' as any);
+        throw apiError;
       }
     } catch (e) {
   console.warn('ride posting submit error', e);
@@ -903,7 +835,7 @@ export default function BookScreen() {
     Number(contribution) > 0 && seats > 0 &&
     !(maxPrice > 0 && Number(contribution) > maxPrice);
 
-  const [selectedVibes, setSelectedVibes] = useState<string[]>([]);
+  const [selectedVibes] = useState<string[]>([]);
 
   // ── Smart pricing computed ────────────────────────────────────────────────
   const priceNum = Number(String(contribution).replace(/[^0-9.]/g, '')) || 0;
@@ -917,9 +849,6 @@ export default function BookScreen() {
   const suggestedMax = distanceMiles && distanceMiles > 0
     ? Math.max(7, Math.round(distanceMiles * 1.1)) : 9;
   const routeIsReady = !!(pickupLocation && dropoffLocation && pickupCoords && dropoffCoords);
-  const grossEarnings = priceNum > 0 ? priceNum * seats : 0;
-  const platformFee = grossEarnings * 0.08;
-  const netEarnings = Math.max(0, grossEarnings - platformFee);
   const suggestedText = distanceMiles && distanceMiles > 0
     ? `$${suggestedMin}-${suggestedMax} · gas split for ${Math.round(durationMinutes || 0) || '--'}min`
     : 'Select route to estimate';
@@ -927,44 +856,32 @@ export default function BookScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={themed.root}
+      style={[styles.root, { backgroundColor: '#FBFAF7' }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
     >
-      <StatusBar barStyle={colors.statusBar} />
-      <LinearGradient
-        colors={colors.gradientBg as unknown as readonly [string, string, ...string[]]}
-        style={StyleSheet.absoluteFillObject}
-      />
+      <StatusBar barStyle="dark-content" />
 
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-        <SafeAreaView style={{ flex: 1 }} edges={['top']}>
-
-          {/* ── Header ── */}
-          <View style={styles.hdr}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-              <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
-            </TouchableOpacity>
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={[styles.hdrTitle, { color: colors.textPrimary }]}>Post a ride</Text>
-              <Text style={[styles.hdrSub, { color: colors.textSecondary }]}>Step 1 of 3 · Route</Text>
-            </View>
-          </View>
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#FBFAF7' }} edges={['top']}>
 
           <FlatList
             style={{ flex: 1 }}
-            contentContainerStyle={{ paddingBottom: 80 }}
+            contentContainerStyle={{ paddingBottom: 130 + insets.bottom }}
             data={[0]}
             ListHeaderComponent={(
               <View>
+                <View style={styles.pageIntro}>
+                  <Text style={styles.pageTitle}>Post a ride</Text>
+                </View>
+
                 <View style={styles.stepWrap}>
-                  <Text style={styles.stepText}>STEP 1 OF 3 · ROUTE</Text>
+                  <Text style={styles.stepText}>Ride details</Text>
                   <View style={styles.stepTrack}>
                     <View style={styles.stepFill} />
                   </View>
                 </View>
 
-                <View style={themed.formCard}>
+                <View style={styles.formCard}>
                   <View style={styles.routeMiniRow}>
                     <View style={styles.routeDots}>
                       <View style={[styles.routeMiniDot, { backgroundColor: '#13213A' }]} />
@@ -1008,12 +925,12 @@ export default function BookScreen() {
 
                 <Text style={styles.fieldGroupLabel}>WHEN</Text>
                 <View style={styles.whenRow}>
-                  <TouchableOpacity style={themed.ceoInputBtn} onPress={() => setCalendarOpen(true)}>
-                    <Text style={themed.ceoInputText}>{date || 'Fri, Nov 20'}</Text>
+                  <TouchableOpacity style={styles.ceoInputBtn} onPress={() => setCalendarOpen(true)}>
+                    <Text style={styles.ceoInputText}>{date || 'Fri, Nov 20'}</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity style={[themed.ceoInputBtn, styles.timeBtn]} onPress={() => setTimeOpen(true)}>
-                    <Text style={themed.ceoInputText}>{time || '3:00 PM'}</Text>
+                  <TouchableOpacity style={[styles.ceoInputBtn, styles.timeBtn]} onPress={() => setTimeOpen(true)}>
+                    <Text style={styles.ceoInputText}>{time || '3:00 PM'}</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -1042,15 +959,15 @@ export default function BookScreen() {
                     <TouchableOpacity
                       key={n}
                       onPress={() => setSeats(n)}
-                      style={[themed.seatPill, seats === n && styles.seatPillActive]}
+                      style={[styles.seatPill, seats === n && styles.seatPillActive]}
                     >
-                      <Text style={[themed.seatPillText, seats === n && styles.seatPillTextActive]}>{n}</Text>
+                      <Text style={[styles.seatPillText, seats === n && styles.seatPillTextActive]}>{n}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
 
                 <Text style={styles.fieldGroupLabel}>PRICE PER SEAT</Text>
-                <View style={themed.priceBox}>
+                <View style={styles.priceBox}>
                   <Text style={styles.priceDollar}>$</Text>
                   <TextInput
                     value={contribution}
@@ -1058,12 +975,12 @@ export default function BookScreen() {
                     placeholder="28"
                     placeholderTextColor="#94A3B8"
                     keyboardType="decimal-pad"
-                    style={themed.priceInputCeo}
+                    style={styles.priceInputCeo}
                   />
 
                   <View style={styles.suggestedWrap}>
                     <Text style={styles.suggestedLabel}>SUGGESTED</Text>
-                    <Text style={themed.suggestedText}>{suggestedText}</Text>
+                    <Text style={styles.suggestedText}>{suggestedText}</Text>
                   </View>
                 </View>
 
@@ -1082,52 +999,8 @@ export default function BookScreen() {
                   placeholder="Heading home for the weekend. Aux is open"
                   placeholderTextColor="#94A3B8"
                   multiline
-                  style={themed.notesCeo}
+                  style={styles.notesCeo}
                 />
-
-                <Text style={styles.fieldGroupLabel}>RIDE VIBE (OPTIONAL)</Text>
-                <View style={styles.vibeCompactRow}>
-                  {['Quiet', 'Social', 'Music', 'Study-friendly', 'Luggage OK'].map((vibe) => {
-                    const active = selectedVibes.includes(vibe);
-
-                    return (
-                      <TouchableOpacity
-                        key={vibe}
-                        onPress={() => {
-                          setSelectedVibes((prev) =>
-                            active ? prev.filter((item) => item !== vibe) : [...prev, vibe]
-                          );
-                        }}
-                        style={[themed.vibeCompactChip, active && styles.vibeCompactChipActive]}
-                      >
-                        <Text style={[themed.vibeCompactText, active && styles.vibeCompactTextActive]}>
-                          {vibe}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-
-                <View style={themed.earningsSummary}>
-                  <View style={styles.summaryRow}>
-                    <Text style={themed.summaryLabel}>
-                      {seats} seat{seats === 1 ? '' : 's'} x ${priceNum > 0 ? priceNum.toFixed(0) : '--'}
-                    </Text>
-                    <Text style={themed.summaryValue}>${grossEarnings.toFixed(2)}</Text>
-                  </View>
-
-                  <View style={styles.summaryRow}>
-                    <Text style={themed.summaryLabel}>Platform fee (8%)</Text>
-                    <Text style={themed.summaryValue}>-${platformFee.toFixed(2)}</Text>
-                  </View>
-
-                  <View style={styles.summaryDivider} />
-
-                  <View style={styles.summaryRow}>
-                    <Text style={themed.summaryLabel}>You'll earn</Text>
-                    <Text style={styles.netEarnValue}>${netEarnings.toFixed(2)}</Text>
-                  </View>
-                </View>
 
                 <TouchableOpacity
                   onPress={handleSubmit}
@@ -1137,7 +1010,7 @@ export default function BookScreen() {
                   {submitting ? (
                     <ActivityIndicator color="#FFFFFF" />
                   ) : (
-                    <Text style={styles.continueText}>Continue →</Text>
+                    <Text style={styles.continueText}>{'Post ride ->'}</Text>
                   )}
                 </TouchableOpacity>
 
@@ -1147,147 +1020,30 @@ export default function BookScreen() {
             renderItem={() => null}
             keyExtractor={() => 'content'}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator={false}
           />
         </SafeAreaView>
-      </TouchableWithoutFeedback>
+      <DriverBottomNav activeTab="offer" />
     </KeyboardAvoidingView>
   );
 }
 
 
-const createStyles = (colors: AppColors, isDark: boolean) =>
-  StyleSheet.create({
-    root: {
-      flex: 1,
-      backgroundColor: colors.bg,
-    },
-    card: {
-      marginHorizontal: 16,
-      marginBottom: 14,
-      borderRadius: 22,
-      borderWidth: 1,
-      borderColor: colors.borderMid,
-      overflow: 'hidden',
-      backgroundColor: isDark ? colors.glassBg : colors.bgCard,
-    },
-    title: {
-      color: colors.textPrimary,
-    },
-    subtitle: {
-      color: colors.textSecondary,
-    },
-    primaryText: {
-      color: colors.primary,
-    },
-
-    formCard: {
-      marginHorizontal: 20,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: isDark ? colors.borderMid : '#DDE3EC',
-      backgroundColor: isDark ? colors.glassBg : '#FFFFFF',
-      padding: 12,
-    },
-    ceoInputBtn: {
-      flex: 1,
-      minHeight: 48,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: isDark ? colors.borderMid : '#DDE3EC',
-      backgroundColor: isDark ? colors.bgInput : '#FFFFFF',
-      justifyContent: 'center',
-      paddingHorizontal: 14,
-    },
-    ceoInputText: {
-      color: colors.textPrimary,
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    seatPill: {
-      height: 34,
-      minWidth: 54,
-      borderRadius: 17,
-      borderWidth: 1,
-      borderColor: isDark ? colors.borderMid : '#DDE3EC',
-      backgroundColor: isDark ? colors.bgInput : '#FFFFFF',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    seatPillText: {
-      color: colors.textSecondary,
-      fontSize: 13,
-      fontWeight: '700',
-    },
-    priceBox: {
-      marginHorizontal: 20,
-      minHeight: 60,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: isDark ? colors.borderMid : '#DDE3EC',
-      backgroundColor: isDark ? colors.bgInput : '#FFFFFF',
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 14,
-    },
-    priceInputCeo: {
-      flex: 1,
-      color: colors.textPrimary,
-      fontSize: 28,
-      fontWeight: '400',
-      paddingVertical: 10,
-    },
-    suggestedText: {
-      color: colors.textSecondary,
-      fontSize: 11,
-      fontWeight: '600',
-      textAlign: 'right',
-    },
-    notesCeo: {
-      marginHorizontal: 20,
-      minHeight: 84,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: isDark ? colors.borderMid : '#DDE3EC',
-      backgroundColor: isDark ? colors.bgInput : '#FFFFFF',
-      padding: 14,
-      color: colors.textPrimary,
-      fontSize: 14,
-      textAlignVertical: 'top',
-    },
-    vibeCompactChip: {
-      borderRadius: 18,
-      borderWidth: 1,
-      borderColor: isDark ? colors.borderMid : '#DDE3EC',
-      backgroundColor: isDark ? colors.bgInput : '#FFFFFF',
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-    },
-    vibeCompactText: {
-      color: colors.textSecondary,
-      fontSize: 12,
-      fontWeight: '700',
-    },
-    earningsSummary: {
-      marginHorizontal: 20,
-      marginTop: 14,
-      borderRadius: 12,
-      backgroundColor: isDark ? colors.glassBg : '#F7F5EF',
-      padding: 14,
-    },
-    summaryLabel: {
-      color: colors.textSecondary,
-      fontSize: 13,
-      fontWeight: '600',
-    },
-    summaryValue: {
-      color: colors.textPrimary,
-      fontSize: 13,
-      fontWeight: '700',
-    },
-      });
 
 const styles = StyleSheet.create({
+
+  // ── From createStyles (previously themed) ────────────────────────────────
+  root: { flex: 1, backgroundColor: '#FBFAF7' },
+  formCard: { marginHorizontal: 20, borderRadius: 20, borderWidth: 1, borderColor: '#E5E0D8', backgroundColor: '#FFFFFF', padding: 14 },
+  ceoInputBtn: { flex: 1, minHeight: 48, borderRadius: 14, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', justifyContent: 'center', paddingHorizontal: 14 },
+  ceoInputText: { color: '#15233A', fontSize: 14, fontWeight: '600' },
+  seatPill: { height: 40, minWidth: 64, borderRadius: 20, borderWidth: 1, borderColor: '#E5E0D8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  seatPillText: { color: '#8B94A6', fontSize: 14, fontWeight: '700' },
+  priceBox: { marginHorizontal: 20, minHeight: 70, borderRadius: 18, borderWidth: 1, borderColor: '#E5E0D8', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
+  priceInputCeo: { flex: 1, color: '#15233A', fontSize: 30, fontWeight: '400', paddingVertical: 10 },
+  suggestedText: { color: '#8B94A6', fontSize: 11, lineHeight: 15, fontWeight: '600', textAlign: 'right' },
+  notesCeo: { marginHorizontal: 20, minHeight: 92, borderRadius: 18, borderWidth: 1, borderColor: '#E5E0D8', backgroundColor: '#FFFFFF', padding: 14, color: '#15233A', fontSize: 14, lineHeight: 20, textAlignVertical: 'top' },
 
   stepWrap: {
   flexDirection: 'row',
@@ -1297,40 +1053,45 @@ const styles = StyleSheet.create({
   marginBottom: 12,
 },
 stepText: {
-  fontSize: 10,
   color: '#7A8FA8',
+  fontSize: 11,
   fontWeight: '800',
-  letterSpacing: 2,
+  letterSpacing: 1.3,
+  textTransform: 'uppercase',
 },
 stepTrack: {
   flex: 1,
-  height: 2,
-  backgroundColor: '#D6DAE1',
+  height: 3,
+  backgroundColor: '#E5E0D8',
+  borderRadius: 2,
 },
 stepFill: {
   width: '34%',
-  height: 2,
+  height: 3,
   backgroundColor: BRAND.orange,
+  borderRadius: 2,
 },
 routeMiniRow: {
   flexDirection: 'row',
-  gap: 10,
+  gap: 12,
 },
 routeDots: {
-  width: 18,
+  width: 22,
   alignItems: 'center',
-  paddingTop: 18,
+  paddingTop: 19,
 },
 routeMiniDot: {
-  width: 8,
-  height: 8,
-  borderRadius: 4,
+  width: 10,
+  height: 10,
+  borderRadius: 5,
 },
 routeMiniLine: {
   width: 1,
   flex: 1,
-  backgroundColor: '#CBD5E1',
-  marginVertical: 4,
+  borderLeftWidth: 1,
+  borderStyle: 'dashed',
+  borderColor: '#CBD5E1',
+  marginVertical: 6,
 },
 stopPlus: {
   color: '#94A3B8',
@@ -1341,21 +1102,21 @@ routeFields: {
   flex: 1,
 },
 addStopText: {
-  color: '#94A3B8',
+  color: '#8B94A6',
   fontSize: 11,
-  fontWeight: '600',
-  marginTop: -4,
-  marginBottom: 4,
-  marginLeft: 10,
+  fontWeight: '700',
+  marginTop: -2,
+  marginBottom: 6,
+  marginLeft: 12,
 },
 fieldGroupLabel: {
   marginHorizontal: 20,
-  marginTop: 14,
+  marginTop: 16,
   marginBottom: 8,
   color: '#7A8FA8',
-  fontSize: 10,
+  fontSize: 11,
   fontWeight: '800',
-  letterSpacing: 2,
+  letterSpacing: 1.3,
 },
 whenRow: {
   flexDirection: 'row',
@@ -1371,8 +1132,8 @@ seatPillRow: {
   paddingHorizontal: 20,
 },
 seatPillActive: {
-  backgroundColor: '#13213A',
-  borderColor: '#13213A',
+  backgroundColor: '#15233A',
+  borderColor: '#15233A',
 },
 seatPillTextActive: {
   color: '#FFFFFF',
@@ -1385,7 +1146,7 @@ priceDollar: {
 },
 suggestedWrap: {
   alignItems: 'flex-end',
-  maxWidth: 132,
+  maxWidth: 142,
 },
 suggestedLabel: {
   color: '#94A3B8',
@@ -1396,50 +1157,21 @@ suggestedLabel: {
 capMiniBanner: {
   marginHorizontal: 20,
   marginTop: 8,
-  borderRadius: 10,
-  backgroundColor: 'rgba(16,185,129,0.1)',
+  borderRadius: 14,
+  backgroundColor: '#F3EFE8',
   paddingHorizontal: 12,
   paddingVertical: 8,
+  borderWidth: 1,
+  borderColor: '#E5E0D8',
 },
 capMiniText: {
-  color: '#10B981',
+  color: '#15233A',
   fontSize: 12,
   fontWeight: '700',
 },
-vibeCompactRow: {
-  flexDirection: 'row',
-  flexWrap: 'wrap',
-  gap: 8,
-  paddingHorizontal: 20,
-},
-vibeCompactChipActive: {
-  backgroundColor: 'rgba(244,98,31,0.12)',
-  borderColor: BRAND.orange,
-},
-vibeCompactTextActive: {
-  color: BRAND.orange,
-},
-summaryRow: {
-  flexDirection: 'row',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  marginBottom: 8,
-},
-summaryDivider: {
-  height: 1,
-  borderStyle: 'dashed',
-  borderWidth: 0.5,
-  borderColor: '#D6DAE1',
-  marginVertical: 8,
-},
-netEarnValue: {
-  color: BRAND.orange,
-  fontSize: 22,
-  fontWeight: '400',
-},
 continueBtn: {
   marginHorizontal: 20,
-  marginTop: 14,
+  marginTop: 16,
   height: 54,
   borderRadius: 27,
   backgroundColor: BRAND.orange,
@@ -1448,14 +1180,16 @@ continueBtn: {
 },
 continueText: {
   color: '#FFFFFF',
-  fontSize: 15,
+  fontSize: 16,
   fontWeight: '800',
 },
 
   // ── Header ────────────────────────────────────────────────────────────────
   hdr:            { flexDirection:'row', alignItems:'center', paddingHorizontal:16, paddingTop:8, paddingBottom:14 },
-  backBtn:        { width:38, height:38, borderRadius:19, backgroundColor:'rgba(255,255,255,0.08)', alignItems:'center', justifyContent:'center' },
-  hdrTitle:       { fontSize:22, fontWeight:'800', color:'#F0F4FF', letterSpacing:-0.5 },
+  backBtn:        { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFFFFF', alignItems:'center', justifyContent:'center', borderWidth: 1, borderColor: '#E5E0D8' },
+  pageIntro:      { paddingHorizontal:20, paddingTop:10, paddingBottom:14 },
+  pageTitle:      { fontSize:24, lineHeight:30, fontWeight:'700', color:'#15233A', letterSpacing:-0.25 },
+  hdrTitle:       { fontSize:22, fontWeight:'800', color:'#15233A', letterSpacing:-0.5 },
   hdrSub:         { fontSize:12, color:'#7A8FA8', marginTop:1 },
   livePill:       { flexDirection:'row', alignItems:'center', gap:5, backgroundColor:'rgba(16,185,129,0.15)', paddingHorizontal:10, paddingVertical:4, borderRadius:16, borderWidth:1, borderColor:'rgba(16,185,129,0.25)' },
   liveDot:        { width:6, height:6, borderRadius:3, backgroundColor:'#10B981' },
@@ -1471,7 +1205,7 @@ continueText: {
   mapRouteLine:   { position:'absolute', height:2.5, backgroundColor:'rgba(244,98,31,0.5)', borderRadius:2 },
   mapPromptWrap:  { position:'absolute', top:0, left:0, right:0, bottom:40, alignItems:'center', justifyContent:'center', gap:8 },
   mapPromptText:  { color:'rgba(255,255,255,0.3)', fontSize:12, textAlign:'center' },
-  mapInfoBar:     { position:'absolute', bottom:0, left:0, right:0, flexDirection:'row', alignItems:'center', padding:14, borderTopWidth:1, borderTopColor:'rgba(255,255,255,0.06)' },
+  mapInfoBar:     { position:'absolute', bottom:0, left:0, right:0, flexDirection:'row', alignItems:'center', padding:14, borderTopWidth:1, borderTopColor:'rgba(0,0,0,0.1)' },
   mapInfoTitle:   { color:'white', fontSize:15, fontWeight:'800' },
   mapInfoSub:     { color:'rgba(255,255,255,0.5)', fontSize:12, marginTop:2 },
   mapEarnBadge:   { alignItems:'center', backgroundColor:'rgba(244,98,31,0.15)', borderRadius:12, paddingHorizontal:10, paddingVertical:6, borderWidth:1, borderColor:'rgba(244,98,31,0.3)' },
@@ -1479,46 +1213,46 @@ continueText: {
   mapEarnValue:   { color:BRAND.orange, fontSize:16, fontWeight:'800' },
 
   // ── Demand Strip ──────────────────────────────────────────────────────────
-  demandStrip:    { marginHorizontal:16, marginBottom:16, backgroundColor:'rgba(255,255,255,0.04)', borderRadius:14, borderWidth:1, borderColor:'rgba(255,255,255,0.07)', paddingVertical:8, paddingHorizontal:12, gap:6 },
+  demandStrip:    { marginHorizontal:16, marginBottom:16, backgroundColor:'#F3EFE8', borderRadius:14, borderWidth:1, borderColor:'#E5E0D8', paddingVertical:8, paddingHorizontal:12, gap:6 },
   demandItem:     { flexDirection:'row', alignItems:'center', gap:6 },
-  demandText:     { color:'rgba(255,255,255,0.55)', fontSize:12 },
+  demandText:     { color:'#8B94A6', fontSize:12 },
 
   // ── Glass Cards ───────────────────────────────────────────────────────────
-  glassCard:      { marginHorizontal:16, marginBottom:14, borderRadius:22, borderWidth:1.5, borderColor:'rgba(255,255,255,0.08)', overflow:'hidden', backgroundColor:'rgba(255,255,255,0.03)' },
+  glassCard:      { marginHorizontal:16, marginBottom:14, borderRadius:22, borderWidth:1.5, borderColor:'#E5E0D8', overflow:'hidden', backgroundColor:'#FFFFFF', shadowColor:'#15233A', shadowOffset:{width:0,height:3}, shadowOpacity:0.07, shadowRadius:12, elevation:3 },
   glassCardInner: { padding:18 },
   cardHdr:        { flexDirection:'row', alignItems:'center', gap:10, marginBottom:16 },
   cardIconWrap:   { width:32, height:32, borderRadius:10, alignItems:'center', justifyContent:'center' },
-  cardTitle:      { fontSize:16, fontWeight:'800', color:'#F0F4FF', flex:1, letterSpacing:-0.3 },
+  cardTitle:      { fontSize:16, fontWeight:'800', color:'#15233A', flex:1, letterSpacing:-0.3 },
 
   // ── Route ─────────────────────────────────────────────────────────────────
   connectorCol:   { width:18, alignItems:'center', paddingTop:30, paddingBottom:20 },
   connectorDot:   { width:10, height:10, borderRadius:5 },
-  connectorLine:  { width:2, flex:1, marginVertical:4, backgroundColor:'rgba(255,255,255,0.1)' },
+  connectorLine:  { width:2, flex:1, marginVertical:4, backgroundColor:'#E5E0D8' },
   quickActionsRow:{ flexDirection:'row', gap:10, marginTop:12 },
   quickBtn:       { flexDirection:'row', alignItems:'center', gap:6, paddingHorizontal:14, paddingVertical:9, borderRadius:12, borderWidth:1, borderColor:'rgba(244,98,31,0.3)', backgroundColor:'rgba(244,98,31,0.06)' },
   quickBtnText:   { fontSize:13, fontWeight:'600', color:BRAND.orange },
-  infoStrip:      { flexDirection:'row', backgroundColor:'rgba(255,255,255,0.05)', borderRadius:14, padding:12, marginTop:14, alignItems:'center' },
+  infoStrip:      { flexDirection:'row', backgroundColor:'#F3EFE8', borderRadius:14, padding:12, marginTop:14, alignItems:'center' },
   infoStripItem:  { flex:1, alignItems:'center', gap:3 },
-  infoStripDiv:   { width:1, height:32, backgroundColor:'rgba(255,255,255,0.08)' },
-  infoStripLabel: { fontSize:9, fontWeight:'700', color:'#7A8FA8', letterSpacing:0.8, textTransform:'uppercase' },
-  infoStripVal:   { fontSize:15, fontWeight:'800', color:'#F0F4FF' },
+  infoStripDiv:   { width:1, height:32, backgroundColor:'#E5E0D8' },
+  infoStripLabel: { fontSize:9, fontWeight:'700', color:'#8B94A6', letterSpacing:0.8, textTransform:'uppercase' },
+  infoStripVal:   { fontSize:15, fontWeight:'800', color:'#15233A' },
 
   // ── Schedule ──────────────────────────────────────────────────────────────
-  scheduleBtn:    { flex:1, flexDirection:'row', alignItems:'center', gap:10, backgroundColor:'rgba(255,255,255,0.05)', borderRadius:14, padding:12, borderWidth:1, borderColor:'rgba(255,255,255,0.08)' },
+  scheduleBtn:    { flex:1, flexDirection:'row', alignItems:'center', gap:10, backgroundColor:'#F3EFE8', borderRadius:14, padding:12, borderWidth:1, borderColor:'#E5E0D8' },
   scheduleBtnFilled: { borderColor:'rgba(244,98,31,0.3)', backgroundColor:'rgba(244,98,31,0.06)' },
   scheduleIconWrap: { width:36, height:36, borderRadius:10, alignItems:'center', justifyContent:'center' },
-  scheduleLabel:  { fontSize:9, fontWeight:'700', color:'#7A8FA8', letterSpacing:0.8, textTransform:'uppercase', marginBottom:2 },
-  scheduleValue:  { fontSize:14, fontWeight:'700', color:'#F0F4FF' },
+  scheduleLabel:  { fontSize:9, fontWeight:'700', color:'#8B94A6', letterSpacing:0.8, textTransform:'uppercase', marginBottom:2 },
+  scheduleValue:  { fontSize:14, fontWeight:'700', color:'#15233A' },
   schedulePlaceholder: { color:'#475569', fontWeight:'500' },
 
   // ── Seats ─────────────────────────────────────────────────────────────────
   popularTag:     { backgroundColor:'rgba(244,98,31,0.15)', borderRadius:12, paddingHorizontal:8, paddingVertical:3 },
   popularTagText: { color:BRAND.orange, fontSize:11, fontWeight:'700' },
   seatRow:        { flexDirection:'row', gap:12 },
-  seatBtn:        { flex:1, borderRadius:16, borderWidth:1.5, borderColor:'rgba(255,255,255,0.08)', backgroundColor:'rgba(255,255,255,0.04)', padding:14, alignItems:'center', gap:8 },
+  seatBtn:        { flex:1, borderRadius:16, borderWidth:1.5, borderColor:'#E5E0D8', backgroundColor:'#F3EFE8', padding:14, alignItems:'center', gap:8 },
   seatBtnActive:  { borderColor:'rgba(244,98,31,0.5)', backgroundColor:'rgba(244,98,31,0.08)' },
   seatIconRow:    { flexDirection:'row', gap:6 },
-  seatIconWrap:   { width:38, height:38, borderRadius:12, backgroundColor:'rgba(255,255,255,0.05)', alignItems:'center', justifyContent:'center' },
+  seatIconWrap:   { width:38, height:38, borderRadius:12, backgroundColor:'#EDEAE4', alignItems:'center', justifyContent:'center' },
   seatIconWrapActive: { backgroundColor:'rgba(244,98,31,0.15)' },
   seatBtnLabel:   { fontSize:15, fontWeight:'600', color:'#7A8FA8' },
   seatBtnSub:     { fontSize:11, color:'#475569', textAlign:'center' },
@@ -1527,37 +1261,37 @@ continueText: {
   aiTag:          { backgroundColor:'rgba(245,158,11,0.15)', borderRadius:12, paddingHorizontal:8, paddingVertical:3 },
   aiTagText:      { color:'#F59E0B', fontSize:11, fontWeight:'700' },
   priceRangeWrap: { marginBottom:14 },
-  priceRangeBar:  { height:4, backgroundColor:'rgba(255,255,255,0.08)', borderRadius:2, marginBottom:6, overflow:'hidden' },
+  priceRangeBar:  { height:4, backgroundColor:'#E5E0D8', borderRadius:2, marginBottom:6, overflow:'hidden' },
   priceRangeFill: { height:'100%' as any, backgroundColor:BRAND.orange, borderRadius:2 },
   priceRangeLabel:{ fontSize:12, color:'#7A8FA8' },
-  priceInputRow:  { flexDirection:'row', alignItems:'center', borderRadius:14, borderWidth:1.5, borderColor:'rgba(255,255,255,0.1)', backgroundColor:'rgba(255,255,255,0.05)', overflow:'hidden', marginBottom:12 },
+  priceInputRow:  { flexDirection:'row', alignItems:'center', borderRadius:14, borderWidth:1.5, borderColor:'#E5E0D8', backgroundColor:'#FFFFFF', overflow:'hidden', marginBottom:12 },
   priceDollarBox: { paddingHorizontal:16, paddingVertical:16, backgroundColor:'rgba(244,98,31,0.1)', alignItems:'center', justifyContent:'center' },
 
-  priceInput:     { flex:1, fontSize:22, fontWeight:'700', color:'#F0F4FF', paddingHorizontal:12, paddingVertical:14 },
+  priceInput:     { flex:1, fontSize:22, fontWeight:'700', color:'#15233A', paddingHorizontal:12, paddingVertical:14 },
   pricePerSeat:   { paddingRight:16, fontSize:14, color:'#7A8FA8', fontWeight:'500' },
   earningsRow:    { flexDirection:'row', gap:12, marginBottom:10 },
-  earningsItem:   { flex:1, backgroundColor:'rgba(255,255,255,0.04)', borderRadius:12, padding:12, alignItems:'center' },
-  earningsLabel:  { fontSize:11, color:'#7A8FA8', fontWeight:'500', marginBottom:4 },
-  earningsValue:  { fontSize:18, fontWeight:'800', color:'#F0F4FF' },
+  earningsItem:   { flex:1, backgroundColor:'#F3EFE8', borderRadius:12, padding:12, alignItems:'center' },
+  earningsLabel:  { fontSize:11, color:'#8B94A6', fontWeight:'500', marginBottom:4 },
+  earningsValue:  { fontSize:18, fontWeight:'800', color:'#15233A' },
   priceHintText:  { fontSize:12, color:'#475569' },
   capBanner:      { marginTop:8, paddingVertical:8, paddingHorizontal:12, borderRadius:10, backgroundColor:'rgba(16,185,129,0.1)', borderWidth:1, borderColor:'rgba(16,185,129,0.25)' },
   capBannerText:  { color:'#10B981', fontSize:12, fontWeight:'600' },
 
   // ── Ride Vibe ─────────────────────────────────────────────────────────────
-  optionalTag:    { fontSize:11, color:'#7A8FA8', backgroundColor:'rgba(255,255,255,0.06)', paddingHorizontal:8, paddingVertical:3, borderRadius:8 },
+  optionalTag:    { fontSize:11, color:'#8B94A6', backgroundColor:'#F3EFE8', paddingHorizontal:8, paddingVertical:3, borderRadius:8 },
   vibeSubLabel:   { fontSize:13, color:'#7A8FA8', marginBottom:12 },
   vibeChipsRow:   { flexDirection:'row', flexWrap:'wrap', gap:8, marginBottom:14 },
-  vibeChip:       { paddingHorizontal:12, paddingVertical:8, borderRadius:20, backgroundColor:'rgba(255,255,255,0.06)', borderWidth:1, borderColor:'rgba(255,255,255,0.08)' },
+  vibeChip:       { paddingHorizontal:12, paddingVertical:8, borderRadius:20, backgroundColor:'#F3EFE8', borderWidth:1, borderColor:'#E5E0D8' },
   vibeChipActive: { backgroundColor:'rgba(139,92,246,0.2)', borderColor:'rgba(139,92,246,0.5)' },
   vibeChipText:   { fontSize:13, color:'#7A8FA8', fontWeight:'500' },
   vibeChipTextActive: { color:'#C4B5FD', fontWeight:'700' },
-  notesInput:     { backgroundColor:'rgba(255,255,255,0.04)', borderRadius:12, borderWidth:1, borderColor:'rgba(255,255,255,0.08)', padding:12, fontSize:14, color:'#F0F4FF', minHeight:64, textAlignVertical:'top' },
+  notesInput:     { backgroundColor:'#FFFFFF', borderRadius:12, borderWidth:1, borderColor:'#E5E0D8', padding:12, fontSize:14, color:'#15233A', minHeight:64, textAlignVertical:'top' },
 
   // ── Campus Activity ───────────────────────────────────────────────────────
-  campusActivityTitle: { fontSize:15, fontWeight:'800', color:'#F0F4FF', marginBottom:12 },
+  campusActivityTitle: { fontSize:15, fontWeight:'800', color:'#15233A', marginBottom:12 },
   campusActivityRow:   { flexDirection:'row', alignItems:'center', paddingVertical:10, gap:10 },
   campusActivityDot:   { width:6, height:6, borderRadius:3, backgroundColor:BRAND.orange, flexShrink:0 },
-  campusActivityText:  { flex:1, fontSize:13, color:'rgba(255,255,255,0.55)' },
+  campusActivityText:  { flex:1, fontSize:13, color:'#8B94A6' },
 
   // ── GO LIVE Button ────────────────────────────────────────────────────────
   goLiveBtn:      { height:60, borderRadius:22, flexDirection:'row', alignItems:'center', justifyContent:'center', overflow:'hidden', marginBottom:10 },
@@ -1579,11 +1313,11 @@ continueText: {
   input: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#DDE3EC',
-    borderRadius: 10,
+    borderColor: '#D7DCE3',
+    borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
+    paddingVertical: 12,
+    fontSize: 15,
     color: '#13213A',
   },
 
@@ -1593,13 +1327,13 @@ continueText: {
   },
   autoPanel: {
     position: 'absolute',
-    top: 50,
+    top: 54,
     left: 0,
     right: 0,
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#DDE3EC',
+    borderColor: '#E5E0D8',
     maxHeight: 220,
     overflow: 'hidden',
     elevation: 20,
@@ -1609,7 +1343,7 @@ continueText: {
     shadowRadius: 20,
     zIndex: 999,
   },
-  autoItem:       { paddingHorizontal:14, paddingVertical:12, borderBottomWidth:1, borderBottomColor:'rgba(255,255,255,0.06)' },
+  autoItem:       { paddingHorizontal:14, paddingVertical:12, borderBottomWidth:1, borderBottomColor:'#E5E0D8' },
   autoItemRow:    { flexDirection:'column' },
   autoMainText: {
     color: '#13213A',
@@ -1681,11 +1415,11 @@ continueText: {
   safeArea:       { flex:1 },
   flex:           { flex:1 },
   header:         { padding:16, paddingBottom:0 },
-  headerTitle:    { fontSize:28, fontWeight:'bold', marginBottom:4, color:'#F0F4FF' },
+  headerTitle:    { fontSize:28, fontWeight:'bold', marginBottom:4, color:'#15233A' },
   headerSubtitle: { fontSize:16, color:'#7A8FA8' },
   scrollArea:     { flex:1 },
   scrollContent:  { padding:16, paddingBottom:40 },
-  card:           { backgroundColor:'rgba(255,255,255,0.05)', borderRadius:18, padding:18, marginBottom:14, borderWidth:1, borderColor:'rgba(255,255,255,0.08)' },
+  card:           { backgroundColor:'#FFFFFF', borderRadius:18, padding:18, marginBottom:14, borderWidth:1, borderColor:'#E5E0D8' },
   cardHeader:     { flexDirection:'row', alignItems:'center', gap:10, marginBottom:16 },
   routeContainer: { flexDirection:'row', gap:14 },
   routeLineCol:   { width:20, alignItems:'center', paddingTop:28, paddingBottom:28 },
@@ -1695,17 +1429,17 @@ continueText: {
   routeInputWrap: { marginBottom:2 },
   quickActions:   { flexDirection:'row', gap:10, marginTop:8 },
   infoStripDivider:{ width:1, height:36, marginHorizontal:8 },
-  infoStripValue: { fontSize:17, fontWeight:'800', color:'#F0F4FF' },
+  infoStripValue: { fontSize:17, fontWeight:'800', color:'#15233A' },
   scheduleRow:    { flexDirection:'row', gap:12 },
-  scheduleInput:  { flex:1, flexDirection:'row', alignItems:'center', backgroundColor:'rgba(255,255,255,0.05)', borderRadius:12, padding:14, gap:12, borderWidth:1, borderColor:'rgba(255,255,255,0.08)' },
+  scheduleInput:  { flex:1, flexDirection:'row', alignItems:'center', backgroundColor:'#F3EFE8', borderRadius:12, padding:14, gap:12, borderWidth:1, borderColor:'#E5E0D8' },
   scheduleTextWrap:{ flex:1 },
   seatsRow:       { flexDirection:'row', gap:12, marginBottom:4 },
-  seatOption:     { flex:1, flexDirection:'row', alignItems:'center', gap:10, paddingVertical:14, paddingHorizontal:16, borderRadius:12, borderWidth:1.5, borderColor:'rgba(255,255,255,0.08)', backgroundColor:'rgba(255,255,255,0.04)' },
+  seatOption:     { flex:1, flexDirection:'row', alignItems:'center', gap:10, paddingVertical:14, paddingHorizontal:16, borderRadius:12, borderWidth:1.5, borderColor:'#E5E0D8', backgroundColor:'#F3EFE8' },
   seatOptionActive:{ borderWidth:2 },
   seatOptionText: { fontSize:15, fontWeight:'600', color:'#475569' },
   fieldLabel:     { fontSize:14, fontWeight:'600', color:'#7A8FA8', marginBottom:10 },
   priceHint:      { marginTop:8, fontSize:12, fontWeight:'500', color:'#475569' },
-  optionalBadge:  { fontSize:11, fontWeight:'600', color:'#94A3B8', backgroundColor:'rgba(255,255,255,0.06)', paddingHorizontal:8, paddingVertical:3, borderRadius:6, overflow:'hidden' },
+  optionalBadge:  { fontSize:11, fontWeight:'600', color:'#8B94A6', backgroundColor:'#F3EFE8', paddingHorizontal:8, paddingVertical:3, borderRadius:6, overflow:'hidden' },
   submitBtn:      { flexDirection:'row', alignItems:'center', justifyContent:'center', borderRadius:16, paddingVertical:18, marginTop:4 },
   submitBtnDisabled:{ opacity:0.5 },
   submitBtnText:  { color:'#FFFFFF', fontSize:18, fontWeight:'700', letterSpacing:0.3 },
@@ -1717,7 +1451,7 @@ continueText: {
   ...StyleSheet.absoluteFillObject,
   alignItems: 'center',
   justifyContent: 'center',
-  backgroundColor: 'rgba(8,14,23,0.25)',
+  backgroundColor: 'rgba(251,250,247,0.6)',
 },
 
 mapPinWrap: {

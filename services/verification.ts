@@ -8,6 +8,7 @@ import { firebaseAuth, firestore } from '@/constants/services';
 import { useVerificationStore } from '@/stores/verificationStore';
 import { useAuthStore } from '@/stores/authStore';
 import { Alert, ToastAndroid, Platform } from 'react-native';
+import { router } from 'expo-router';
 
 // Keep track of the unsubscribe function for the Firestore listener
 let unsubscribeVerificationListener: (() => void) | null = null;
@@ -235,19 +236,7 @@ export function checkCanRequestRide(): boolean {
         },
         {
           text: 'Verify Now',
-          onPress: async () => {
-            const user = firebaseAuth.currentUser;
-            if (!user) return;
-            
-            try {
-              const token = await user.getIdToken(true);
-              const verificationUrl = `https://ridealongapp.com/student-verification.html?token=${token}`;
-              const { Linking } = require('react-native');
-              await Linking.openURL(verificationUrl);
-            } catch (error) {
-              console.error('Error opening verification URL:', error);
-            }
-          },
+          onPress: () => router.push('/(rider)/settings/student-verification' as any),
         },
       ]
     );

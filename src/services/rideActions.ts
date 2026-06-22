@@ -137,6 +137,27 @@ export async function completeRide(card: RideCardRef): Promise<boolean> {
   }
 }
 
+export async function riderCompleteRide(confirmedRideId: string): Promise<boolean> {
+  try {
+    await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), {
+      riderCompleteConfirmed: true,
+      updatedAt: serverTimestamp(),
+    }).catch(() => {});
+    const ok = await callUpdateRideStatus(confirmedRideId, 'rider_complete');
+    if (!ok) throw new Error('rider_complete_failed');
+    await logActivity({
+      type: 'ride_completed',
+      entityType: 'ride',
+      entityId: confirmedRideId,
+      metadata: { role: 'rider' },
+    });
+    return true;
+  } catch (e) {
+    showRideError(e);
+    return false;
+  }
+}
+
 export async function cancelRide(card: RideCardRef): Promise<boolean> {
   const fallbackId = card.confirmedId || card.rideRequestId || card.ridePostingId || card.riderId || null;
   try {

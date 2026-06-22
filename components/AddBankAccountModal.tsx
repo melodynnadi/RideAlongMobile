@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
+import DismissKeyboardView from '@/components/DismissKeyboardView';
 import { Ionicons } from '@expo/vector-icons';
 import type { AddBankAccountPayload } from '@/types';
 
@@ -146,7 +147,8 @@ export function AddBankAccountModal({ visible, onClose, onSubmit, loading = fals
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
-      <KeyboardAvoidingView style={s.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <DismissKeyboardView style={s.flex}>
+        <KeyboardAvoidingView style={s.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <TouchableOpacity style={s.backdrop} activeOpacity={1} onPress={handleClose} />
 
         <View style={[s.sheet, { backgroundColor: theme.card, borderColor: theme.border }]}>
@@ -167,7 +169,7 @@ export function AddBankAccountModal({ visible, onClose, onSubmit, loading = fals
                 <Text style={[s.subtitle, { color: theme.sub }]}>Connect your bank for payouts</Text>
               </View>
             </View>
-            <TouchableOpacity onPress={handleClose} disabled={busy} style={[s.closeBtn, { backgroundColor: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}>
+            <TouchableOpacity onPress={handleClose} disabled={busy} style={[s.closeBtn, { backgroundColor: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]} accessibilityRole="button" accessibilityLabel="Close add bank account">
               <Ionicons name="close" size={20} color={theme.text} />
             </TouchableOpacity>
           </View>
@@ -272,12 +274,14 @@ export function AddBankAccountModal({ visible, onClose, onSubmit, loading = fals
             </TouchableOpacity>
           </View>
         </View>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </DismissKeyboardView>
     </Modal>
   );
 }
 
 const s = StyleSheet.create({
+  flex: { flex: 1 },
   overlay:  { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
 
@@ -296,7 +300,7 @@ const s = StyleSheet.create({
   headerIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   title:      { fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
   subtitle:   { fontSize: 13, fontWeight: '400', marginTop: 1 },
-  closeBtn:   { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  closeBtn:   { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
 
   form: { paddingHorizontal: 24 },
 
