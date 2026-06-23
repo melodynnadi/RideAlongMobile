@@ -5,6 +5,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { firebaseAuth, firestore } from '@/constants/services';
+import * as Location from 'expo-location';
 import { PaymentModal } from '@/components/PaymentModal';
 import { RideFiltersModal } from '@/components/RideFiltersModal';
 import { usePromotions } from '@/hooks/usePromotions';
@@ -35,6 +36,29 @@ const BORDER = '#E5E0D8';
 const MUTED = '#8B94A6';
 const FONT_SANS = Platform.OS === 'web' ? '"Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, sans-serif' : undefined;
 const FONT_MONO = Platform.OS === 'web' ? '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace' : undefined;
+
+function formatCurrentLocationAddress(result?: Location.LocationGeocodedAddress | null): string {
+  if (!result) return 'Current location';
+  return [result.name, result.street, result.city, result.region].filter(Boolean).join(', ') || 'Current location';
+}
+
+async function getCurrentLocationAddressAsync(): Promise<string | null> {
+  try {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') return null;
+    const pos =
+      (await Location.getLastKnownPositionAsync()) ||
+      (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+    if (!pos) return null;
+    const rev = await Location.reverseGeocodeAsync({
+      latitude: pos.coords.latitude,
+      longitude: pos.coords.longitude,
+    });
+    return formatCurrentLocationAddress(rev?.[0]);
+  } catch {
+    return null;
+  }
+}
 
 type TabKey = 'home' | 'find' | 'rides' | 'inbox' | 'you';
 type RNTextProps = React.ComponentProps<typeof RNText>;
@@ -358,7 +382,7 @@ export function RiderHomeReference() {
   const [confirmedRideStatus, setConfirmedRideStatus] = useState<string | null>(null);
   const [confirmedRideId, setConfirmedRideId] = useState<string | null>(null);
   const ratingNavRef = useRef<Set<string>>(new Set());
-  const [from, setFrom] = useState('Austin, TX');
+  const [from, setFrom] = useState('');
   const [to, setTo] = useState('Houston, TX');
   const [promotionIndex, setPromotionIndex] = useState(0);
   const promotionScrollRef = useRef<ScrollView>(null);
@@ -432,6 +456,20 @@ export function RiderHomeReference() {
     }, 5000);
     return () => clearInterval(interval);
   }, [promotions.length, promotionSnapInterval]);
+
+  useEffect(() => {
+    if (from.trim()) return;
+    let cancelled = false;
+
+    (async () => {
+      const current = await getCurrentLocationAddressAsync();
+      if (!cancelled && current) setFrom(current);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [from]);
 
   const nextRide = useMemo(() => {
     const inProgress = confirmed.find((r) => String(r.status || '').toUpperCase() === 'IN_PROGRESS');
@@ -971,13 +1009,28 @@ function RiderRequestReferencePlaceholder() {
 
 export function RiderRequestReference() {
   const params = useLocalSearchParams<{ pickup?: string; dropoff?: string }>();
-  const [pickup, setPickup] = useState(String(params.pickup || ''));
+  const initialPickup = String(params.pickup || '');
+  const [pickup, setPickup] = useState(initialPickup);
   const [dropoff, setDropoff] = useState(String(params.dropoff || ''));
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [price, setPrice] = useState('28');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (initialPickup.trim()) return;
+    let cancelled = false;
+
+    (async () => {
+      const current = await getCurrentLocationAddressAsync();
+      if (!cancelled && current) setPickup(current);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialPickup]);
 
   const submit = async () => {
     const user = firebaseAuth.currentUser;
