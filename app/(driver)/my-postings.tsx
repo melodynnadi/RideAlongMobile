@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import {
   collection, query, where, onSnapshot, doc,
-  updateDoc, serverTimestamp, Timestamp,
+  updateDoc, serverTimestamp, Timestamp, getDocs, addDoc,
 } from 'firebase/firestore';
 import { firebaseAuth, firestore } from '@/constants/services';
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
@@ -25,6 +25,7 @@ type BookingRequest = {
   contributionAmount: number | null;
   status: string;
   ridePostingId: string;
+  createdAtMs: number;
 };
 
 const NAVY   = '#15233A';
@@ -103,11 +104,20 @@ export default function MyPostingsScreen() {
     const snapB: Map<string, BookingRequest> = new Map();
 
     const flush = () => {
+      // Dedup by doc ID first (merges snapA + snapB), then dedup by riderId per
+      // posting keeping only the most recent doc — prevents duplicate cards when
+      // a rider books more than once for the same posting.
+      const seen = new Map<string, BookingRequest>();
+      [...snapA.values(), ...snapB.values()].forEach((r) => seen.set(r.id, r));
+
       const byPosting: Record<string, BookingRequest[]> = {};
-      [...snapA.values(), ...snapB.values()].forEach((r) => {
+      seen.forEach((r) => {
         if (!byPosting[r.ridePostingId]) byPosting[r.ridePostingId] = [];
-        if (!byPosting[r.ridePostingId].find((x) => x.id === r.id)) {
+        const existing = byPosting[r.ridePostingId].findIndex((x) => x.riderId === r.riderId);
+        if (existing === -1) {
           byPosting[r.ridePostingId].push(r);
+        } else if (r.createdAtMs > byPosting[r.ridePostingId][existing].createdAtMs) {
+          byPosting[r.ridePostingId][existing] = r;
         }
       });
       setRequestsByPostingId(byPosting);
@@ -124,6 +134,7 @@ export default function MyPostingsScreen() {
       contributionAmount: d.contributionAmount != null ? Number(d.contributionAmount) : (d.price != null ? Number(d.price) : null),
       status: String(d.status || 'pending'),
       ridePostingId: d.ridePostingId || d.rideId || '',
+      createdAtMs: d.createdAt?.toMillis?.() ?? d._localCreatedMs ?? 0,
     });
 
     const qA = query(collection(firestore, 'ridePostingRequests'), where('driverId', '==', uid));
@@ -187,6 +198,27 @@ export default function MyPostingsScreen() {
         },
       },
     ]);
+  }, []);
+
+  const openChatWithRider = useCallback(async (req: BookingRequest) => {
+    const uid = firebaseAuth.currentUser?.uid;
+    if (!uid || !req.riderId) return;
+    try {
+      // Always create a fresh thread for this specific booking request
+      const chatRef = await addDoc(collection(firestore, 'chats'), {
+        participants: [uid, req.riderId],
+        participantRoles: { [uid]: 'driver', [req.riderId]: 'rider' },
+        ridePostingId: req.ridePostingId || null,
+        ridePostingRequestId: req.id,
+        context: 'booking-request',
+        createdAt: serverTimestamp(),
+        lastMessage: null,
+        lastMessageTimestamp: null,
+      });
+      router.push(`/(driver)/messages/${chatRef.id}` as any);
+    } catch {
+      Alert.alert('Error', 'Could not open the chat. Please try again.');
+    }
   }, []);
 
   useEffect(() => {
@@ -351,6 +383,7 @@ export default function MyPostingsScreen() {
               actingOnRequest={actingOnRequest}
               onAccept={acceptRequest}
               onDecline={declineRequest}
+              onMessage={openChatWithRider}
             />
           ))}
         </ScrollView>
@@ -369,6 +402,7 @@ function PostingCard({
   actingOnRequest,
   onAccept,
   onDecline,
+  onMessage,
 }: {
   posting: Posting;
   isPast: boolean;
@@ -379,6 +413,7 @@ function PostingCard({
   actingOnRequest: string | null;
   onAccept: (req: BookingRequest) => void;
   onDecline: (req: BookingRequest) => void;
+  onMessage: (req: BookingRequest) => void;
 }) {
   const hasRequests = incomingRequests.length > 0;
 
@@ -457,7 +492,16 @@ function PostingCard({
         const isActing = actingOnRequest === req.id;
         return (
           <View key={req.id} style={s.requestRow}>
-            <View style={s.requestRowTop}>
+            {/* Tappable rider info → opens rider profile */}
+            <TouchableOpacity
+              style={s.requestRowTop}
+              activeOpacity={0.7}
+              onPress={() => req.riderId && router.push({
+                pathname: '/(driver)/rider/[id]',
+                params: { id: req.riderId, returnTo: '/(driver)/my-postings' },
+              } as any)}
+              disabled={!req.riderId}
+            >
               <View style={s.requestDot} />
               <View style={{ flex: 1 }}>
                 <Text style={s.requestName}>{req.riderName}</Text>
@@ -468,8 +512,21 @@ function PostingCard({
                   </Text>
                 )}
               </View>
-            </View>
+              {req.riderId ? (
+                <Ionicons name="chevron-forward" size={15} color={MUTED} />
+              ) : null}
+            </TouchableOpacity>
+
             <View style={s.requestActions}>
+              <TouchableOpacity
+                style={s.msgBtn}
+                activeOpacity={0.75}
+                onPress={() => onMessage(req)}
+                disabled={!req.riderId}
+              >
+                <Ionicons name="chatbubble-outline" size={14} color={NAVY} />
+                <Text style={s.msgBtnText}>Message</Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 style={[s.acceptBtn, isActing && { opacity: 0.6 }]}
                 onPress={() => onAccept(req)}
@@ -495,7 +552,7 @@ function PostingCard({
 
       {/* Actions */}
       {!isPast && (
-        <View style={s.actions}>
+        <View style={[s.actions, hasRequests && s.actionsDivided]}>
           <TouchableOpacity style={s.editBtn} onPress={onEdit} activeOpacity={0.8}>
             <Ionicons name="pencil-outline" size={14} color={NAVY} />
             <Text style={s.editBtnText}>Edit</Text>
@@ -596,6 +653,12 @@ const s = StyleSheet.create({
   vibeText: { fontSize: 12, color: ORANGE, fontWeight: '600' },
   notes: { fontSize: 13, color: MUTED, marginBottom: 12, lineHeight: 18 },
   actions: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  actionsDivided: {
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: BORDER,
+  },
   editBtn: {
     minHeight: 42, flex: 1, flexDirection: 'row', alignItems: 'center',
     justifyContent: 'center', gap: 5, backgroundColor: '#F3EFE8',
@@ -616,7 +679,14 @@ const s = StyleSheet.create({
   requestDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D97706' },
   requestName: { fontSize: 14, fontWeight: '700', color: NAVY },
   requestMeta: { fontSize: 12, color: MUTED, marginTop: 2 },
-  requestActions: { flexDirection: 'row', gap: 8 },
+  requestActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  msgBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 5, minHeight: 40, paddingHorizontal: 14,
+    backgroundColor: '#F3EFE8', borderRadius: 20,
+    borderWidth: 1, borderColor: BORDER,
+  },
+  msgBtnText: { fontSize: 13, fontWeight: '700', color: NAVY },
   acceptBtn: {
     flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center',
     backgroundColor: NAVY, borderRadius: 20,

@@ -43,6 +43,7 @@ const SECONDARY = '#0D1B48';
 const BG     = '#FBFAF7';
 const BORDER = '#E5E0D8';
 const MUTED  = '#8B94A6';
+const confirmationRepairs = new Set<string>();
 
 const COLORS = {
   orange: '#DE5D20',
@@ -190,7 +191,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
 
   const statusLabel = isInProgress ? 'IN PROGRESS'
     : isConfirmedOnly ? 'CONFIRMED'
-    : (isPosting && hasOfferReceived) ? 'OFFER RECEIVED'
+    : (isPosting && hasOfferReceived) ? 'REQUEST RECEIVED'
     : isOfferSent ? 'OFFER SENT'
     : prettyStatus(rawStatus).toUpperCase();
   const statusColor = isInProgress ? ORANGE
@@ -212,12 +213,15 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
   const handlePickup = async () => {
     setPickingUp(true);
     try {
-      await actionConfirmPickup({
+      const pickedUp = await actionConfirmPickup({
         confirmedId: ride.confirmedId,
         rideRequestId: ride.type === 'rideRequest' ? ride.id : undefined,
         ridePostingId: ride.type === 'ridePosting' ? ride.id : undefined,
         riderId: ride.riderId,
       });
+      if (pickedUp && ride.confirmedId) {
+        router.push(('/(driver)/trip/' + ride.confirmedId) as any);
+      }
     } finally {
       setPickingUp(false);
     }
@@ -386,6 +390,7 @@ type UpcomingRideCard = {
   dateTime: Date | null;
   dateStr?: string;
   confirmedId?: string;
+  ridePostingId?: string;
   confirmedStatus?: string;
   riderId?: string;
   confirmedDriverComplete?: boolean;
@@ -1120,6 +1125,11 @@ export default function HomeScreen() {
         const price = r?.contributionAmount ?? r?.price ?? r?.estimatedFare;
         const distance = r?.distance;
         const postingId = r.ridePostingId || r.ridePostId || r.postingId || r.posting?.id;
+        if (postingId && ['accepted', 'confirmed'].includes(String(r?.status || '').toLowerCase())) {
+          void ensureAcceptedPostingRequestConfirmation(d.id, r, uid ? String(uid) : '').catch((error) => {
+            console.warn('Accepted posting request repair failed', d.id, error);
+          });
+        }
         if (postingId && !['rejected','declined','cancelled','canceled','completed','accepted','confirmed'].includes(String(r?.status || '').toLowerCase())) {
           byPosting[String(postingId)] = { id: d.id, status: String(r?.status || 'pending') };
         }
@@ -1127,6 +1137,7 @@ export default function HomeScreen() {
           id: d.id,
           type: 'ridePostingRequest',
           status: String(r?.status || 'offer_sent'),
+          ridePostingId: postingId ? String(postingId) : undefined,
           from,
           to,
           dateTime: dt,
@@ -1159,6 +1170,11 @@ export default function HomeScreen() {
           const price = r?.contributionAmount ?? r?.price ?? r?.estimatedFare;
           const distance = r?.distance;
           const postingId = r.ridePostingId || r.ridePostId || r.postingId || r.posting?.id;
+        if (postingId && ['accepted', 'confirmed'].includes(String(r?.status || '').toLowerCase())) {
+          void ensureAcceptedPostingRequestConfirmation(d.id, r, uid ? String(uid) : '').catch((error) => {
+            console.warn('Accepted posting request repair failed', d.id, error);
+          });
+        }
           if (postingId && !['rejected','declined','cancelled','canceled','completed','accepted','confirmed'].includes(String(r?.status || '').toLowerCase())) {
             byPosting[String(postingId)] = { id: d.id, status: String(r?.status || 'pending') };
           }
@@ -1166,6 +1182,7 @@ export default function HomeScreen() {
             id: d.id,
             type: 'ridePostingRequest',
             status: String(r?.status || 'offer_sent'),
+          ridePostingId: postingId ? String(postingId) : undefined,
             from,
             to,
             dateTime: dt,
@@ -1200,6 +1217,11 @@ export default function HomeScreen() {
           const price = r?.contributionAmount ?? r?.price ?? r?.estimatedFare;
           const distance = r?.distance;
           const postingId = r.ridePostingId || r.ridePostId || r.postingId || r.posting?.id;
+        if (postingId && ['accepted', 'confirmed'].includes(String(r?.status || '').toLowerCase())) {
+          void ensureAcceptedPostingRequestConfirmation(d.id, r, uid ? String(uid) : '').catch((error) => {
+            console.warn('Accepted posting request repair failed', d.id, error);
+          });
+        }
           if (postingId && !['rejected','declined','cancelled','canceled','completed','accepted','confirmed'].includes(String(r?.status || '').toLowerCase())) {
             byPosting[String(postingId)] = { id: d.id, status: String(r?.status || 'pending') };
           }
@@ -1207,6 +1229,7 @@ export default function HomeScreen() {
             id: d.id,
             type: 'ridePostingRequest',
             status: String(r?.status || 'pending'),
+          ridePostingId: postingId ? String(postingId) : undefined,
             from,
             to,
             dateTime: dt,
@@ -1241,6 +1264,11 @@ export default function HomeScreen() {
             const price = r?.contributionAmount ?? r?.price ?? r?.estimatedFare;
             const distance = r?.distance;
             const postingId = r.ridePostingId || r.ridePostId || r.postingId || r.posting?.id;
+        if (postingId && ['accepted', 'confirmed'].includes(String(r?.status || '').toLowerCase())) {
+          void ensureAcceptedPostingRequestConfirmation(d.id, r, uid ? String(uid) : '').catch((error) => {
+            console.warn('Accepted posting request repair failed', d.id, error);
+          });
+        }
             if (postingId && !['rejected','declined','cancelled','canceled','completed','accepted','confirmed'].includes(String(r?.status || '').toLowerCase())) {
               byPosting[String(postingId)] = { id: d.id, status: String(r?.status || 'pending') };
             }
@@ -1248,6 +1276,7 @@ export default function HomeScreen() {
               id: d.id,
               type: 'ridePostingRequest',
               status: String(r?.status || 'pending'),
+          ridePostingId: postingId ? String(postingId) : undefined,
               from,
               to,
               dateTime: dt,
@@ -1581,6 +1610,7 @@ export default function HomeScreen() {
               return (raw === 'DRIVER_COMPLETED' || raw === 'RIDER_COMPLETED') ? 'IN_PROGRESS' : raw;
             });
             const allConfirmed = childStatuses.every((s) => s === 'CONFIRMED');
+            const anyConfirmed = childStatuses.some((s) => s === 'CONFIRMED');
             const anyPending = childStatuses.some((s) => s === 'PENDING');
             const anyInProgress = childStatuses.some((s) => s === 'IN_PROGRESS');
             const allCompleted = childStatuses.every((s) => s === 'COMPLETED');
@@ -1596,18 +1626,15 @@ export default function HomeScreen() {
               return;
             }
             // Determine aggregated status: PENDING until all seats filled, then follow ride progression
-            const seatsNotFilled = items.length < seatCount;
             const aggregatedStatus = anyFlagged
               ? 'FLAGGED'
-              : seatsNotFilled
-                ? 'PENDING'
-                : allCompleted
-                  ? 'COMPLETED'
-                  : anyInProgress
-                    ? 'IN_PROGRESS'
-                    : allConfirmed
-                      ? 'CONFIRMED'
-                      : 'PENDING';
+              : allCompleted
+                ? 'COMPLETED'
+                : anyInProgress
+                  ? 'IN_PROGRESS'
+                  : (allConfirmed || anyConfirmed || anyPending)
+                    ? 'CONFIRMED'
+                    : 'PENDING';
             console.log('[groupRide aggregation]', pid, 'childStatuses:', childStatuses, '=>', aggregatedStatus);
             // Remove individual posting/request cards for this posting once group view is available
             Object.keys(cards).forEach((k) => { if (k === `ridePosting-${pid}`) delete (cards as any)[k]; });
@@ -2071,6 +2098,21 @@ export default function HomeScreen() {
   // This prevents stale-closure issues from individual listeners calling setCombinedUpcoming
   // with out-of-date views of other maps (e.g., after posting a ride, confirmed could be dropped).
   useEffect(() => {
+    const acceptedPostingRequests = [
+      ...Object.values(upcPostingReqDriver || {}),
+      ...Object.values(upcPostingReqEmail || {}),
+      ...Object.values(upcPostingReqOwner || {}),
+      ...Object.values(upcPostingReqOwnerEmail || {}),
+    ].filter((card) => {
+      const status = String(card.status || '').toLowerCase();
+      const postingId = card.ridePostingId;
+      return ['accepted', 'confirmed'].includes(status)
+        && (!postingId || (confirmedCountByPostingId[postingId] || 0) === 0);
+    }).map((card) => ({ ...card, status: 'CONFIRMED', confirmedStatus: 'CONFIRMED' }));
+    const acceptedPostingIds = new Set(
+      acceptedPostingRequests.map((card) => card.ridePostingId).filter((id): id is string => Boolean(id)),
+    );
+
     const arr: UpcomingRideCard[] = [
       ...Object.values(upcOffersSent || {}),
       ...Object.values(upcReqDriver || {}),
@@ -2087,18 +2129,15 @@ export default function HomeScreen() {
   ...Object.values(upcPostingsDriver || {}).filter((c) => {
         if (c.type !== 'ridePosting') return true;
         const seatsFilled = confirmedCountByPostingId[c.id] || 0;
-        const totalSeats = Number(c.seatsAvailable || c.seats || 1);
-        // Only hide Posted card when ALL seats are filled
-        const isFull = seatsFilled >= totalSeats;
-        return !isFull; // show Posted until all seats are filled
+        return seatsFilled === 0 && !acceptedPostingIds.has(c.id);
       }),
   ...Object.values(upcPostingsEmail || {}).filter((c) => {
         if (c.type !== 'ridePosting') return true;
         const seatsFilled = confirmedCountByPostingId[c.id] || 0;
-        const totalSeats = Number(c.seatsAvailable || c.seats || 1);
-        const isFull = seatsFilled >= totalSeats;
-        return !isFull; // show Posted until all seats are filled
+        return seatsFilled === 0 && !acceptedPostingIds.has(c.id);
       }),
+      // Accepted requests recover older records that predate confirmedRides synchronization.
+      ...acceptedPostingRequests,
       // Confirmed at the end so it overrides placeholders with the same (type-id)
   // Include only active confirmed rides in Upcoming.
   ...Object.values(upcConfirmed || {}).filter((c) => {
@@ -2331,26 +2370,86 @@ export default function HomeScreen() {
         const pd = await getDoc(doc(firestore, 'ridePostings', String(postingId)));
         post = pd.exists() ? (pd.data() as any) : undefined;
       }
-      // Call server to accept with concurrency + payment authorization
+      // The server owns seat allocation; the client then verifies the canonical
+      // confirmedRides document so older backend deployments cannot leave the UI half-confirmed.
       if (!postingId) throw new Error('Missing postingId on request');
+      if (!uid) throw new Error('Driver is not signed in');
+
+      const driverSnap = await getDoc(doc(firestore, 'drivers', uid));
+      const driver = driverSnap.exists() ? (driverSnap.data() as any) : {};
+      const driverName = [driver.firstName, driver.lastName].filter(Boolean).join(' ').trim()
+        || driver.personalInfo?.fullName || driver.displayName || driver.name || userName || 'Driver';
+      const driverEmail = driver.personalInfo?.email || driver.email || email || firebaseAuth.currentUser?.email || '';
       const base = getApiBaseUrl();
       const token = await firebaseAuth.currentUser?.getIdToken();
-      const seatPrice = (typeof (r?.contributionAmount) === 'number' ? r.contributionAmount : (typeof post?.pricePerSeat === 'number' ? post.pricePerSeat : undefined));
-      const resp = await fetch(`${base}/driver/posting/${encodeURIComponent(String(postingId))}/accept-request`, {
+      const seatPrice = typeof r?.contributionAmount === 'number'
+        ? r.contributionAmount
+        : (typeof post?.pricePerSeat === 'number' ? post.pricePerSeat : undefined);
+      const resp = await fetch(`${base}/api/ride-postings/${encodeURIComponent(String(postingId))}/requests/${encodeURIComponent(requestId)}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ requestId, userId: uid, seatPrice }),
+        body: JSON.stringify({ driverId: uid, driverName, driverEmail, seatPrice }),
       });
       if (!resp.ok) {
         let errText = 'Failed to accept request';
         try { const j = await resp.json(); errText = j?.error || errText; } catch {}
-        Alert.alert('Accept failed', errText);
-        return;
+        throw new Error(errText);
       }
       const result = await resp.json().catch(() => ({} as any));
 
-      // Show success message
-      Alert.alert('Success', 'Ride request accepted! The rider has been notified.');
+      const riderId = r.riderId || r.userId || r.requesterId || r.ownerId;
+      if (!riderId) throw new Error('The accepted request is missing its rider ID');
+
+      const totalSeats = Number(result.totalSeats ?? post?.seatsAvailable ?? post?.totalSeats ?? post?.seats ?? 1) || 1;
+      const seatsTaken = Number(result.seatsTaken ?? post?.seatsTaken ?? r.passengers ?? 1) || 1;
+      const seatsRemaining = Math.max(0, Number(result.seatsRemaining ?? (totalSeats - seatsTaken)) || 0);
+      const confirmedId = String(result.confirmedRideId || `${postingId}_${requestId}`);
+      const confirmedPayload = deepClean({
+        ridePostingRequestId: requestId,
+        ridePostingId: String(postingId),
+        riderId: String(riderId),
+        riderName: r.riderName || r.userName || r.requesterName || 'Rider',
+        riderEmail: r.riderEmail || r.userEmail || r.requesterEmail || null,
+        riderPhone: r.riderPhone || r.userPhone || r.phone || null,
+        driverId: uid,
+        driverName,
+        driverEmail,
+        driverPhone: driver.personalInfo?.phone || driver.phone || null,
+        vehicleInfo: driver.vehicleInfo || post?.vehicleInfo || null,
+        pickup: post?.pickup || post?.pickupAddress || r.pickup || r.pickupAddress || null,
+        dropoff: post?.dropoff || post?.dropoffAddress || r.dropoff || r.dropoffAddress || null,
+        date: post?.date || r.date || null,
+        time: post?.time || r.time || null,
+        passengers: Number(r.passengers ?? r.seats ?? 1) || 1,
+        contributionAmount: r.contributionAmount ?? r.price ?? seatPrice ?? null,
+        paymentIntentId: r.paymentIntentId || null,
+        paymentStatus: r.paymentStatus || 'authorized',
+        totalSeats,
+        seatsTaken,
+        seatsRemaining,
+        status: 'CONFIRMED',
+        source: 'mobile:accept-posting-request',
+        originalRidePosting: post || null,
+        originalRidePostingRequest: { id: requestId, ...r },
+        confirmedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      });
+
+      await setDoc(doc(firestore, 'confirmedRides', confirmedId), confirmedPayload, { merge: true });
+      await updateDoc(doc(firestore, 'ridePostingRequests', requestId), {
+        status: 'accepted',
+        confirmedRideId: confirmedId,
+        acceptedBy: uid,
+        updatedAt: serverTimestamp(),
+      });
+
+      setConfirmedCountByPostingId((prev) => ({
+        ...prev,
+        [String(postingId)]: Math.max(prev[String(postingId)] || 0, seatsTaken),
+      }));
+
+      Alert.alert('Ride confirmed', 'The rider has been notified and the confirmed ride is now available to both of you.');
 
       // Remove pending badge for this posting; confirmed child doc will flow in via listeners
       setPostingReqByPostingId((prev) => {
@@ -2364,7 +2463,7 @@ export default function HomeScreen() {
       // The confirmed ride listener should pick it up automatically
     } catch (e) {
       console.warn('acceptPostingRequest error', e);
-      Alert.alert('Error', 'Failed to accept request. Please try again.');
+      Alert.alert('Accept failed', e instanceof Error ? e.message : 'Failed to accept request. Please try again.');
     }
   };
 
@@ -2860,12 +2959,14 @@ export default function HomeScreen() {
     const status = String(next.confirmedStatus || next.status || '').toLowerCase();
     if (status.includes('progress') || status.includes('driver_completed') || status.includes('rider_completed')) return 'your ride is in progress.';
     if (status.includes('confirmed')) return 'your ride has been confirmed!';
-    if (next.type === 'ridePosting') return 'your ride is posted.';
+    if (next.type === 'ridePosting') {
+      return postingReqByPostingId[next.id] ? 'you received a request!' : 'your ride is posted.';
+    }
     if (status.includes('offer_sent') || status === 'sent') return 'your offer has been sent!';
     if (next.type === 'ridePostingRequest' || status.includes('offer') || status.includes('pending')) return 'you have a ride request!';
 
     return 'your next ride is coming up.';
-  }, [displayUpcoming]);
+  }, [displayUpcoming, postingReqByPostingId]);
 
   return (
     <View style={[s.root, { backgroundColor: BG }]}>
@@ -3790,6 +3891,76 @@ function parseCurrency(v: any): number | undefined {
     return isNaN(num) ? undefined : num;
   }
   return undefined;
+}
+
+async function ensureAcceptedPostingRequestConfirmation(requestId: string, request: any, driverId: string) {
+  const postingId = request.ridePostingId || request.ridePostId || request.postingId || request.posting?.id;
+  if (!postingId || !driverId) return;
+
+  const confirmedId = String(request.confirmedRideId || `${postingId}_${requestId}`);
+  if (confirmationRepairs.has(confirmedId)) return;
+  confirmationRepairs.add(confirmedId);
+
+  try {
+    const confirmedRef = doc(firestore, 'confirmedRides', confirmedId);
+    const existing = await getDoc(confirmedRef);
+    const existingStatus = existing.exists() ? String(existing.data().status || '').toUpperCase() : '';
+    if (existing.exists() && existingStatus && existingStatus !== 'PENDING') return;
+
+    const [postingSnap, driverSnap] = await Promise.all([
+      getDoc(doc(firestore, 'ridePostings', String(postingId))),
+      getDoc(doc(firestore, 'drivers', driverId)),
+    ]);
+    const posting = postingSnap.exists() ? postingSnap.data() as any : {};
+    const driver = driverSnap.exists() ? driverSnap.data() as any : {};
+    const riderId = request.riderId || request.userId || request.requesterId || request.ownerId;
+    if (!riderId) throw new Error('Accepted request is missing riderId');
+
+    const totalSeats = Number(posting.seatsAvailable ?? posting.totalSeats ?? posting.seats ?? 1) || 1;
+    const seatsTaken = Number(posting.seatsTaken ?? request.passengers ?? 1) || 1;
+    const payload = deepClean({
+      ridePostingRequestId: requestId,
+      ridePostingId: String(postingId),
+      riderId: String(riderId),
+      riderName: request.riderName || request.userName || request.requesterName || 'Rider',
+      riderEmail: request.riderEmail || request.userEmail || request.requesterEmail || null,
+      riderPhone: request.riderPhone || request.userPhone || request.phone || null,
+      driverId,
+      driverName: [driver.firstName, driver.lastName].filter(Boolean).join(' ').trim()
+        || driver.personalInfo?.fullName || driver.displayName || driver.name || request.driverName || 'Driver',
+      driverEmail: driver.personalInfo?.email || driver.email || request.driverEmail || null,
+      driverPhone: driver.personalInfo?.phone || driver.phone || null,
+      vehicleInfo: driver.vehicleInfo || posting.vehicleInfo || request.vehicleInfo || null,
+      pickup: posting.pickup || posting.pickupAddress || request.pickup || request.pickupAddress || null,
+      dropoff: posting.dropoff || posting.dropoffAddress || request.dropoff || request.dropoffAddress || null,
+      date: posting.date || request.date || null,
+      time: posting.time || request.time || null,
+      passengers: Number(request.passengers ?? request.seats ?? 1) || 1,
+      contributionAmount: request.contributionAmount ?? request.price ?? posting.pricePerSeat ?? null,
+      paymentIntentId: request.paymentIntentId || null,
+      paymentStatus: request.paymentStatus || 'authorized',
+      totalSeats,
+      seatsTaken,
+      seatsRemaining: Math.max(0, Number(posting.availableSeats ?? (totalSeats - seatsTaken)) || 0),
+      status: 'CONFIRMED',
+      source: 'mobile:repair-accepted-posting-request',
+      originalRidePosting: posting,
+      originalRidePostingRequest: { id: requestId, ...request },
+      confirmedAt: request.acceptedAt || serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      ...(existing.exists() ? {} : { createdAt: serverTimestamp() }),
+    });
+
+    await setDoc(confirmedRef, payload, { merge: true });
+    await updateDoc(doc(firestore, 'ridePostingRequests', requestId), {
+      status: 'accepted',
+      confirmedRideId: confirmedId,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    confirmationRepairs.delete(confirmedId);
+    throw error;
+  }
 }
 
 function deepClean<T = any>(obj: T): T {

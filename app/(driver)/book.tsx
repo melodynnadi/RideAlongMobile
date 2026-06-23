@@ -874,13 +874,6 @@ export default function BookScreen() {
                   <Text style={styles.pageTitle}>Post a ride</Text>
                 </View>
 
-                <View style={styles.stepWrap}>
-                  <Text style={styles.stepText}>Ride details</Text>
-                  <View style={styles.stepTrack}>
-                    <View style={styles.stepFill} />
-                  </View>
-                </View>
-
                 <View style={styles.formCard}>
                   <View style={styles.routeMiniRow}>
                     <View style={styles.routeDots}>
@@ -1045,32 +1038,6 @@ const styles = StyleSheet.create({
   suggestedText: { color: '#8B94A6', fontSize: 11, lineHeight: 15, fontWeight: '600', textAlign: 'right' },
   notesCeo: { marginHorizontal: 20, minHeight: 92, borderRadius: 18, borderWidth: 1, borderColor: '#E5E0D8', backgroundColor: '#FFFFFF', padding: 14, color: '#15233A', fontSize: 14, lineHeight: 20, textAlignVertical: 'top' },
 
-  stepWrap: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  gap: 10,
-  paddingHorizontal: 20,
-  marginBottom: 12,
-},
-stepText: {
-  color: '#7A8FA8',
-  fontSize: 11,
-  fontWeight: '800',
-  letterSpacing: 1.3,
-  textTransform: 'uppercase',
-},
-stepTrack: {
-  flex: 1,
-  height: 3,
-  backgroundColor: '#E5E0D8',
-  borderRadius: 2,
-},
-stepFill: {
-  width: '34%',
-  height: 3,
-  backgroundColor: BRAND.orange,
-  borderRadius: 2,
-},
 routeMiniRow: {
   flexDirection: 'row',
   gap: 12,

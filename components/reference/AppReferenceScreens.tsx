@@ -1497,7 +1497,7 @@ export function RiderChatReference() {
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={0}>
 
           {/* Header */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BDR, backgroundColor: '#FFF', gap: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BDR, backgroundColor: BG2, gap: 10 }}>
             <TouchableOpacity
               onPress={() => router.back()}
               style={{ width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BDR, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center' }}
@@ -1533,7 +1533,7 @@ export function RiderChatReference() {
           <ScrollView
             ref={flatListRef}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ padding: 16, paddingTop: 24, paddingBottom: 8, flexGrow: 1 }}
+            contentContainerStyle={{ padding: 16, paddingTop: 28, paddingBottom: 8, flexGrow: 1 }}
             keyboardShouldPersistTaps="handled"
           >
             {!messages.length ? (
@@ -2662,4 +2662,3 @@ const s = StyleSheet.create({
   termsTitle: { fontSize: 24, fontWeight: '700', marginTop: 20, marginBottom: 24 },
   sectionBig: { fontSize: 16, fontWeight: '700', marginTop: 20, marginBottom: 8 },
 });
-

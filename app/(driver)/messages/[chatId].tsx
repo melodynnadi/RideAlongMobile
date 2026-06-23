@@ -290,7 +290,7 @@ export default function ChatDetailScreen() {
 
               </>
             }
-            ListHeaderComponentStyle={{ marginHorizontal: -16, marginTop: -16 }}
+            ListHeaderComponentStyle={{ marginHorizontal: -16, marginTop: -16, marginBottom: 12 }}
             ref={flatListRef}
             data={messages}
             renderItem={renderMessage}
@@ -351,7 +351,7 @@ const s = StyleSheet.create({
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14 },
   loadingText: { color: MUTED, fontSize: 14, fontWeight: '500' },
 
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BORDER, backgroundColor: '#FFFFFF', gap: 10 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BORDER, backgroundColor: BG, gap: 10 },
   backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: BORDER },
   headerMid: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },

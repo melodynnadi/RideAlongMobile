@@ -446,7 +446,7 @@ export function RiderHomeReference() {
     const rawStatus = String(nextRequest.status || nextRequest.state || '').toLowerCase();
     const offerCount = Number(nextRequest.offerCount || nextRequest.offersCount || nextRequest.driverOfferCount || 0);
     const hasOffer =
-      rawStatus.includes('offer') || rawStatus.includes('matched') || rawStatus.includes('accepted') ||
+      rawStatus.includes('offer') || rawStatus.includes('matched') ||
       offerCount > 0 || (Array.isArray(nextRequest.offers) && nextRequest.offers.length > 0) ||
       !!nextRequest.offerId || !!nextRequest.rideOfferId;
     return hasOffer ? { offerId: nextRequest.offerId || nextRequest.rideOfferId || '', driverId: nextRequest.driverId } : null;
@@ -454,7 +454,7 @@ export function RiderHomeReference() {
 
   const nextRequestHasOffer = !!nextRequestOfferInfo;
 
-  const nextRequestIsConfirmed = !!nextRequest && String(nextRequest.status || nextRequest.state || '').toLowerCase() === 'confirmed';
+  const nextRequestIsConfirmed = !!nextRequest && ['accepted', 'confirmed'].includes(String(nextRequest.status || nextRequest.state || '').toLowerCase());
 
   // Watch confirmedRides by rideRequestId so we get live status updates (e.g. CONFIRMED → IN_PROGRESS)
   // rideRequests.status never gets updated by the backend after pickup, so this is the only reliable source.
@@ -575,6 +575,12 @@ function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
   const statusLabel = isInProgress ? 'IN PROGRESS' : 'CONFIRMED';
   const statusColor = isInProgress ? '#DE5D20' : '#16A34A';
   const statusBg    = isInProgress ? 'rgba(222,93,32,0.08)' : '#EDFAF3';
+  const rideDate = ride.date
+    ? ride.date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+    : 'Date pending';
+  const rideTime = ride.date
+    ? ride.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : 'Time pending';
 
   const [driverName, setDriverName] = useState(ride.driverName);
   const [vehicleText, setVehicleText] = useState(ride.vehicle);
@@ -604,18 +610,31 @@ function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
 
   return (
     <TouchableOpacity style={styles.rideCard} onPress={() => isInProgress ? router.push(`/(rider)/trip/${ride.id}` as any) : router.push(`/(rider)/ride/${ride.id}` as any)}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+      <View style={styles.confirmedCardHeader}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: statusBg, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 }}>
           <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: statusColor }} />
           <Text style={{ color: statusColor, fontSize: 11, fontWeight: '800', letterSpacing: 0.5 }}>{statusLabel}</Text>
         </View>
-        <Text style={styles.cardPrice}>${Math.round(ride.price)}</Text>
+        <View style={styles.confirmedFareBlock}>
+          <Text style={styles.confirmedFareLabel}>TOTAL</Text>
+          <Text style={styles.cardPrice}>${ride.price.toFixed(2)}</Text>
+        </View>
       </View>
       <View style={styles.rideMain}>
         <RouteDots compact />
         <View style={{ flex: 1 }}>
-          <View style={styles.rideLine}><Text style={styles.ridePlace}>{ride.from}</Text><Text style={styles.rideTime}>{ride.date ? ride.date.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : 'TIME PENDING'}</Text></View>
+          <View style={styles.rideLine}><Text style={styles.ridePlace}>{ride.from}</Text></View>
           <View style={styles.rideLine}><Text style={styles.ridePlace}>{ride.to}</Text></View>
+        </View>
+      </View>
+      <View style={styles.confirmedSchedule}>
+        <View style={styles.confirmedScheduleItem}>
+          <Ionicons name="calendar-outline" size={16} color={MUTED} />
+          <Text style={styles.rideTime}>{rideDate}</Text>
+        </View>
+        <View style={styles.confirmedScheduleItem}>
+          <Ionicons name="time-outline" size={16} color={MUTED} />
+          <Text style={styles.rideTime}>{rideTime}</Text>
         </View>
       </View>
       <View style={styles.driverFooter}>
@@ -658,7 +677,7 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
   const dropoff = request.dropoffAddress || request.dropoff || request.to || 'Destination pending';
   const price = Number(request.maxPrice || request.estimatedFare || request.price || 0);
   const rawStatus = String(request.status || request.state || '').toLowerCase();
-  const isConfirmed = rawStatus === 'confirmed';
+  const isConfirmed = rawStatus === 'accepted' || rawStatus === 'confirmed';
   const normalizedStatus = String(confirmedRideStatus || '').toUpperCase();
   const isInProgress = ['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED'].includes(normalizedStatus);
   const isDriverCompleted = normalizedStatus === 'DRIVER_COMPLETED';
@@ -1960,11 +1979,16 @@ const styles = StyleSheet.create({
   quickCity: { fontFamily: FONT_SANS, color: NAVY, fontSize: 16, fontWeight: '600', marginTop: 8 },
   quickPrice: { color: ORANGE, fontSize: 23, fontWeight: '300', marginTop: 4 },
   rideCard: { borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 18 },
+  confirmedCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 },
+  confirmedFareBlock: { alignItems: 'flex-end', flexShrink: 0 },
+  confirmedFareLabel: { color: MUTED, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, marginBottom: 1 },
+  confirmedSchedule: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 18, marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#ECE8E1' },
+  confirmedScheduleItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   emptyCard: { borderRadius: 18, borderWidth: 1, borderStyle: 'dashed', borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 24, alignItems: 'center', justifyContent: 'center', minHeight: 120 },
   rideMain: { flexDirection: 'row' },
-  rideLine: { flexDirection: 'row', alignItems: 'center' },
+  rideLine: { flexDirection: 'row', alignItems: 'center', minHeight: 28 },
   ridePlace: { fontFamily: FONT_SANS, flex: 1, color: NAVY, fontSize: 17, fontWeight: '600' },
-  rideTime: { fontFamily: FONT_MONO, color: MUTED, fontSize: 11, fontWeight: '600', textTransform: 'uppercase' },
+  rideTime: { fontFamily: FONT_SANS, color: MUTED, fontSize: 12, fontWeight: '700' },
   rideMeta: { color: MUTED, fontSize: 12, fontWeight: '600', marginVertical: 5 },
   driverFooter: { flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, borderStyle: 'dashed', borderTopColor: '#D7DCE3', paddingTop: 14, marginTop: 12 },
   activityCardActions: { flexDirection: 'row', gap: 8, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#E5E0D8' },
@@ -1978,7 +2002,7 @@ const styles = StyleSheet.create({
   availableAvatarImage: { width: '100%', height: '100%', borderRadius: 21 },
   avatarText: { fontFamily: FONT_SANS, color: ORANGE, fontSize: 14, fontWeight: '600' },
   driverSmall: { flex: 1, color: '#6B7280', fontSize: 12, fontWeight: '700', lineHeight: 18 },
-  cardPrice: { color: ORANGE, fontSize: 32, fontWeight: '300' },
+  cardPrice: { color: ORANGE, fontSize: 24, fontWeight: '700' },
   eyebrow: { fontFamily: FONT_SANS, color: '#7A8FA8', fontSize: 11, fontWeight: '800', letterSpacing: 1.3, textTransform: 'uppercase', marginBottom: 8, marginTop: 16 },
   seatRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   seatPill: { flex: 1, minHeight: 48, borderRadius: 24, borderWidth: 1, borderColor: '#D7DCE3', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },

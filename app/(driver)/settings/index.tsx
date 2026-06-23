@@ -22,7 +22,6 @@ import { settingsService } from '@/src/services/settingsService';
 import { notificationService } from '@/src/services/notificationService';
 import { useVerificationStore } from '@/stores/verificationStore';
 import { useAppTheme } from '@/hooks/ThemeContext';
-import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 
 const NAVY = '#15233A';
 const ORANGE = '#DE5D20';

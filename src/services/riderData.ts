@@ -96,6 +96,17 @@ const textValue = (...values: unknown[]) => {
   return '';
 };
 
+const numberValue = (...values: unknown[]) => {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const parsed = Number(value.replace(/[^0-9.-]/g, ''));
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return 0;
+};
+
 const inactiveRideStatuses = new Set([
   'cancelled',
   'canceled',
@@ -123,6 +134,40 @@ export const toDate = (value: any): Date | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+const rideDateFromData = (data: DocumentData): Date | null => {
+  const direct = toDate(
+    data.scheduledAt || data.dateTime || data.requestedTime || data.pickupTime
+      || data.originalRideRequest?.requestedTime || data.originalRidePosting?.departureTime,
+  );
+  if (direct) return direct;
+
+  const dateValue = data.date || data.departureDate || data.scheduledDate
+    || data.originalRideRequest?.date || data.originalRidePosting?.date;
+  const timeValue = data.time || data.departureTime || data.scheduledTime
+    || data.originalRideRequest?.time || data.originalRidePosting?.time;
+
+  if (typeof dateValue === 'string') {
+    const dateMatch = dateValue.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (dateMatch) {
+      let hours = 0;
+      let minutes = 0;
+      if (typeof timeValue === 'string') {
+        const timeMatch = timeValue.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+        if (timeMatch) {
+          hours = Number(timeMatch[1]);
+          minutes = Number(timeMatch[2] || 0);
+          const meridiem = timeMatch[3]?.toLowerCase();
+          if (meridiem === 'pm' && hours < 12) hours += 12;
+          if (meridiem === 'am' && hours === 12) hours = 0;
+        }
+      }
+      return new Date(Number(dateMatch[1]), Number(dateMatch[2]) - 1, Number(dateMatch[3]), hours, minutes);
+    }
+  }
+
+  return toDate(dateValue);
+};
+
 function rideFromDoc(snapshot: QueryDocumentSnapshot<DocumentData>): MobileRidePosting {
   const data = snapshot.data();
   const firstName = textValue(data.driverFirstName, data.driver?.firstName);
@@ -135,8 +180,19 @@ function rideFromDoc(snapshot: QueryDocumentSnapshot<DocumentData>): MobileRideP
     id: snapshot.id,
     from: textValue(data.pickup, data.pickupLocation, data.pickupAddress, data.from, data.origin) || 'Pickup pending',
     to: textValue(data.dropoff, data.dropoffLocation, data.dropoffAddress, data.to, data.destination) || 'Destination pending',
-    date: toDate(data.departureTime || data.pickupTime || data.scheduledTime || data.dateTime || data.createdAt),
-    price: Number(data.pricePerSeat ?? data.price ?? data.fare ?? data.estimatedFare ?? 0),
+    date: rideDateFromData(data),
+    price: numberValue(
+      data.contributionAmount,
+      data.paymentAmount,
+      data.offerAmount,
+      data.pricePerSeat,
+      data.price,
+      data.fare,
+      data.estimatedFare,
+      data.originalRideRequest?.contributionAmount,
+      data.originalRideRequest?.estimatedFare,
+      data.originalRidePosting?.pricePerSeat,
+    ),
     seats: Number(data.availableSeats ?? data.seatsAvailable ?? data.seats ?? 1),
     status: String(data.status || 'available').toLowerCase(),
     driverId: textValue(data.driverId, data.driverUid, data.driverUID, data.userId, data.ownerId, data.createdBy, data.driver?.id, data.driver?.uid) || undefined,

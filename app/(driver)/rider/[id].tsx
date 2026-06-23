@@ -4,7 +4,7 @@ import {
   TouchableOpacity, ScrollView, Linking, StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { firestore, firebaseAuth } from '@/constants/services';
 import { doc, getDoc, query, collection, where, onSnapshot, getDocs } from 'firebase/firestore';
@@ -73,9 +73,12 @@ function InitialsAvatar({ name, size = 72 }: { name: string; size?: number }) {
 }
 
 export default function RiderProfilePage() {
-  const { goBack } = useReturnNavigation('/(driver)');
-  const { id } = useLocalSearchParams();
+  const { id, returnTo } = useLocalSearchParams<{ id?: string; returnTo?: string }>();
   const riderId = Array.isArray(id) ? id[0] : id;
+  const goBack = () => {
+    const dest = Array.isArray(returnTo) ? returnTo[0] : returnTo;
+    router.replace((dest || '/(driver)') as any);
+  };
 
   const [loading, setLoading]       = useState(true);
   const [rider, setRider]           = useState<any | null>(null);
