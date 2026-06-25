@@ -16,7 +16,6 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { doc, getDoc, addDoc, deleteDoc, collection, serverTimestamp, query, where, getDocs, limit as fsLimit } from 'firebase/firestore';
 import { firestore, firebaseAuth } from '@/constants/services';
 import { Ionicons } from '@expo/vector-icons';
-
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 
 const NAVY   = '#15233A';
@@ -70,8 +69,8 @@ function fmtTime(val: any): string {
 }
 
 export default function RequestDeepLinkScreen() {
-  const { goBack } = useReturnNavigation('/(driver)/requests');
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { goBack } = useReturnNavigation('/(driver)/requests');
   const requestId = Array.isArray(id) ? id[0] : id;
 
   const [loading, setLoading]         = useState(true);
@@ -302,7 +301,7 @@ export default function RequestDeepLinkScreen() {
           <TouchableOpacity
             style={s.card}
             activeOpacity={0.7}
-            onPress={() => { if (riderId) router.push({ pathname: '/(driver)/rider/[id]', params: { id: riderId, returnTo: '/(driver)/request/' + id } } as any); }}
+            onPress={() => { if (riderId) router.push({ pathname: '/(driver)/rider/[id]', params: { id: riderId, returnTo: `/(driver)/request/${requestId}` } } as any); }}
           >
             <View style={s.personRow}>
               {riderAvatarUrl ? (

@@ -1,5 +1,6 @@
 import { firestore, firebaseAuth } from '@/constants/services';
 import { doc, setDoc, updateDoc, getDoc, serverTimestamp, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
+import { roleKey } from '@/src/utils/roleIdentity';
 
 export type FlagPayload = {
   reason: string;
@@ -112,6 +113,10 @@ export async function submitDriverFlag(rideId: string, payload: FlagPayload) {
     if (driverId) {
       await addDoc(collection(firestore, 'notifications'), {
         userId: driverId,
+        recipientId: driverId,
+        recipientRole: 'driver',
+        recipientKeys: [roleKey('driver', driverId)],
+        driverId,
         type: 'ride_flagged',
         title: postingId ? 'Group Ride Flagged' : 'Ride Flagged',
         message: postingId 
@@ -161,6 +166,10 @@ export async function submitDriverFlag(rideId: string, payload: FlagPayload) {
       try {
         await addDoc(collection(firestore, 'notifications'), {
           userId: riderId,
+          recipientId: riderId,
+          recipientRole: 'rider',
+          recipientKeys: [roleKey('rider', riderId)],
+          riderId,
           type: 'ride_flagged',
           title: 'Group Ride Flagged',
           message: 'Your group ride has been flagged and requires admin review. No further actions can be taken until resolved.',

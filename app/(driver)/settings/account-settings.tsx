@@ -18,8 +18,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { UniversitySearch } from '@/components/ui/UniversitySearch';
 import { router } from 'expo-router';
-import { firebaseAuth, firestore } from '@/constants/services';
-import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
+import { deleteUser, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
+import { deleteDoc, doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import {
   sendPhoneOTP,
   verifyPhoneOTP,
@@ -46,6 +47,10 @@ export default function AccountSettingsScreen() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [showOTPModal, setShowOTPModal] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deletePasswordHidden, setDeletePasswordHidden] = useState(true);
+  const [deleting, setDeleting] = useState(false);
 
   const [fullName, setFullName]       = useState('');
   const [email, setEmail]             = useState('');
@@ -53,6 +58,7 @@ export default function AccountSettingsScreen() {
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [university, setUniversity]   = useState('');
   const [major, setMajor]             = useState('');
+  const [about, setAbout]             = useState('');
 
   const [originalPhone, setOriginalPhone] = useState('');
   const [pendingPhone, setPendingPhone]   = useState('');
@@ -64,6 +70,7 @@ export default function AccountSettingsScreen() {
   const [verifying, setVerifying] = useState(false);
 
   const [showMajorPicker, setShowMajorPicker] = useState(false);
+  const [majorSearch, setMajorSearch] = useState('');
 
   useEffect(() => { loadUserData(); }, []);
 
@@ -93,6 +100,7 @@ export default function AccountSettingsScreen() {
         setDateOfBirth(data.dateOfBirth || data.DOB || data.personalInfo?.dateOfBirth || data.personalInfo?.dob || '');
         setUniversity(data.university || data.personalInfo?.university || '');
         setMajor(data.major || data.personalInfo?.major || '');
+        setAbout(data.about || data.bio || data.description || data.personalInfo?.about || data.personalInfo?.bio || '');
       }
     } catch { Alert.alert('Error', 'Failed to load your account information'); }
     finally { setLoading(false); }
@@ -138,6 +146,42 @@ export default function AccountSettingsScreen() {
     setOtpCode(''); setOtpError(''); setPendingPhone('');
   };
 
+  const closeDelete = () => {
+    if (deleting) return;
+    setDeleteOpen(false);
+    setDeletePassword('');
+  };
+
+  const deleteAccount = async () => {
+    const user = firebaseAuth.currentUser;
+    if (!user?.email || !deletePassword || deleting) return;
+
+    setDeleting(true);
+    try {
+      await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, deletePassword));
+
+      fetch(`${getApiBaseUrl()}/api/send-account-deletion-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email, name: fullName || 'there' }),
+      }).catch(() => undefined);
+
+      await Promise.all([
+        deleteDoc(doc(firestore, 'drivers', user.uid)).catch(() => undefined),
+        deleteDoc(doc(firestore, 'riders', user.uid)).catch(() => undefined),
+        deleteDoc(doc(firestore, 'users', user.uid)).catch(() => undefined),
+      ]);
+      await deleteUser(user);
+      setDeleteOpen(false);
+      router.replace('/(auth)/sign-in' as any);
+    } catch (error: any) {
+      const incorrect = error?.code === 'auth/invalid-credential' || error?.code === 'auth/wrong-password';
+      Alert.alert('Unable to delete account', incorrect ? 'Your current password is incorrect.' : error?.message || 'Please try again.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const saveProfileData = async () => {
     try {
       setSaving(true);
@@ -147,15 +191,18 @@ export default function AccountSettingsScreen() {
       const driverDoc    = await getDoc(driverDocRef);
       if (!driverDoc.exists()) { Alert.alert('Error', 'Your driver profile could not be found. Please contact support.'); return; }
       const existingPersonalInfo = driverDoc.data()?.personalInfo || {};
+      const aboutText = about.trim();
       await updateDoc(driverDocRef, {
         fullName: fullName.trim(), name: fullName.trim(),
         phoneNumber: phoneNumber.trim(), phone: phoneNumber.trim(),
         dateOfBirth: dateOfBirth.trim(), DOB: dateOfBirth.trim(),
         university: university.trim(), major: major.trim(),
+        about: aboutText, bio: aboutText, description: aboutText,
         personalInfo: {
           ...existingPersonalInfo,
           phone: phoneNumber.trim(), dateOfBirth: dateOfBirth.trim(), dob: dateOfBirth.trim(),
           university: university.trim(), major: major.trim(),
+          about: aboutText, bio: aboutText,
         },
         updatedAt: serverTimestamp(),
       });
@@ -269,6 +316,23 @@ export default function AccountSettingsScreen() {
               </Field>
             </View>
 
+            <Text style={s.sectionLabel}>About</Text>
+            <View style={s.sectionCard}>
+              <Field label="About you" icon="person-circle-outline" isLast>
+                <TextInput
+                  style={[s.fieldInput, s.aboutInput]}
+                  value={about}
+                  onChangeText={setAbout}
+                  placeholder="Share what classmates should know about riding with you."
+                  placeholderTextColor={MUTED}
+                  multiline
+                  maxLength={240}
+                  textAlignVertical="top"
+                />
+                <Text style={s.fieldHint}>{about.length}/240 characters</Text>
+              </Field>
+            </View>
+
             <TouchableOpacity
               style={[s.saveBtn, saving && { opacity: 0.6 }]}
               onPress={handleSaveChanges}
@@ -277,6 +341,18 @@ export default function AccountSettingsScreen() {
               {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={s.saveBtnText}>Save changes</Text>}
             </TouchableOpacity>
 
+            <View style={s.dangerSection}>
+              <Text style={s.dangerLabel}>DANGER ZONE</Text>
+              <TouchableOpacity style={s.deleteRow} onPress={() => setDeleteOpen(true)} accessibilityRole="button">
+                <View style={s.deleteIcon}><Ionicons name="trash-outline" size={19} color="#C94747" /></View>
+                <View style={s.dangerCopy}>
+                  <Text style={s.deleteTitle}>Delete account</Text>
+                  <Text style={s.deleteSubtitle}>Permanently remove your account and profile data</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={MUTED} />
+              </TouchableOpacity>
+            </View>
+
             <View style={{ height: 40 }} />
           </ScrollView>
 
@@ -284,6 +360,9 @@ export default function AccountSettingsScreen() {
           <Modal visible={showOTPModal} transparent animationType="slide" onRequestClose={handleCancelOTP}>
             <KeyboardAwareModalView style={s.modalOverlay}>
               <View style={s.modalCard}>
+                <View style={s.modalIconWrap}>
+                  <Ionicons name="shield-checkmark-outline" size={22} color={ORANGE} />
+                </View>
                 <Text style={s.modalTitle}>Verify Phone Number</Text>
                 <Text style={s.modalSub}>
                   {"We've sent a 6-digit code to"}{'\n'}
@@ -333,28 +412,94 @@ export default function AccountSettingsScreen() {
           </Modal>
 
           {/* Major Picker */}
-          <Modal visible={showMajorPicker} transparent animationType="slide" onRequestClose={() => setShowMajorPicker(false)}>
-            <View style={s.modalOverlay}>
-              <View style={s.pickerCard}>
+          <Modal visible={showMajorPicker} transparent animationType="slide" onRequestClose={() => { setShowMajorPicker(false); setMajorSearch(''); }}>
+            <View style={s.pickerOverlay}>
+              <View style={s.pickerSheet}>
+                <View style={s.pickerHandle} />
+
                 <View style={s.pickerHdr}>
+                  <View style={s.pickerHdrIcon}>
+                    <Ionicons name="book-outline" size={16} color={ORANGE} />
+                  </View>
                   <Text style={s.pickerTitle}>Select Major</Text>
-                  <TouchableOpacity onPress={() => setShowMajorPicker(false)}>
-                    <Text style={s.pickerDone}>Done</Text>
+                  <TouchableOpacity style={s.pickerCloseBtn} onPress={() => { setShowMajorPicker(false); setMajorSearch(''); }} activeOpacity={0.7}>
+                    <Ionicons name="close" size={20} color={MUTED} />
                   </TouchableOpacity>
                 </View>
-                <ScrollView>
-                  {MAJORS.map((maj) => (
+
+                <View style={s.pickerSearchWrap}>
+                  <Ionicons name="search-outline" size={16} color={MUTED} />
+                  <TextInput
+                    style={s.pickerSearchInput}
+                    placeholder="Search majors…"
+                    placeholderTextColor={MUTED}
+                    value={majorSearch}
+                    onChangeText={setMajorSearch}
+                    autoCorrect={false}
+                    autoCapitalize="none"
+                  />
+                  {majorSearch.length > 0 && (
+                    <TouchableOpacity onPress={() => setMajorSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Ionicons name="close-circle" size={16} color={MUTED} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                  {MAJORS.filter((m) => m.toLowerCase().includes(majorSearch.toLowerCase())).map((maj) => (
                     <TouchableOpacity
                       key={maj}
                       style={s.pickerItem}
-                      onPress={() => { setMajor(maj); setShowMajorPicker(false); }}
+                      onPress={() => { setMajor(maj); setMajorSearch(''); setShowMajorPicker(false); }}
+                      activeOpacity={0.7}
                     >
                       <Text style={[s.pickerItemText, major === maj && s.pickerItemTextActive]}>{maj}</Text>
+                      {major === maj && <Ionicons name="checkmark" size={18} color={ORANGE} />}
                     </TouchableOpacity>
                   ))}
+                  {MAJORS.filter((m) => m.toLowerCase().includes(majorSearch.toLowerCase())).length === 0 && (
+                    <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                      <Text style={{ color: MUTED, fontSize: 14 }}>{`No majors match "${majorSearch}"`}</Text>
+                    </View>
+                  )}
                 </ScrollView>
               </View>
             </View>
+          </Modal>
+
+          <Modal visible={deleteOpen} transparent animationType="slide" onRequestClose={closeDelete}>
+            <KeyboardAwareModalView style={s.deleteModalOverlay}>
+              <View style={s.deleteModalSheet}>
+                <View style={s.deleteModalHandle} />
+                <View style={s.deleteModalHeader}>
+                  <View style={s.deleteModalCopy}>
+                    <Text style={s.deleteModalTitle}>Delete your account?</Text>
+                    <Text style={s.deleteModalSubtitle}>This permanently deletes your RideAlong account and profile data. This cannot be undone.</Text>
+                  </View>
+                  <TouchableOpacity style={s.deleteModalClose} onPress={closeDelete} hitSlop={hitSlop}>
+                    <Ionicons name="close" size={20} color={NAVY} />
+                  </TouchableOpacity>
+                </View>
+                <Text style={s.fieldLabel}>CURRENT PASSWORD</Text>
+                <View style={s.deletePasswordWrap}>
+                  <TextInput
+                    value={deletePassword}
+                    onChangeText={setDeletePassword}
+                    placeholder="Enter your password"
+                    placeholderTextColor={MUTED}
+                    secureTextEntry={deletePasswordHidden}
+                    autoCapitalize="none"
+                    style={s.deletePasswordInput}
+                  />
+                  <TouchableOpacity onPress={() => setDeletePasswordHidden((hidden) => !hidden)} hitSlop={hitSlop}>
+                    <Ionicons name={deletePasswordHidden ? 'eye-outline' : 'eye-off-outline'} size={20} color={MUTED} />
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity style={[s.deleteButton, (!deletePassword || deleting) && { opacity: 0.5 }]} onPress={() => void deleteAccount()} disabled={!deletePassword || deleting}>
+                  {deleting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={s.saveBtnText}>Delete account permanently</Text>}
+                </TouchableOpacity>
+              </View>
+            </KeyboardAwareModalView>
           </Modal>
 
         </KeyboardAvoidingView>
@@ -411,6 +556,7 @@ const s = StyleSheet.create({
   fieldInputDisabled: { color: MUTED, backgroundColor: '#F3EFE8' },
   fieldInputText:     { color: NAVY, fontSize: 14, fontWeight: '500' },
   fieldInputPlaceholder: { color: MUTED, fontSize: 14 },
+  aboutInput: { minHeight: 112, lineHeight: 21, paddingTop: 14, paddingBottom: 14 },
   fieldHint:          { color: MUTED, fontSize: 11, marginTop: 6 },
   warningText:        { color: '#F59E0B', fontSize: 11, marginTop: 6, fontWeight: '500' },
   phoneChangeRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 9 },
@@ -420,9 +566,17 @@ const s = StyleSheet.create({
 
   saveBtn:     { minHeight: 54, borderRadius: 27, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
   saveBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  dangerSection: { marginTop: 30, marginBottom: 4 },
+  dangerLabel: { color: '#A66A6A', fontSize: 10, lineHeight: 15, letterSpacing: 1.3, fontWeight: '700', marginBottom: 8, paddingHorizontal: 2 },
+  deleteRow: { minHeight: 76, borderRadius: 18, borderWidth: 1, borderColor: '#F0D4D4', backgroundColor: '#FFF9F9', flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16 },
+  deleteIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: '#FDECEC', alignItems: 'center', justifyContent: 'center' },
+  dangerCopy: { flex: 1 },
+  deleteTitle: { color: '#B33F3F', fontSize: 15, lineHeight: 20, fontWeight: '700' },
+  deleteSubtitle: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 2 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalCard:    { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 24, width: '100%', maxWidth: 400 },
+  modalIconWrap: { width: 52, height: 52, borderRadius: 16, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 14 },
   modalTitle:   { color: NAVY, fontSize: 20, fontWeight: '700', marginBottom: 12, textAlign: 'center' },
   modalSub:     { color: MUTED, fontSize: 14, textAlign: 'center', marginBottom: 20, lineHeight: 20 },
 
@@ -438,12 +592,28 @@ const s = StyleSheet.create({
   modalBtnOutlineText: { color: NAVY, fontSize: 15, fontWeight: '600' },
   modalBtnPrimary:   { flex: 1, padding: 14, borderRadius: 10, alignItems: 'center', backgroundColor: ORANGE },
   modalBtnText:      { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  deleteModalOverlay: { flex: 1, backgroundColor: 'rgba(21,35,58,0.35)', justifyContent: 'flex-end' },
+  deleteModalSheet: { borderTopLeftRadius: 26, borderTopRightRadius: 26, backgroundColor: BG, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 30 },
+  deleteModalHandle: { width: 42, height: 5, borderRadius: 3, backgroundColor: '#D1D5DB', alignSelf: 'center', marginBottom: 18 },
+  deleteModalHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, marginBottom: 20 },
+  deleteModalCopy: { flex: 1 },
+  deleteModalTitle: { color: NAVY, fontSize: 22, lineHeight: 28, fontWeight: '700' },
+  deleteModalSubtitle: { color: MUTED, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  deleteModalClose: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  deletePasswordWrap: { minHeight: 54, borderRadius: 14, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, marginBottom: 16 },
+  deletePasswordInput: { flex: 1, color: NAVY, fontSize: 15, paddingVertical: 14 },
+  deleteButton: { minHeight: 54, borderRadius: 27, backgroundColor: '#C94747', alignItems: 'center', justifyContent: 'center' },
 
-  pickerCard:     { backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, width: '100%', marginTop: 'auto', maxHeight: '80%' },
-  pickerHdr:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: BORDER },
-  pickerTitle:    { color: NAVY, fontSize: 17, fontWeight: '700' },
-  pickerDone:     { color: ORANGE, fontSize: 15, fontWeight: '600' },
-  pickerItem:     { paddingVertical: 14, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  pickerItemText: { color: NAVY, fontSize: 15 },
+  pickerOverlay:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  pickerSheet:    { backgroundColor: BG, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 36, maxHeight: '88%' },
+  pickerHandle:   { width: 40, height: 4, borderRadius: 2, backgroundColor: BORDER, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
+  pickerHdr:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: BORDER, gap: 10 },
+  pickerHdrIcon:  { width: 34, height: 34, borderRadius: 10, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center' },
+  pickerTitle:    { flex: 1, color: NAVY, fontSize: 17, fontWeight: '700', letterSpacing: -0.2 },
+  pickerCloseBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F1F3F6', alignItems: 'center', justifyContent: 'center' },
+  pickerSearchWrap: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginVertical: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', gap: 8 },
+  pickerSearchInput: { flex: 1, fontSize: 14, color: NAVY, padding: 0 },
+  pickerItem:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 15, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  pickerItemText: { color: NAVY, fontSize: 15, fontWeight: '500', flex: 1 },
   pickerItemTextActive: { color: ORANGE, fontWeight: '700' },
 });

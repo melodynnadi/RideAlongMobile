@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { View, ActivityIndicator } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -55,6 +56,15 @@ function AuthGate() {
 }
 
 function AppStack() {
+  const isLoading = useAuthStore((s) => s.isLoading);
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#FBFAF7', alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color="#DE5D20" />
+      </View>
+    );
+  }
 
   return (
     <>

@@ -6,10 +6,23 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { firestore, firebaseAuth } from '@/constants/services';
+import { firestore, firebaseAuth, storage } from '@/constants/services';
 import { doc, getDoc, query, collection, where, onSnapshot, getDocs } from 'firebase/firestore';
+import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
+
+async function resolveAvatarUrl(raw: string | null | undefined): Promise<string | null> {
+  if (!raw || !raw.trim()) return null;
+  const url = raw.trim();
+  if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url;
+  const path = url.replace(/^gs:\/\/[^/]+\//, '');
+  try {
+    return await getDownloadURL(storageRef(storage, path));
+  } catch {
+    return null;
+  }
+}
 
 const NAVY   = '#15233A';
 const ORANGE = '#DE5D20';
@@ -111,24 +124,26 @@ export default function RiderProfilePage() {
 
           await Promise.all(raterIds.map(async (rid) => {
             try {
-              const udoc = await getDoc(doc(firestore, 'riders', rid));
+              const [udoc, ddoc] = await Promise.all([
+                getDoc(doc(firestore, 'riders', rid)),
+                getDoc(doc(firestore, 'drivers', rid)),
+              ]);
+              let rawAvatar: string | null | undefined;
+              let name: string | undefined;
               if (udoc.exists()) {
                 const u = udoc.data() as any;
                 if (u?.role === 'driver' || u?.isDriver === true || u?.type === 'driver') driverMap[rid] = true;
-                const avatar = u?.avatarUrl || u?.avatarURL || u?.photoURL || u?.photoUrl;
-                const uname  = u?.name || u?.displayName || u?.fullName || (u?.firstName && u?.lastName ? `${u.firstName} ${u.lastName}`.trim() : u?.firstName);
-                if (avatar || uname) profileMap[rid] = { name: uname, avatarUrl: avatar };
+                rawAvatar = u?.avatarUrl || u?.avatarURL || u?.photoURL || u?.photoUrl;
+                name = u?.name || u?.displayName || u?.fullName || (u?.firstName && u?.lastName ? `${u.firstName} ${u.lastName}`.trim() : u?.firstName);
               }
-              if (!driverMap[rid]) {
-                const ddoc = await getDoc(doc(firestore, 'drivers', rid));
-                if (ddoc.exists()) {
-                  driverMap[rid] = true;
-                  const dv = ddoc.data() as any;
-                  const avatar2 = dv?.avatarUrl1 || dv?.avatarUrl || dv?.photoURL;
-                  const dname   = dv?.fullName || dv?.name;
-                  profileMap[rid] = { name: profileMap[rid]?.name || dname, avatarUrl: profileMap[rid]?.avatarUrl || avatar2 };
-                }
+              if (ddoc.exists()) {
+                driverMap[rid] = true;
+                const dv = ddoc.data() as any;
+                rawAvatar = rawAvatar || dv?.avatarUrl1 || dv?.avatarUrl || dv?.photoURL;
+                name = name || dv?.fullName || dv?.name || (dv?.personalInfo?.firstName && `${dv.personalInfo.firstName} ${dv.personalInfo.lastName || ''}`.trim());
               }
+              const avatarUrl = await resolveAvatarUrl(rawAvatar);
+              profileMap[rid] = { name, avatarUrl: avatarUrl || undefined };
             } catch {}
           }));
 

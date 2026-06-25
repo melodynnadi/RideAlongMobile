@@ -26,6 +26,7 @@ import {
 import { firebaseAuth, firestore } from '@/constants/services';
 
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
+import { isReadForRole, notificationBelongsToRole, roleKey } from '@/src/utils/roleIdentity';
 
 const NAVY   = '#15233A';
 const ORANGE = '#DE5D20';
@@ -158,8 +159,8 @@ export default function NotificationsScreen() {
         if (rawType.includes('ride') || rawType.includes('offer')) mappedType = 'ride';
         else if (rawType.includes('driver')) mappedType = 'driver';
         else if (rawType.includes('pay')) mappedType = 'payment';
-        const readBy: string[] = Array.isArray(data.readBy) ? data.readBy : [];
-        const read = data.read === true || data.unread === false || readBy.includes(user.uid);
+        if (!notificationBelongsToRole(data, user.uid, 'driver')) return;
+        const read = isReadForRole(data, user.uid, 'driver');
         pendingMap.set(document.id, {
           id: document.id,
           type: mappedType,
@@ -199,7 +200,11 @@ export default function NotificationsScreen() {
       if (!user) return;
       const raw = pendingMapRef.current.get(id);
       if (!raw?.path) return;
-      await updateDoc(doc(firestore, raw.path), { read: true, unread: false, readBy: arrayUnion(user.uid) });
+      await updateDoc(doc(firestore, raw.path), {
+        [`read_driver_${user.uid}`]: true,
+        readAt: new Date(),
+        readByRole: arrayUnion(roleKey('driver', user.uid)),
+      });
     } catch (e) { console.warn('markAsRead failed', e); }
   };
 
@@ -284,10 +289,10 @@ export default function NotificationsScreen() {
           ) : notifications.length === 0 ? (
             <View style={s.emptyCard}>
               <View style={s.emptyIcon}>
-                <Ionicons name="bell-outline" size={26} color={ORANGE} />
+                <Ionicons name="notifications-outline" size={24} color={ORANGE} />
               </View>
               <Text style={s.emptyTitle}>You are all caught up</Text>
-              <Text style={s.emptyText}>Ride, payment, and message updates will appear here.</Text>
+              <Text style={s.emptyText}>Ride updates, messages, and account alerts will appear here.</Text>
             </View>
           ) : (
             <View>{notifications.map(renderRow)}</View>
@@ -332,19 +337,16 @@ const s = StyleSheet.create({
   loadingWrap: { alignItems: 'center', paddingTop: 24, gap: 14 },
   loadingText: { color: MUTED, fontSize: 14, fontWeight: '500' },
   emptyCard: {
-    borderRadius: 20,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: BORDER,
-    backgroundColor: '#FFFFFF',
-    padding: 32,
+    minHeight: 420,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
     alignItems: 'center',
-    marginTop: 8,
+    justifyContent: 'center',
   },
   emptyIcon: {
     width: 54, height: 54, borderRadius: 27, backgroundColor: '#FEF0E8',
-    alignItems: 'center', justifyContent: 'center', marginBottom: 16,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 14,
   },
-  emptyTitle: { color: NAVY, fontSize: 19, fontWeight: '700', marginBottom: 6 },
-  emptyText:  { color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center', maxWidth: 260 },
+  emptyTitle: { color: NAVY, fontSize: 19, lineHeight: 25, fontWeight: '700', textAlign: 'center', letterSpacing: -0.2 },
+  emptyText:  { color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center', maxWidth: 278, marginTop: 6, fontWeight: '500' },
 });

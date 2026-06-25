@@ -42,8 +42,7 @@ import {
   getDeleteMessageThreadErrorMessage,
 } from '@/services/messageThreadsService';
 import { showErrorToast, showSuccessToast } from '@/src/utils/showToast';
-
-import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
+import { legacyUnreadField, roleKey, roleUnreadField } from '@/src/utils/roleIdentity';
 
 const NAVY   = '#15233A';
 const ORANGE = '#DE5D20';
@@ -55,14 +54,15 @@ const MUTED  = '#8B94A6';
 interface Message {
   id: string;
   senderId: string;
+  senderRole?: 'rider' | 'driver';
   text: string;
   timestamp: any;
   read: boolean;
 }
 
 export default function ChatDetailScreen() {
-  const { goBack } = useReturnNavigation('/(driver)/messages');
   const { chatId } = useLocalSearchParams();
+  const goToMessages = useCallback(() => router.replace('/(driver)/messages' as any), []);
 
   const [messages, setMessages]           = useState<Message[]>([]);
   const [messageText, setMessageText]     = useState('');
@@ -81,21 +81,24 @@ export default function ChatDetailScreen() {
   const currentUser      = firebaseAuth.currentUser;
 
   useEffect(() => {
-    if (!currentUser || !chatId) { goBack(); return; }
+    if (!currentUser || !chatId) { goToMessages(); return; }
     loadChatDetails();
     messagesUnsubRef.current = loadMessages();
     return () => {
       if (messagesUnsubRef.current) messagesUnsubRef.current();
       if (rideUnsubRef.current) rideUnsubRef.current();
     };
-  }, [currentUser?.uid, chatId]);
+  }, [currentUser?.uid, chatId, goToMessages]);
 
   useFocusEffect(
     useCallback(() => {
       if (!currentUser || !chatId) return;
       const resetUnreadCount = async () => {
         try {
-          await updateDoc(doc(firestore, 'chats', chatId as string), { [`unreadCount_${currentUser.uid}`]: 0 });
+          await updateDoc(doc(firestore, 'chats', chatId as string), {
+            [roleUnreadField('driver', currentUser.uid)]: 0,
+            [`unreadCounts.${roleKey('driver', currentUser.uid)}`]: 0,
+          });
         } catch {}
       };
       resetUnreadCount();
@@ -114,7 +117,8 @@ export default function ChatDetailScreen() {
       const chatData = chatDoc.data();
       const { driverId, rideId, participants } = chatData;
       const safeParticipants   = Array.isArray(participants) ? participants : [];
-      const otherParticipants  = safeParticipants.filter((id: string) => id !== currentUser!.uid);
+      const riderId            = chatData.riderId || chatData.riderUID || chatData.riderUid || chatData.userId;
+      const otherParticipants  = [riderId || safeParticipants.find((id: string) => id !== currentUser!.uid)].filter(Boolean);
       const isGroupChat        = otherParticipants.length > 1;
       const recId              = otherParticipants[0];
       setRecipientId(recId);
@@ -150,14 +154,27 @@ export default function ChatDetailScreen() {
         if (rideUnsubRef.current) rideUnsubRef.current();
         rideUnsubRef.current = onSnapshot(rideRef, (snap) => { if (snap.exists()) setRideStatus(snap.data().status || null); });
       }
-      await updateDoc(doc(firestore, 'chats', chatId as string), { [`unreadCount_${currentUser!.uid}`]: 0 });
+      await updateDoc(doc(firestore, 'chats', chatId as string), {
+        [roleUnreadField('driver', currentUser!.uid)]: 0,
+        [`unreadCounts.${roleKey('driver', currentUser!.uid)}`]: 0,
+      });
     } catch (e) { console.error('Error loading chat details:', e); }
   };
 
   const loadMessages = () => {
     const q = query(collection(firestore, 'chats', chatId as string, 'messages'), orderBy('timestamp', 'asc'));
     return onSnapshot(q, (snap) => {
-      setMessages(snap.docs.map((d) => ({ id: d.id, senderId: d.data().senderId, text: d.data().text, timestamp: d.data().timestamp, read: d.data().read || false })));
+      setMessages(snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          senderId: data.senderId,
+          senderRole: data.senderRole === 'driver' ? 'driver' : data.senderRole === 'rider' ? 'rider' : undefined,
+          text: data.text,
+          timestamp: data.timestamp,
+          read: data.read || false,
+        };
+      }));
       setLoading(false);
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     }, (e) => { console.error('Error loading messages:', e); setLoading(false); });
@@ -169,13 +186,20 @@ export default function ChatDetailScreen() {
     if (!canSendMessages(rideStatus) || isTerminalStatus(rideStatus)) return;
     setSending(true);
     try {
-      await addDoc(collection(firestore, 'chats', chatId as string, 'messages'), { senderId: currentUser.uid, text, timestamp: serverTimestamp(), read: false });
+      await addDoc(collection(firestore, 'chats', chatId as string, 'messages'), { senderId: currentUser.uid, senderRole: 'driver', text, timestamp: serverTimestamp(), read: false });
       const chatDoc = await getDoc(doc(firestore, 'chats', chatId as string));
       const chatData = chatDoc.data();
       const ps = chatData?.participants || [];
-      const updateData: any = { lastMessage: text, lastMessageTimestamp: serverTimestamp(), lastMessageSenderId: currentUser.uid };
-      for (const pId of ps) {
-        if (pId !== currentUser.uid) updateData[`unreadCount_${pId}`] = (chatData?.[`unreadCount_${pId}`] || 0) + 1;
+      const updateData: any = { lastMessage: text, lastMessageTimestamp: serverTimestamp(), lastMessageSenderId: currentUser.uid, lastMessageSenderRole: 'driver' };
+      const riderId = chatData?.riderId || chatData?.riderUID || chatData?.riderUid || chatData?.userId;
+      if (riderId) {
+        const field = roleUnreadField('rider', String(riderId));
+        updateData[field] = (chatData?.[field] || 0) + 1;
+        updateData[`unreadCounts.${roleKey('rider', String(riderId))}`] = (chatData?.unreadCounts?.[roleKey('rider', String(riderId))] || 0) + 1;
+      } else {
+        for (const pId of ps) {
+          if (pId !== currentUser.uid) updateData[legacyUnreadField(pId)] = (chatData?.[legacyUnreadField(pId)] || 0) + 1;
+        }
       }
       await updateDoc(doc(firestore, 'chats', chatId as string), updateData);
       setMessageText('');
@@ -218,7 +242,7 @@ export default function ChatDetailScreen() {
   };
 
   const renderMessage = ({ item }: { item: Message }) => {
-    const isSent = item.senderId === currentUser?.uid;
+    const isSent = item.senderId === currentUser?.uid && (!item.senderRole || item.senderRole === 'driver');
     return (
       <View style={[s.msgWrap, isSent ? s.msgWrapSent : s.msgWrapReceived]}>
         {isSent ? (
@@ -266,7 +290,7 @@ export default function ChatDetailScreen() {
               <>
                 {/* Header */}
           <View style={s.header}>
-            <TouchableOpacity style={s.backBtn} onPress={goBack}>
+            <TouchableOpacity style={s.backBtn} onPress={goToMessages}>
               <Ionicons name="chevron-back" size={22} color={NAVY} />
             </TouchableOpacity>
 

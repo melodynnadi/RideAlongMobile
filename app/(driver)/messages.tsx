@@ -39,6 +39,7 @@ import {
   getHiddenDeletedThreadIdsForCurrentUser,
 } from '@/services/messageThreadsService';
 import { showErrorToast, showSuccessToast } from '@/src/utils/showToast';
+import { chatBelongsToRole, legacyUnreadField, roleKey, roleUnreadField } from '@/src/utils/roleIdentity';
 
 const NAVY = '#15233A';
 const ORANGE = '#DE5D20';
@@ -131,15 +132,6 @@ export default function MessagesScreen() {
 
     setLoading(true);
 
-    const orderedQuery = query(
-      collection(firestore, 'chats'),
-      where('participants', 'array-contains', currentUser.uid),
-      orderBy('lastMessageTimestamp', 'desc')
-    );
-    const plainQuery = query(
-      collection(firestore, 'chats'),
-      where('participants', 'array-contains', currentUser.uid)
-    );
     const driverOrderedQuery = query(
       collection(firestore, 'chats'),
       where('driverId', '==', currentUser.uid),
@@ -149,6 +141,8 @@ export default function MessagesScreen() {
       collection(firestore, 'chats'),
       where('driverId', '==', currentUser.uid)
     );
+    const orderedQuery = driverOrderedQuery;
+    const plainQuery = driverPlainQuery;
 
     let activeUnsub: (() => void) | null = null;
 
@@ -164,13 +158,11 @@ export default function MessagesScreen() {
                 id: d.id,
                 data: d.data() as Record<string, any>,
               }))
-              .filter(({ id }) => !hiddenThreadIdsRef.current.has(id));
+              .filter(({ id, data }) => !hiddenThreadIdsRef.current.has(id) && chatBelongsToRole(data, currentUser.uid, 'driver'));
 
             chatDocs.forEach(({ data }) => {
-              const participants = Array.isArray(data.participants) ? data.participants : [];
-              participants
-                .filter((id: string) => id !== currentUser.uid)
-                .forEach((id: string) => userIdsToFetch.add(id));
+              const riderId = data.riderId || data.riderUID || data.riderUid || data.userId;
+              if (riderId) userIdsToFetch.add(String(riderId));
             });
 
             const userIdsArr = Array.from(userIdsToFetch).filter((id) => !userCache.has(id));
@@ -180,11 +172,7 @@ export default function MessagesScreen() {
                 userIdsArr.map(async (userId) => {
                   try {
                     let userDoc = await getDoc(doc(firestore, 'riders', userId));
-                    if (!userDoc.exists()) {
-                      try {
-                        userDoc = await getDoc(doc(firestore, 'drivers', userId));
-                      } catch {}
-                    }
+                    if (!userDoc.exists()) userDoc = await getDoc(doc(firestore, 'users', userId));
                     userCache.set(userId, userDoc.exists() ? userDoc.data() : null);
                   } catch (error) {
                     if (!warnedUserIds.has(userId)) {
@@ -201,7 +189,7 @@ export default function MessagesScreen() {
               const { riderId, driverId, rideId, lastMessage, lastMessageTimestamp } = chatData;
 
               const participants = Array.isArray(chatData.participants) ? chatData.participants : [];
-              const otherParticipants = participants.filter((id: string) => id !== currentUser.uid);
+              const otherParticipants = [riderId || chatData.riderUID || chatData.riderUid || chatData.userId || participants.find((id: string) => id !== currentUser.uid)].filter(Boolean);
               const isGroupChat = otherParticipants.length > 1;
 
               let recipientName = 'Unknown User';
@@ -223,10 +211,16 @@ export default function MessagesScreen() {
                 }
               }
 
-              const unreadField = `unreadCount_${currentUser.uid}`;
+              const unreadField = roleUnreadField('driver', currentUser.uid);
+              const legacyField = legacyUnreadField(currentUser.uid);
+              const unreadCounts = chatData.unreadCounts || {};
               const unreadCount =
                 chatData[unreadField] && typeof chatData[unreadField] === 'number'
                   ? chatData[unreadField]
+                  : typeof unreadCounts[roleKey('driver', currentUser.uid)] === 'number'
+                    ? unreadCounts[roleKey('driver', currentUser.uid)]
+                  : typeof chatData[legacyField] === 'number'
+                    ? chatData[legacyField]
                   : 0;
 
               return {
@@ -387,12 +381,14 @@ export default function MessagesScreen() {
           <View style={s.rowContent}>
             <View style={s.rowTop}>
               <Text style={s.name} numberOfLines={1}>{item.recipientName}</Text>
-              {hasUnread ? <Text style={s.newBadge}>{item.unreadCount} NEW</Text> : null}
             </View>
             <Text style={s.preview} numberOfLines={1}>{item.lastMessage}</Text>
           </View>
 
-          <Text style={s.time}>{formatTimestamp(item.lastMessageTimestamp)}</Text>
+          <View style={s.rowMeta}>
+            <Text style={s.time}>{formatTimestamp(item.lastMessageTimestamp)}</Text>
+            {hasUnread ? <Text style={s.newBadge}>{item.unreadCount} NEW</Text> : null}
+          </View>
         </TouchableOpacity>
       </Swipeable>
     );
@@ -559,11 +555,15 @@ const s = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '600',
   },
+  rowMeta: {
+    alignItems: 'flex-end',
+    gap: 4,
+    flexShrink: 0,
+  },
   time: {
     color: MUTED,
     fontSize: 11,
     fontWeight: '600',
-    flexShrink: 0,
   },
   swipeDelete: {
     width: 80,

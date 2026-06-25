@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Modal, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform } from 'react-native';
 import { Check, CreditCard, ShieldCheck, Smartphone, X } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { computeTotals } from '@/utils/fees';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs, addDoc, Timestamp } from 'firebase/firestore';
@@ -455,6 +456,9 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
         <View style={styles.modalContent}>
           <View style={styles.sheetHandle} />
           <View style={styles.modalHeader}>
+            <View style={styles.headerIcon}>
+              <Ionicons name="card-outline" size={18} color="#DE5D20" />
+            </View>
             <View style={styles.headerCopy}>
               <Text style={styles.modalTitle}>Confirm payment</Text>
               <Text style={styles.modalSubtitle}>Review your fare and payment method</Text>
@@ -591,8 +595,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   sheetHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: '#D8D3CB', alignSelf: 'center', marginTop: 10 },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 16 },
-  headerCopy: { flex: 1, paddingRight: 12 },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 16 },
+  headerIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  headerCopy: { flex: 1 },
   modalTitle: { color: '#15233A', fontSize: 24, lineHeight: 30, fontWeight: '700' },
   modalSubtitle: { color: '#8B94A6', fontSize: 13, lineHeight: 18, fontWeight: '500', marginTop: 2 },
   closeButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: '#E5E0D8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },

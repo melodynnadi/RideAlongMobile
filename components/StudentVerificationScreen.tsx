@@ -6,12 +6,10 @@ import { ActivityIndicator, Alert, Platform, RefreshControl, ScrollView, StyleSh
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
-  getStudentVerificationHistory,
   getStudentVerificationStatus,
   StudentDocumentType,
   StudentVerificationStatusResponse,
   submitStudentVerification,
-  VerificationSubmission,
   VerificationUploadFile,
 } from '@/services/studentVerification';
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
@@ -63,10 +61,6 @@ function statusDetails(status?: string | null) {
   }
 }
 
-function docLabel(type?: StudentDocumentType) {
-  return DOCUMENT_TYPES.find((item) => item.value === type)?.label || 'Student document';
-}
-
 type StudentVerificationScreenProps = {
   fallbackRoute?: string;
 };
@@ -78,7 +72,6 @@ export default function StudentVerificationScreen({
   const [docType, setDocType] = useState<StudentDocumentType>('enrollment_letter');
   const [file, setFile] = useState<VerificationUploadFile | null>(null);
   const [status, setStatus] = useState<StudentVerificationStatusResponse | null>(null);
-  const [history, setHistory] = useState<VerificationSubmission[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -87,10 +80,7 @@ export default function StudentVerificationScreen({
     if (refresh) setRefreshing(true);
     else setLoading(true);
     try {
-      const [nextStatus, nextHistory] = await Promise.all([
-        getStudentVerificationStatus(),
-        getStudentVerificationHistory().catch(() => []),
-      ]);
+      const nextStatus = await getStudentVerificationStatus();
       setStatus(nextStatus);
       useVerificationStore.getState().setVerificationData({
         isVerified: nextStatus.user.isVerified,
@@ -101,7 +91,6 @@ export default function StudentVerificationScreen({
         daysRemaining: nextStatus.user.daysLeft,
         verificationDeadline: nextStatus.user.deadline ? new Date(nextStatus.user.deadline) : null,
       });
-      setHistory(nextHistory.length ? nextHistory : nextStatus.latestSubmission ? [nextStatus.latestSubmission] : []);
     } catch (error: any) {
       Alert.alert('Unable to load verification', error?.message || 'Please check your connection and try again.');
     } finally {
@@ -175,7 +164,9 @@ export default function StudentVerificationScreen({
     }
   };
 
-  const current = statusDetails(status?.user.isVerified ? 'approved' : status?.user.verificationStatus);
+  const rawStatus = status?.user.verificationStatus;
+  const isAlreadyVerified = !!status?.user.isVerified || rawStatus === 'approved' || rawStatus === 'auto-approved';
+  const current = statusDetails(isAlreadyVerified ? 'approved' : rawStatus);
   const latest = status?.latestSubmission;
   const score = latest?.matchScores?.aggregate;
   const scorePercent = typeof score === 'number' ? Math.round(score * 100) : null;
@@ -206,11 +197,15 @@ export default function StudentVerificationScreen({
                 <View style={styles.flex}>
                   <Text style={styles.eyebrow}>CURRENT STATUS</Text>
                   <Text style={[styles.statusTitle, { color: current.color }]}>{current.label}</Text>
-                  <Text style={styles.statusBody}>{latest?.decisionReason || 'Upload proof that you are currently enrolled.'}</Text>
+                  <Text style={styles.statusBody}>
+                    {isAlreadyVerified ? "You're verified. No additional student proof is needed." : latest?.decisionReason || 'Upload proof that you are currently enrolled.'}
+                  </Text>
                   {deadlineCopy ? <Text style={styles.deadline}>{deadlineCopy}</Text> : null}
                 </View>
               </View>
 
+              {!isAlreadyVerified ? (
+                <>
               {latest?.matchScores ? (
                 <View style={styles.card}>
                   <View style={styles.sectionHeadingRow}>
@@ -255,23 +250,9 @@ export default function StudentVerificationScreen({
               <TouchableOpacity style={[styles.submitButton, (!file || submitting) && styles.submitDisabled]} onPress={() => void submit()} disabled={!file || submitting} accessibilityRole="button">
                 {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.submitText}>Submit for verification</Text>}
               </TouchableOpacity>
+                </>
+              ) : null}
 
-              <View style={styles.historyHeader}>
-                <Text style={styles.sectionTitle}>Verification history</Text>
-              </View>
-              {history.length ? history.map((item) => {
-                const itemStatus = statusDetails(item.status);
-                return (
-                  <View key={item.id} style={styles.historyCard}>
-                    <View style={[styles.historyDot, { backgroundColor: itemStatus.color }]} />
-                    <View style={styles.flex}>
-                      <Text style={styles.historyTitle}>{docLabel(item.docType)}</Text>
-                      <Text style={styles.historyMeta}>{item.createdAt?.toLocaleDateString() || 'Recently'} · {itemStatus.label}</Text>
-                      {item.decisionReason ? <Text style={styles.historyReason}>{item.decisionReason}</Text> : null}
-                    </View>
-                  </View>
-                );
-              }) : <View style={styles.emptyState}><Text style={styles.emptyText}>No submissions yet</Text></View>}
             </>
           )}
         </ScrollView>
@@ -322,12 +303,4 @@ const styles = StyleSheet.create({
   submitButton: { height: 54, borderRadius: 27, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', marginTop: 16, marginBottom: 28 },
   submitDisabled: { opacity: 0.45 },
   submitText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-  historyHeader: { marginTop: 6, marginBottom: 12 },
-  historyCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, borderBottomWidth: 1, borderBottomColor: BORDER, paddingHorizontal: 2, paddingVertical: 16 },
-  historyDot: { width: 9, height: 9, borderRadius: 5, marginTop: 5 },
-  historyTitle: { color: NAVY, fontSize: 14, fontWeight: '700' },
-  historyMeta: { color: MUTED, fontSize: 11, marginTop: 3 },
-  historyReason: { color: '#5F6878', fontSize: 11, lineHeight: 16, marginTop: 5 },
-  emptyState: { minHeight: 84, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 18 },
-  emptyText: { color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center' },
 });

@@ -17,6 +17,15 @@ import {
 } from 'firebase/firestore';
 
 import { firebaseAuth, firestore } from '@/constants/services';
+import {
+  chatBelongsToRole,
+  isReadForRole,
+  notificationBelongsToRole,
+  roleKey,
+  roleUnreadField,
+  legacyUnreadField,
+  type RideAlongRole,
+} from '@/src/utils/roleIdentity';
 
 export type RiderProfile = {
   id: string;
@@ -27,6 +36,7 @@ export type RiderProfile = {
   avatarUrl?: string;
   university?: string;
   rating?: number;
+  about?: string;
 };
 
 export type MobileRidePosting = {
@@ -72,6 +82,7 @@ export type MobileRideRequest = {
 export type MobileMessage = {
   id: string;
   senderId: string;
+  senderRole?: RideAlongRole;
   text: string;
   createdAt: Date | null;
 };
@@ -87,9 +98,9 @@ export type MobileNotification = {
 
 const textValue = (...values: unknown[]) => {
   for (const value of values) {
-    if (typeof value === 'string' && value.trim()) return value.trim();
-    if (value && typeof value === 'object') {
-      const candidate = (value as any).address || (value as any).description || (value as any).name;
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (value && typeof value === 'object') {
+      const candidate = (value as any).address || (value as any).description || (value as any).name || (value as any).formattedAddress || (value as any).fullAddress;
       if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
     }
   }
@@ -122,7 +133,9 @@ const normalizedStatus = (value: unknown) => String(value || '').replace(/[-\s]/
 
 const isInactiveRide = (ride: MobileRidePosting) => {
   const status = normalizedStatus(ride.status || ride.raw?.status);
-  const statusAtFlag = normalizedStatus(ride.raw?.statusAtFlag);
+  const statusAtFlag = normalizedStatus(
+    ride.raw?.statusAtFlag || ride.raw?.statusBeforeFlag || ride.raw?.flaggedFromStatus || ride.raw?.previousStatus,
+  );
   return inactiveRideStatuses.has(status) || statusAtFlag === 'completed';
 };
 
@@ -178,8 +191,8 @@ function rideFromDoc(snapshot: QueryDocumentSnapshot<DocumentData>): MobileRideP
 
   return {
     id: snapshot.id,
-    from: textValue(data.pickup, data.pickupLocation, data.pickupAddress, data.from, data.origin) || 'Pickup pending',
-    to: textValue(data.dropoff, data.dropoffLocation, data.dropoffAddress, data.to, data.destination) || 'Destination pending',
+    from: textValue(data.pickup, data.pickupAddress, data.pickupLocation, data.pickupGeo, data.from, data.origin) || 'Pickup pending',
+    to: textValue(data.dropoff, data.dropoffAddress, data.dropoffLocation, data.dropoffGeo, data.destination, data.to) || 'Destination pending',
     date: rideDateFromData(data),
     price: numberValue(
       data.contributionAmount,
@@ -197,11 +210,80 @@ function rideFromDoc(snapshot: QueryDocumentSnapshot<DocumentData>): MobileRideP
     status: String(data.status || 'available').toLowerCase(),
     driverId: textValue(data.driverId, data.driverUid, data.driverUID, data.userId, data.ownerId, data.createdBy, data.driver?.id, data.driver?.uid) || undefined,
     driverName,
-    driverAvatarUrl: textValue(data.driverAvatarUrl, data.avatarUrl, data.photoURL, data.driver?.avatarUrl, data.driver?.photoURL) || undefined,
+    driverAvatarUrl: textValue(data.driverAvatarUrl, data.avatarUrl1, data.avatarUrl, data.photoURL, data.photoUrl, data.profilePicture, data.driver?.avatarUrl1, data.driver?.avatarUrl, data.driver?.photoURL, data.driver?.photoUrl, data.driver?.profilePicture) || undefined,
     driverRating: Number(data.driverRating ?? data.rating) || undefined,
     vehicle: textValue(data.vehicleText, `${make} ${model}`) || 'Vehicle details pending',
     raw: data,
   };
+}
+
+const idValue = (...values: unknown[]) => textValue(...values);
+
+const driverProfileExistsCache = new Map<string, boolean>();
+
+async function userHasDriverProfile(uid: string): Promise<boolean> {
+  if (driverProfileExistsCache.has(uid)) return driverProfileExistsCache.get(uid) ?? false;
+  const snapshot = await getDoc(doc(firestore, 'drivers', uid)).catch(() => null);
+  const exists = snapshot?.exists() === true;
+  driverProfileExistsCache.set(uid, exists);
+  return exists;
+}
+
+async function notificationTargetsRider(data: DocumentData, uid: string): Promise<boolean> {
+  if (!notificationBelongsToRole(data, uid, 'rider')) return false;
+
+  const driverId = idValue(data.driverId, data.driverUID, data.driverUid, data.driver?.id, data.driver?.uid);
+  const riderId = idValue(data.riderId, data.riderUID, data.riderUid, data.rider?.id, data.rider?.uid);
+  if (driverId === uid && riderId !== uid) return false;
+  if (riderId === uid) return true;
+
+  const confirmedRideId = idValue(data.confirmedRideId, data.rideId);
+  if (confirmedRideId) {
+    const rideSnap = await getDoc(doc(firestore, 'confirmedRides', confirmedRideId)).catch(() => null);
+    if (rideSnap?.exists()) {
+      const ride = rideSnap.data();
+      const rideDriverId = idValue(ride.driverId, ride.driverUID, ride.driverUid);
+      const rideRiderId = idValue(ride.riderId, ride.riderUID, ride.riderUid, ride.userId);
+      if (rideDriverId === uid && rideRiderId !== uid) return false;
+      if (rideRiderId === uid) return true;
+    }
+  }
+
+  const rideRequestId = idValue(data.rideRequestId, data.requestId);
+  if (rideRequestId) {
+    const requestSnap = await getDoc(doc(firestore, 'rideRequests', rideRequestId)).catch(() => null);
+    if (requestSnap?.exists()) {
+      const request = requestSnap.data();
+      const requestDriverId = idValue(request.driverId, request.driverUID, request.driverUid, request.assignedDriverId, request.providerId);
+      const requestRiderId = idValue(request.riderId, request.riderUID, request.riderUid, request.userId, request.requesterId, request.ownerId);
+      if (requestDriverId === uid && requestRiderId !== uid) return false;
+      if (requestRiderId === uid) return true;
+    }
+  }
+
+  const ridePostingRequestId = idValue(data.ridePostingRequestId, data.postingRequestId);
+  if (ridePostingRequestId) {
+    const requestSnap = await getDoc(doc(firestore, 'ridePostingRequests', ridePostingRequestId)).catch(() => null);
+    if (requestSnap?.exists()) {
+      const request = requestSnap.data();
+      const requestDriverId = idValue(request.driverId, request.driverUID, request.driverUid, request.ownerId);
+      const requestRiderId = idValue(request.riderId, request.riderUID, request.riderUid, request.userId, request.requesterId);
+      if (requestDriverId === uid && requestRiderId !== uid) return false;
+      if (requestRiderId === uid) return true;
+    }
+  }
+
+  const ridePostingId = idValue(data.ridePostingId, data.postingId);
+  if (ridePostingId) {
+    const postingSnap = await getDoc(doc(firestore, 'ridePostings', ridePostingId)).catch(() => null);
+    if (postingSnap?.exists()) {
+      const posting = postingSnap.data();
+      const postingDriverId = idValue(posting.driverId, posting.driverUID, posting.driverUid, posting.userId, posting.ownerId);
+      if (postingDriverId === uid) return false;
+    }
+  }
+
+  return !(await userHasDriverProfile(uid));
 }
 
 async function enrichRideWithDriver(ride: MobileRidePosting): Promise<MobileRidePosting> {
@@ -225,7 +307,7 @@ async function enrichRideWithDriver(ride: MobileRidePosting): Promise<MobileRide
     return {
       ...ride,
       driverName,
-      driverAvatarUrl: textValue(driver.avatarUrl, driver.photoURL, driver.profilePicture, personal.avatarUrl, personal.photoURL) || ride.driverAvatarUrl,
+      driverAvatarUrl: textValue(driver.avatarUrl1, driver.avatarUrl, driver.photoURL, driver.photoUrl, driver.profilePicture, personal.avatarUrl, personal.photoURL, personal.photoUrl, personal.profilePicture) || ride.driverAvatarUrl,
       driverRating: Number(driver.rating ?? driver.averageRating ?? ride.driverRating) || undefined,
       vehicle: vehicle || textValue(driver.vehicleText, driver.vehicleDescription) || ride.vehicle,
     };
@@ -280,6 +362,7 @@ export function subscribeRiderProfile(uid: string, onData: (profile: RiderProfil
       avatarUrl: textValue(data.avatarUrl, data.photoURL, data.profilePicture, sharedData?.avatarUrl, sharedData?.photoURL, sharedData?.profilePicture, firebaseAuth.currentUser?.photoURL) || undefined,
       university: textValue(data.university, data.school, data.college, sharedData?.university, sharedData?.school, sharedData?.college) || undefined,
       rating: Number(data.rating ?? sharedData?.rating) || undefined,
+      about: textValue(data.about, data.bio, data.description, sharedData?.about, sharedData?.bio, sharedData?.description) || undefined,
     });
   };
   const riderUnsubscribe = onSnapshot(doc(firestore, 'riders', uid), (snapshot) => {
@@ -305,7 +388,7 @@ export function subscribeRiderConfirmedRides(uid: string, onData: (rides: Mobile
       .filter((ride) => !isInactiveRide(ride))
       .filter((ride) => {
         const s = String(ride.status || '').toUpperCase();
-        if (s === 'IN_PROGRESS' || s === 'FLAGGED') return true;
+        if (s === 'IN_PROGRESS' || s === 'DRIVER_COMPLETED' || s === 'RIDER_COMPLETED' || s === 'FLAGGED') return true;
         return !ride.date || ride.date.getTime() >= now;
       });
     rides.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
@@ -355,17 +438,16 @@ export function subscribeRiderRequests(uid: string, onData: (requests: MobileRid
 export function subscribeRiderConversations(uid: string, onData: (items: MobileConversation[]) => void): Unsubscribe {
   const chatsQuery = query(collection(firestore, 'chats'), where('participants', 'array-contains', uid));
   return onSnapshot(chatsQuery, async (snapshot) => {
-    const items = await Promise.all(snapshot.docs.map(async (chat) => {
+    const riderChats = snapshot.docs.filter((chat) => chatBelongsToRole(chat.data(), uid, 'rider'));
+    const items = await Promise.all(riderChats.map(async (chat) => {
       const data = chat.data();
       const participants = Array.isArray(data.participants) ? data.participants.map(String) : [];
-      const otherUserId = participants.find((id) => id !== uid);
+      const otherUserId = textValue(data.driverId, data.driverUID, data.driverUid)
+        || participants.find((id) => id !== uid);
       let profile: DocumentData | undefined;
       if (otherUserId) {
-        const [driver, rider] = await Promise.all([
-          getDoc(doc(firestore, 'drivers', otherUserId)).catch(() => null),
-          getDoc(doc(firestore, 'riders', otherUserId)).catch(() => null),
-        ]);
-        profile = driver?.exists() ? driver.data() : rider?.exists() ? rider.data() : undefined;
+        const driver = await getDoc(doc(firestore, 'drivers', otherUserId)).catch(() => null);
+        profile = driver?.exists() ? driver.data() : undefined;
       }
       const name = textValue(
         profile?.displayName,
@@ -376,6 +458,8 @@ export function subscribeRiderConversations(uid: string, onData: (items: MobileC
       const initials = name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
       const photoURL = profile?.photoURL || profile?.avatarUrl || null;
       const unreadCounts = data.unreadCounts || {};
+      const roleField = roleUnreadField('rider', uid);
+      const legacyField = legacyUnreadField(uid);
       return {
         id: chat.id,
         otherUserId,
@@ -384,7 +468,7 @@ export function subscribeRiderConversations(uid: string, onData: (items: MobileC
         photoURL,
         preview: textValue(data.lastMessage?.text, data.lastMessage, data.lastMessageText) || 'Start the conversation',
         updatedAt: toDate(data.lastMessageTimestamp || data.lastMessageAt || data.updatedAt || data.createdAt),
-        unread: Number(data[`unreadCount_${uid}`] ?? unreadCounts[uid] ?? data.unreadCount ?? 0),
+        unread: Number(data[roleField] ?? data[legacyField] ?? unreadCounts[roleKey('rider', uid)] ?? unreadCounts[uid] ?? data.unreadCount ?? 0),
         rideId: textValue(data.rideId, data.confirmedRideId) || undefined,
       } satisfies MobileConversation;
     }));
@@ -401,6 +485,7 @@ export function subscribeChatMessages(chatId: string, onData: (messages: MobileM
       return {
         id: item.id,
         senderId: textValue(data.senderId, data.userId, data.authorId),
+        senderRole: data.senderRole === 'driver' ? 'driver' : data.senderRole === 'rider' ? 'rider' : undefined,
         text: textValue(data.text, data.message, data.body),
         createdAt: toDate(data.timestamp || data.createdAt || data.sentAt),
       };
@@ -408,11 +493,12 @@ export function subscribeChatMessages(chatId: string, onData: (messages: MobileM
   });
 }
 
-export async function sendChatMessage(chatId: string, senderId: string, text: string): Promise<void> {
+export async function sendChatMessage(chatId: string, senderId: string, text: string, senderRole: RideAlongRole = 'rider'): Promise<void> {
   const trimmed = text.trim();
   if (!trimmed) return;
   await addDoc(collection(firestore, 'chats', chatId, 'messages'), {
     senderId,
+    senderRole,
     text: trimmed,
     timestamp: serverTimestamp(),
     read: false,
@@ -424,24 +510,37 @@ export async function sendChatMessage(chatId: string, senderId: string, text: st
     lastMessage: trimmed,
     lastMessageTimestamp: serverTimestamp(),
     lastMessageSenderId: senderId,
+    lastMessageSenderRole: senderRole,
   };
-  const participants = Array.isArray(chatData?.participants) ? chatData.participants : [];
-  participants.forEach((participantId: string) => {
-    if (participantId !== senderId) updates[`unreadCount_${participantId}`] = Number(chatData?.[`unreadCount_${participantId}`] || 0) + 1;
-  });
+  const recipientRole: RideAlongRole = senderRole === 'rider' ? 'driver' : 'rider';
+  const recipientId = recipientRole === 'driver'
+    ? textValue(chatData?.driverId, chatData?.driverUID, chatData?.driverUid)
+    : textValue(chatData?.riderId, chatData?.riderUID, chatData?.riderUid, chatData?.userId);
+  if (recipientId) {
+    const field = roleUnreadField(recipientRole, recipientId);
+    updates[field] = Number(chatData?.[field] || 0) + 1;
+    updates[`unreadCounts.${roleKey(recipientRole, recipientId)}`] = Number(chatData?.unreadCounts?.[roleKey(recipientRole, recipientId)] || 0) + 1;
+  } else {
+    const participants = Array.isArray(chatData?.participants) ? chatData.participants : [];
+    participants.forEach((participantId: string) => {
+      if (participantId !== senderId) updates[legacyUnreadField(participantId)] = Number(chatData?.[legacyUnreadField(participantId)] || 0) + 1;
+    });
+  }
   await updateDoc(chatRef, updates);
 }
 
-export async function markChatAsRead(chatId: string, uid: string): Promise<void> {
-  await updateDoc(doc(firestore, 'chats', chatId), { [`unreadCount_${uid}`]: 0 });
+export async function markChatAsRead(chatId: string, uid: string, role: RideAlongRole = 'rider'): Promise<void> {
+  await updateDoc(doc(firestore, 'chats', chatId), {
+    [roleUnreadField(role, uid)]: 0,
+    [`unreadCounts.${roleKey(role, uid)}`]: 0,
+  });
 }
 
 export async function markRiderNotificationAsRead(notificationId: string, uid: string): Promise<void> {
   await updateDoc(doc(firestore, 'notifications', notificationId), {
-    read: true,
-    unread: false,
+    [`read_rider_${uid}`]: true,
     readAt: serverTimestamp(),
-    readBy: arrayUnion(uid),
+    readByRole: arrayUnion(roleKey('rider', uid)),
   });
 }
 
@@ -458,18 +557,20 @@ export function subscribeRiderNotifications(uid: string, onData: (items: MobileN
     const merged = Array.from(byId.values()).sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
     onData(merged);
   };
-  const unsubs = queries.map((notificationsQuery, index) => onSnapshot(notificationsQuery, (snapshot) => {
-    buckets.set(index, snapshot.docs.map((item) => {
+  const unsubs = queries.map((notificationsQuery, index) => onSnapshot(notificationsQuery, async (snapshot) => {
+    const mapped = await Promise.all(snapshot.docs.map(async (item) => {
       const data = item.data();
+      if (!(await notificationTargetsRider(data, uid))) return null;
       return {
         id: item.id,
         title: textValue(data.title, data.type) || 'RideAlong update',
         body: textValue(data.body, data.message, data.text, data.description),
         createdAt: toDate(data.createdAt || data.timestamp || data.sentAt),
-        read: data.read === true || data.isRead === true || data.unread === false || (Array.isArray(data.readBy) && data.readBy.includes(uid)),
+        read: isReadForRole(data, uid, 'rider'),
         type: textValue(data.type, data.category) || 'notification',
-      };
+      } satisfies MobileNotification;
     }));
+    buckets.set(index, mapped.filter((item): item is MobileNotification => Boolean(item)));
     flush();
   }));
   return () => unsubs.forEach((unsubscribe) => unsubscribe());

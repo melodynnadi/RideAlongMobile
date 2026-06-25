@@ -9,6 +9,8 @@ export type RiderAccountProfile = {
   email: string;
   phone: string;
   university: string;
+  major: string;
+  about: string;
   avatarUrl?: string;
 };
 
@@ -42,6 +44,8 @@ export async function loadRiderAccount(): Promise<RiderAccountProfile> {
     email: value(user.email, rider.email, shared.email),
     phone: value(rider.phoneNumber, rider.phone, shared.phoneNumber, shared.phone, user.phoneNumber),
     university: value(rider.university, rider.universityData?.name, shared.university, shared.universityData?.name),
+    major: value(rider.major, rider.personalInfo?.major, shared.major, shared.personalInfo?.major),
+    about: value(rider.about, rider.bio, rider.description, shared.about, shared.bio, shared.description),
     avatarUrl: value(rider.avatarUrl, rider.photoURL, rider.profilePicture, shared.avatarUrl, user.photoURL) || undefined,
   };
 }
@@ -55,6 +59,8 @@ export async function saveRiderAccount(profile: Omit<RiderAccountProfile, 'email
   const fullName = `${firstName} ${lastName}`.trim();
   const phone = profile.phone.trim();
   const university = profile.university.trim();
+  const major = profile.major.trim();
+  const about = profile.about.trim();
   const email = user.email || '';
   const common = {
     firstName,
@@ -65,6 +71,10 @@ export async function saveRiderAccount(profile: Omit<RiderAccountProfile, 'email
     phone,
     phoneNumber: phone,
     university,
+    major,
+    about,
+    bio: about,
+    description: about,
     updatedAt: serverTimestamp(),
   };
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,10 +12,11 @@ import {
   Linking,
   StatusBar,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
-import { firebaseAuth, firestore } from '@/constants/services';
+import { firebaseAuth, firestore, storage } from '@/constants/services';
 import {
   collection,
   doc,
@@ -28,8 +29,10 @@ import {
   Timestamp,
   getDocs,
 } from 'firebase/firestore';
+import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { DriverBottomNav } from '@/components/DriverBottomNav';
+import { RideFiltersModal } from '@/components/RideFiltersModal';
 import { getDefaultFilters, filterRides as applyRideFilters, hasActiveFilters, type RideFilterOptions } from '@/utils/rideFilters';
 import { useRideBrowseStore, type DriverRequestFilter } from '@/stores/rideBrowseStore';
 
@@ -55,6 +58,7 @@ type InboxItem = {
   requesterId?: string | null;
   requesterEmail?: string | null;
   requesterPhone?: string | null;
+  requesterAvatarUrl?: string | null;
   requesterRating?: number | null;
   status: string;
   ridePostingId?: string | null;
@@ -105,11 +109,46 @@ function getRideDateTime(r: any): Date | null {
 }
 
 function extractAddress(r: any, kind: 'pickup' | 'dropoff'): string | undefined {
-  const loc = kind === 'pickup' ? (r?.pickupLocation || r?.pickup || r?.from) : (r?.dropoffLocation || r?.dropoff || r?.to);
-  if (typeof loc === 'string') return loc;
-  if (loc?.address) return loc.address;
-  const addr = kind === 'pickup' ? (r?.pickupAddress || r?.fromAddress) : (r?.dropoffAddress || r?.toAddress);
-  if (typeof addr === 'string') return addr;
+  const read = (value: any): string | undefined => {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (value && typeof value === 'object') {
+      const nested = value.address || value.description || value.name || value.formattedAddress || value.fullAddress;
+      if (typeof nested === 'string' && nested.trim()) return nested.trim();
+    }
+    return undefined;
+  };
+
+  const pickupCandidates = [
+    r?.pickupAddress,
+    r?.fromAddress,
+    r?.pickupLocation,
+    r?.pickup,
+    r?.from,
+    r?.origin,
+    r?.originAddress,
+  ];
+  const dropoffCandidates = [
+    r?.dropoffAddress,
+    r?.toAddress,
+    r?.destinationAddress,
+    r?.dropoffLocation,
+    r?.destinationLocation,
+    r?.dropoff,
+    r?.destination,
+    r?.to,
+  ];
+
+  const candidates = kind === 'pickup' ? pickupCandidates : dropoffCandidates;
+  const pickupText = kind === 'dropoff'
+    ? pickupCandidates.map(read).find(Boolean)?.toLowerCase()
+    : undefined;
+
+  for (const candidate of candidates) {
+    const value = read(candidate);
+    if (!value) continue;
+    if (kind === 'dropoff' && pickupText && value.toLowerCase() === pickupText) continue;
+    return value;
+  }
   return undefined;
 }
 
@@ -128,6 +167,58 @@ function extractCoords(r: any, kind: 'pickup' | 'dropoff'): { lat: number; lng: 
   }
   if (typeof flatLat === 'number' && typeof flatLng === 'number') return { lat: flatLat, lng: flatLng };
   return null;
+}
+
+function extractAvatarUrl(data: any): string | null {
+  const personal = data?.personalInfo || data?.profile || {};
+  const rider = data?.rider || {};
+  const user = data?.user || {};
+  const value = data?.avatarUrl
+    || data?.photoURL
+    || data?.photoUrl
+    || data?.riderAvatarUrl
+    || data?.riderPhotoURL
+    || data?.requesterAvatarUrl
+    || data?.requesterPhotoURL
+    || data?.userAvatarUrl
+    || data?.userPhotoURL
+    || data?.profilePicture
+    || data?.profilePhotoUrl
+    || data?.profileImageUrl
+    || data?.imageUrl
+    || personal?.avatarUrl
+    || personal?.photoURL
+    || personal?.photoUrl
+    || personal?.profilePicture
+    || personal?.profilePhotoUrl
+    || personal?.profileImageUrl
+    || rider?.avatarUrl
+    || rider?.photoURL
+    || rider?.photoUrl
+    || rider?.profilePicture
+    || user?.avatarUrl
+    || user?.photoURL
+    || user?.photoUrl
+    || user?.profilePicture;
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+async function resolveAvatarUrl(data: any): Promise<string | null> {
+  const direct = extractAvatarUrl(data);
+  if (direct && (/^https?:\/\//i.test(direct) || direct.startsWith('data:'))) return direct;
+  const path = direct
+    || data?.photoPath
+    || data?.avatarPath
+    || data?.profilePhotoPath
+    || data?.personalInfo?.photoPath
+    || data?.profile?.photoPath;
+  if (typeof path !== 'string' || !path.trim()) return null;
+  const normalizedPath = path.trim().replace(/^gs:\/\/[^/]+\//, '');
+  try {
+    return await getDownloadURL(storageRef(storage, normalizedPath));
+  } catch {
+    return direct;
+  }
 }
 
 function normalizeDurationString(s: string): string {
@@ -241,11 +332,6 @@ function formatDateOnly(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function formatMoney(price?: number | null): string {
-  if (price == null || isNaN(price)) return '';
-  return `$${Math.round(price)}`;
-}
-
 function relativeDayLabel(dateStr?: string | null): string {
   if (!dateStr) return '';
   try {
@@ -259,13 +345,6 @@ function relativeDayLabel(dateStr?: string | null): string {
     if (diffDays === 1) return 'Tomorrow';
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   } catch { return String(dateStr); }
-}
-
-function shortCity(value?: string | null) {
-  const text = String(value || '').trim();
-  if (!text) return 'Campus';
-  const first = text.split(',')[0]?.trim() || text;
-  return first.length > 14 ? `${first.slice(0, 13)}...` : first;
 }
 
 function mergeRows(prev: InboxItem[], cur: InboxItem[]): InboxItem[] {
@@ -282,12 +361,15 @@ export default function RequestsInboxScreen() {
   const [items, setItems] = useState<InboxItem[]>([]);
   const [openItems, setOpenItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [userDataByUserId, setUserDataByUserId] = useState<Record<string, { name: string; rating: number; email: string }>>({});
+  const [userDataByUserId, setUserDataByUserId] = useState<Record<string, { name: string; rating: number; email: string; avatarUrl?: string | null }>>({});
   const [offeredByReqId, setOfferedByReqId] = useState<Record<string, { id: string; status: string }>>({});
   const filter = useRideBrowseStore((state) => state.driverFilter);
   const search = useRideBrowseStore((state) => state.driverSearch);
   const setFilter = useRideBrowseStore((state) => state.setDriverFilter);
   const setSearch = useRideBrowseStore((state) => state.setDriverSearch);
+  const [filterOptions, setFilterOptions] = useState<RideFilterOptions>(getDefaultFilters());
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const avatarLookupAttemptsRef = useRef<Set<string>>(new Set());
 
   const allItems = useMemo<InboxItem[]>(() => {
     const map: Record<string, InboxItem> = {};
@@ -305,7 +387,7 @@ export default function RequestsInboxScreen() {
 
   const filteredItems = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return allItems.filter((item) => {
+    const base = allItems.filter((item) => {
       if (offeredByReqId[item.id]) return false;
       if (filter === 'today' && !isSameDay(item.date, 0)) return false;
       if (filter === 'tomorrow' && !isSameDay(item.date, 1)) return false;
@@ -317,7 +399,8 @@ export default function RequestsInboxScreen() {
       const searchable = [item.pickup, item.dropoff, userData?.name, item.requesterName, item.requesterEmail].filter(Boolean).join(' ').toLowerCase();
       return searchable.includes(term);
     });
-  }, [allItems, items, filter, search, offeredByReqId, userDataByUserId]);
+    return applyRideFilters(base, filterOptions) as InboxItem[];
+  }, [allItems, items, filter, search, offeredByReqId, userDataByUserId, filterOptions]);
 
   const finalItems = useMemo(() => {
     if (filter === 'best') return [...filteredItems].sort((a, b) => scoreRequest(b) - scoreRequest(a));
@@ -427,9 +510,10 @@ export default function RequestsInboxScreen() {
           distanceMiles: typeof distInfo.miles === 'number' ? distInfo.miles : null,
           notes: r.notes || null,
           requesterName: r.userName || r.riderName || r.requesterName || r.name || null,
-          requesterId: r.userId || r.riderId || r.requesterId || null,
+          requesterId: r.riderId || r.userId || r.requesterId || null,
           requesterEmail: r.userEmail || r.riderEmail || r.requesterEmail || r.email || null,
           requesterPhone: r.userPhone || r.phone || r.phoneNumber || r.contactPhone || null,
+          requesterAvatarUrl: extractAvatarUrl(r),
           status: String(r.status || 'pending'),
           ridePostingId: r.ridePostingId || r.postingId || null,
           pickupLat: pickupCoords?.lat ?? null,
@@ -498,9 +582,10 @@ export default function RequestsInboxScreen() {
             distanceMiles: typeof distInfo.miles === 'number' ? distInfo.miles : null,
             notes: r.notes || null,
             requesterName: r.userName || r.riderName || r.requesterName || r.name || null,
-            requesterId: r.userId || r.riderId || r.requesterId || null,
+            requesterId: r.riderId || r.userId || r.requesterId || null,
             requesterEmail: r.userEmail || r.riderEmail || r.requesterEmail || r.email || null,
             requesterPhone: r.userPhone || r.phone || r.phoneNumber || r.contactPhone || null,
+            requesterAvatarUrl: extractAvatarUrl(r),
             status: String(r.status || 'pending'),
             ridePostingId: r.ridePostingId || r.postingId || null,
             pickupLat: pickupCoords?.lat ?? null,
@@ -539,18 +624,102 @@ export default function RequestsInboxScreen() {
 
   useEffect(() => {
     (async () => {
-      const ids = Array.from(new Set([...items, ...openItems].map((item) => item.requesterId).filter(Boolean))) as string[];
-      const missing = ids.filter((id) => !userDataByUserId[id]);
-      if (!missing.length) return;
-      const nextUserData: Record<string, { name: string; rating: number; email: string }> = {};
+      const requestRows = [...items, ...openItems];
+      const ids = Array.from(new Set(requestRows.map((item) => item.requesterId).filter(Boolean))) as string[];
+      const missing = ids.filter((id) => {
+        const cached = userDataByUserId[id];
+        if (!cached) return true;
+        if (!cached.avatarUrl && !avatarLookupAttemptsRef.current.has(`id:${id}`)) return true;
+        return false;
+      });
+      const nextUserData: Record<string, { name: string; rating: number; email: string; avatarUrl?: string | null }> = {};
       for (const id of missing) {
         try {
-          const userSnap = await getDoc(doc(firestore, 'riders', id));
+          avatarLookupAttemptsRef.current.add(`id:${id}`);
+          let userSnap = await getDoc(doc(firestore, 'riders', id));
+          if (!userSnap.exists()) userSnap = await getDoc(doc(firestore, 'users', id));
           if (!userSnap.exists()) continue;
           const data: any = userSnap.data();
-          const name = data.fullName || [data.firstName, data.lastName].filter(Boolean).join(' ') || data.name || data.displayName || '';
+          const personal = data.personalInfo || data.profile || {};
+          const name = data.fullName || data.name || data.displayName || [data.firstName || personal.firstName, data.lastName || personal.lastName].filter(Boolean).join(' ') || personal.fullName || personal.name || '';
           const rating = data.rating || data.averageRating || (data.ratingSum && data.ratingCount ? data.ratingSum / data.ratingCount : 5.0);
-          nextUserData[id] = { name: String(name).trim(), rating, email: data.email || '' };
+          nextUserData[id] = {
+            name: String(name).trim(),
+            rating,
+            email: data.email || personal.email || '',
+            avatarUrl: await resolveAvatarUrl(data),
+          };
+        } catch {}
+      }
+      const emailRows = requestRows.filter((item) => {
+        const key = item.requesterId || item.requesterEmail || '';
+        if (!item.requesterEmail || !key || userDataByUserId[key]?.avatarUrl || nextUserData[key]?.avatarUrl) return false;
+        if (avatarLookupAttemptsRef.current.has(`email:${item.requesterEmail.toLowerCase()}`)) return false;
+        return true;
+      });
+      for (const item of emailRows) {
+        try {
+          const emailValue = item.requesterEmail!.trim();
+          avatarLookupAttemptsRef.current.add(`email:${emailValue.toLowerCase()}`);
+          const riderByEmail = await getDocs(query(collection(firestore, 'riders'), where('email', '==', emailValue)));
+          const riderByNestedEmail = riderByEmail.empty
+            ? await getDocs(query(collection(firestore, 'riders'), where('personalInfo.email', '==', emailValue))).catch(() => null)
+            : null;
+          const userByEmail = riderByEmail.empty && (!riderByNestedEmail || riderByNestedEmail.empty)
+            ? await getDocs(query(collection(firestore, 'users'), where('email', '==', emailValue))).catch(() => null)
+            : null;
+          const snap = !riderByEmail.empty
+            ? riderByEmail.docs[0]
+            : riderByNestedEmail && !riderByNestedEmail.empty
+              ? riderByNestedEmail.docs[0]
+              : userByEmail && !userByEmail.empty
+                ? userByEmail.docs[0]
+                : null;
+          if (!snap) continue;
+          const data: any = snap.data();
+          const name = data.fullName || [data.firstName, data.lastName].filter(Boolean).join(' ') || data.name || data.displayName || item.requesterName || '';
+          const rating = data.rating || data.averageRating || (data.ratingSum && data.ratingCount ? data.ratingSum / data.ratingCount : 5.0);
+          const key = item.requesterId || item.requesterEmail || snap.id;
+          nextUserData[key] = {
+            name: String(name).trim(),
+            rating,
+            email: data.email || emailValue,
+            avatarUrl: await resolveAvatarUrl(data),
+          };
+        } catch {}
+      }
+      const requestRowsNeedingAvatar = requestRows.filter((item) => {
+        const key = item.requesterId || item.requesterEmail || item.id;
+        if (item.requesterAvatarUrl || userDataByUserId[key]?.avatarUrl || nextUserData[key]?.avatarUrl) return false;
+        if (avatarLookupAttemptsRef.current.has(`request:${item.id}`)) return false;
+        return true;
+      });
+      for (const item of requestRowsNeedingAvatar) {
+        try {
+          avatarLookupAttemptsRef.current.add(`request:${item.id}`);
+          const requestSnap = await getDoc(doc(firestore, 'rideRequests', item.id));
+          if (!requestSnap.exists()) continue;
+          const requestData: any = requestSnap.data();
+          const riderId = requestData.riderId || requestData.userId || requestData.requesterId;
+          if (!riderId) continue;
+          const riderSnap = await getDoc(doc(firestore, 'riders', riderId));
+          if (!riderSnap.exists()) continue;
+          const riderData: any = riderSnap.data();
+          const name = riderData.name || riderData.displayName || riderData.fullName ||
+            (riderData.firstName && riderData.lastName ? `${riderData.firstName} ${riderData.lastName}`.trim() : riderData.firstName) ||
+            item.requesterName || '';
+          const rating = typeof riderData.rating === 'number'
+            ? riderData.rating
+            : typeof riderData.avgRating === 'number'
+              ? riderData.avgRating
+              : 5.0;
+          nextUserData[riderId] = {
+            name: String(name).trim(),
+            rating,
+            email: riderData.email || item.requesterEmail || '',
+            avatarUrl: riderData.avatarUrl || riderData.photoURL || riderData.photoUrl || null,
+          };
+          if (item.requesterEmail) nextUserData[item.requesterEmail] = nextUserData[riderId];
         } catch {}
       }
       if (Object.keys(nextUserData).length) setUserDataByUserId((prev) => ({ ...prev, ...nextUserData }));
@@ -568,11 +737,14 @@ export default function RequestsInboxScreen() {
   const renderItem = ({ item }: { item: InboxItem }) => {
     const isOffered = !!offeredByReqId[item.id];
     const dayLabel = relativeDayLabel(item.date);
-    const userData = item.requesterId ? userDataByUserId[item.requesterId] : undefined;
+    const profileKey = item.requesterId || item.requesterEmail || '';
+    const userData = profileKey ? userDataByUserId[profileKey] : undefined;
     const displayName = userData?.name?.trim() || item.requesterName?.trim() || 'Rider';
     const userRating = userData?.rating || 5.0;
+    const avatarUrl = item.requesterAvatarUrl || userData?.avatarUrl || null;
     const initials = displayName.split(/\s+/).map((p: string) => p[0]).join('').slice(0, 2).toUpperCase() || 'R';
     const seatsLabel = item.seats ? `${item.seats} seat${item.seats !== 1 ? 's' : ''}` : '1 seat';
+    const scheduleText = [dayLabel, item.time].filter(Boolean).join(' · ') || 'Time TBD';
 
     return (
       <TouchableOpacity
@@ -580,12 +752,60 @@ export default function RequestsInboxScreen() {
         onPress={() => router.push({ pathname: '/(driver)/request/[id]', params: { id: item.id, returnTo: '/(driver)/requests' } } as any)}
         activeOpacity={0.88}
       >
-        <View style={s.cardTop}>
-          <View style={s.dot} />
-          <Text style={s.route} numberOfLines={1}>
-            {shortCity(item.pickup)} → {shortCity(item.dropoff)}
-          </Text>
-          <Text style={s.time}>{[dayLabel, item.time].filter(Boolean).join('\n')}</Text>
+        <View style={s.cardHeader}>
+          <View style={s.avatar}>
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={s.avatarImage} contentFit="cover" />
+            ) : (
+              <Text style={s.avatarText}>{initials}</Text>
+            )}
+          </View>
+          <View style={s.riderCopy}>
+            <View style={s.riderTitleRow}>
+              <Text style={s.riderName} numberOfLines={1}>{displayName}</Text>
+              <View style={[s.statusBadge, isOffered && s.statusBadgeOffered]}>
+                <Text style={[s.statusBadgeText, isOffered && s.statusBadgeTextOffered]}>{isOffered ? 'Sent' : 'New'}</Text>
+              </View>
+            </View>
+            <Text style={s.riderMeta}>{`★ ${userRating.toFixed(2)} · ${seatsLabel}`}</Text>
+          </View>
+          <View style={s.priceBlock}>
+            {item.price ? (
+              <Text style={s.price}>${Math.round(item.price)}</Text>
+            ) : (
+              <Text style={s.priceOpen}>Open</Text>
+            )}
+            <Text style={s.priceCaption}>contribution</Text>
+          </View>
+        </View>
+
+        <View style={s.compactMetaRow}>
+          <Ionicons name="time-outline" size={14} color={MUTED} />
+          <Text style={s.compactMetaText} numberOfLines={1}>{scheduleText}</Text>
+          {item.distanceText ? (
+            <>
+              <View style={s.metaDivider} />
+              <Text style={s.compactMetaText} numberOfLines={1}>{item.distanceText}</Text>
+            </>
+          ) : null}
+        </View>
+
+        <View style={s.routeCard}>
+          <View style={s.routeRail}>
+            <View style={s.pickupDot} />
+            <View style={s.routeLine} />
+            <View style={s.dropoffDot} />
+          </View>
+          <View style={s.routeCopy}>
+            <View>
+              <Text style={s.locationLabel}>Pickup</Text>
+              <Text style={s.locationText} numberOfLines={1}>{item.pickup || 'Pickup pending'}</Text>
+            </View>
+            <View>
+              <Text style={s.locationLabel}>Dropoff</Text>
+              <Text style={s.locationText} numberOfLines={1}>{item.dropoff || 'Dropoff pending'}</Text>
+            </View>
+          </View>
         </View>
 
         <View style={s.dash} />
@@ -659,6 +879,10 @@ export default function RequestsInboxScreen() {
                     <Ionicons name="close" size={18} color={MUTED} />
                   </TouchableOpacity>
                 ) : null}
+                <TouchableOpacity style={s.filterBtn} onPress={() => setShowFilterModal(true)} activeOpacity={0.7}>
+                  <Ionicons name="options-outline" size={19} color={hasActiveFilters(filterOptions) ? ORANGE : NAVY} />
+                  {hasActiveFilters(filterOptions) && <View style={s.filterDot} />}
+                </TouchableOpacity>
               </View>
 
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
@@ -676,29 +900,52 @@ export default function RequestsInboxScreen() {
             </View>
           }
           ListEmptyComponent={
-            loading ? (
-              <View style={s.loadingWrap}>
-                <ActivityIndicator color={ORANGE} size="large" />
-                <Text style={s.loadingText}>Loading requests...</Text>
-              </View>
-            ) : (
-              <View style={s.emptyCard}>
-                <View style={s.emptyIcon}>
-                  <Ionicons name="car-outline" size={27} color={ORANGE} />
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 32 }}>
+              {loading ? (
+                <View style={s.loadingWrap}>
+                  <ActivityIndicator color={ORANGE} size="large" />
+                  <Text style={s.loadingText}>Loading requests...</Text>
                 </View>
-                <Text style={s.emptyTitle}>No requests yet</Text>
-                <Text style={s.emptyText}>
-                  {filter !== 'all'
-                    ? 'Try a different filter.'
-                    : 'Rider requests will appear here as students post trips.'}
-                </Text>
-              </View>
-            )
+              ) : (
+                <View style={s.emptyState}>
+                  <View style={s.emptyIcon}><Ionicons name="car-outline" size={27} color={ORANGE} /></View>
+                  <Text style={s.emptyTitle}>{allItems.length ? 'No requests match' : 'No requests yet'}</Text>
+                  <Text style={s.emptyText}>
+                    {allItems.length
+                      ? 'Try a different search or clear the filters.'
+                      : 'Rider requests will appear here as students post trips.'}
+                  </Text>
+                  <TouchableOpacity
+                    style={s.emptyPrimary}
+                    onPress={() => {
+                      if (allItems.length) {
+                        setSearch('');
+                        setFilter('all');
+                        setFilterOptions(getDefaultFilters());
+                      } else {
+                        router.push('/(driver)/book' as any);
+                      }
+                    }}
+                    accessibilityRole="button"
+                  >
+                    <Ionicons name={allItems.length ? 'refresh-outline' : 'add-circle-outline'} size={18} color="#FFFFFF" />
+                    <Text style={s.emptyPrimaryText}>{allItems.length ? 'Clear filters' : 'Post a ride'}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
           }
         />
       </SafeAreaView>
 
       <DriverBottomNav activeTab="requests" />
+      <RideFiltersModal
+        visible={showFilterModal}
+        onClose={() => setShowFilterModal(false)}
+        onApply={(f) => { setFilterOptions(f); setShowFilterModal(false); }}
+        initialFilters={filterOptions}
+        showSeatsFilter={false}
+      />
     </View>
   );
 }
@@ -759,24 +1006,49 @@ const s = StyleSheet.create({
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: NAVY },
   route: { flex: 1, color: NAVY, fontSize: 16, fontWeight: '700' },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  riderCopy: { flex: 1, minWidth: 0 },
+  riderTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  statusSlot: { flex: 1, minWidth: 0, alignItems: 'flex-start' },
+  statusBadge: { minHeight: 22, borderRadius: 11, backgroundColor: '#F3F5F8', borderWidth: 1, borderColor: '#E0E6EE', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
+  statusBadgeOffered: { backgroundColor: '#FEF0E8', borderColor: '#F5C9AF' },
+  statusBadgeText: { color: NAVY, fontSize: 10, lineHeight: 13, fontWeight: '800' },
+  statusBadgeTextOffered: { color: ORANGE },
   time: { color: MUTED, fontSize: 10, lineHeight: 14, fontWeight: '700', textAlign: 'right' },
-  dash: { borderTopWidth: 1, borderColor: '#ECE8E1', marginVertical: 14 },
-  cardBottom: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  compactMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, minHeight: 18 },
+  compactMetaText: { color: MUTED, fontSize: 12, lineHeight: 16, fontWeight: '700', flexShrink: 1 },
+  metaDivider: { width: 3, height: 3, borderRadius: 2, backgroundColor: '#C4CBD6', marginHorizontal: 2 },
+  routeCard: { flexDirection: 'row', gap: 10, marginTop: 11, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F0ECE5' },
+  routeRail: { width: 10, alignItems: 'center', paddingTop: 15, paddingBottom: 5 },
+  routeLine: { width: 2, flex: 1, minHeight: 26, backgroundColor: '#CBD5E1', marginVertical: 4 },
+  routeCopy: { flex: 1, minWidth: 0, gap: 8 },
+  locationBlock: { marginTop: 12, gap: 8 },
+  locationRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  locationTextWrap: { flex: 1, minWidth: 0 },
+  locationLabel: { color: MUTED, fontSize: 9, lineHeight: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
+  pickupDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: NAVY },
+  dropoffDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: ORANGE },
+  locationText: { color: NAVY, fontSize: 14, lineHeight: 18, fontWeight: '700' },
+  dash: { display: 'none' },
+  cardBottom: { display: 'none' },
   avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#F9E8DB',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
-  avatarText: { color: ORANGE, fontSize: 14, fontWeight: '600' },
-  riderName: { color: NAVY, fontSize: 16, fontWeight: '600' },
-  riderMeta: { color: MUTED, fontSize: 13, fontWeight: '600', marginTop: 3 },
-  price: { color: ORANGE, fontSize: 28, fontWeight: '500', marginLeft: 8 },
-  priceOpen: { color: MUTED, fontSize: 16, fontWeight: '600', marginLeft: 8 },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 },
+  avatarImage: { width: 44, height: 44, borderRadius: 22 },
+  avatarText: { color: ORANGE, fontSize: 15, fontWeight: '700' },
+  riderName: { flex: 1, color: NAVY, fontSize: 16, fontWeight: '800' },
+  riderMeta: { color: MUTED, fontSize: 12, fontWeight: '700', marginTop: 3 },
+  priceBlock: { alignItems: 'flex-end', marginLeft: 4 },
+  price: { color: ORANGE, fontSize: 28, lineHeight: 32, fontWeight: '600' },
+  priceOpen: { color: MUTED, fontSize: 16, lineHeight: 22, fontWeight: '700' },
+  priceCaption: { color: MUTED, fontSize: 8, lineHeight: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 12 },
   declineBtn: {
     flex: 1,
     minHeight: 46,
@@ -800,18 +1072,7 @@ const s = StyleSheet.create({
   disabled: { opacity: 0.55 },
   loadingWrap: { alignItems: 'center', paddingTop: 60, gap: 14 },
   loadingText: { color: MUTED, fontSize: 14, fontWeight: '500' },
-  emptyCard: {
-    borderRadius: 20,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: BORDER,
-    backgroundColor: '#FFFFFF',
-    padding: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 180,
-    marginTop: 20,
-  },
+  emptyState: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 48, minHeight: 340 },
   emptyIcon: {
     width: 54,
     height: 54,
@@ -823,4 +1084,8 @@ const s = StyleSheet.create({
   },
   emptyTitle: { color: NAVY, fontSize: 19, lineHeight: 25, fontWeight: '700', textAlign: 'center', letterSpacing: -0.2 },
   emptyText: { maxWidth: 280, color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 6 },
+  emptyPrimary: { minHeight: 46, borderRadius: 23, backgroundColor: ORANGE, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 22, marginTop: 18 },
+  emptyPrimaryText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  filterBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  filterDot: { position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: 4, backgroundColor: ORANGE, borderWidth: 1.5, borderColor: '#FFFFFF' },
 });

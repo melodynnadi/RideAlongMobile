@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { firebaseAuth, firestore } from '@/constants/services';
 import { logActivity } from '@/utils/activityLogger';
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
+import { roleKey } from '@/src/utils/roleIdentity';
 
 const NAVY   = '#15233A';
 const ORANGE = '#DE5D20';
@@ -142,6 +143,10 @@ export function FlagRideModal({ visible, onClose, rideId, role = 'rider', onFlag
         if (ride?.driverId) {
           await addDoc(collection(firestore, 'notifications'), {
             userId: ride.driverId, type: 'ride_flagged',
+            recipientId: ride.driverId,
+            recipientRole: 'driver',
+            recipientKeys: [roleKey('driver', ride.driverId)],
+            driverId: ride.driverId,
             title: postingId ? 'Group Ride Flagged' : 'Ride Flagged',
             message: postingId
               ? `Your group ride with ${allRiderNames.join(', ')} has been flagged and requires admin review.`
@@ -173,6 +178,10 @@ export function FlagRideModal({ visible, onClose, rideId, role = 'rider', onFlag
           try {
             await addDoc(collection(firestore, 'notifications'), {
               userId: riderId, type: 'ride_flagged', title: 'Group Ride Flagged',
+              recipientId: riderId,
+              recipientRole: 'rider',
+              recipientKeys: [roleKey('rider', riderId)],
+              riderId,
               message: 'Your group ride has been flagged and requires admin review.',
               rideId: allRideIds[i], ridePostingId: postingId,
               severity: 'high', read: false, createdAt: serverTimestamp(),

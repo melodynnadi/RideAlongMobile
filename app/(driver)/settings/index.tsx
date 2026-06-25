@@ -13,11 +13,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { deleteUser } from 'firebase/auth';
-import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 
 import { firebaseAuth, firestore } from '@/constants/services';
-import { removeProfilePhoto } from '@/src/services/profilePhoto';
 import { settingsService } from '@/src/services/settingsService';
 import { notificationService } from '@/src/services/notificationService';
 import { useVerificationStore } from '@/stores/verificationStore';
@@ -34,8 +32,6 @@ export default function SettingsScreen() {
   const { isVerified, verificationStatus } = useVerificationStore();
   const { isDark, setDark } = useAppTheme();
   const [pushEnabled, setPushEnabled] = useState(true);
-
-  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     settingsService.getSettings().then((settings) => {
@@ -103,45 +99,6 @@ export default function SettingsScreen() {
   const isVerifiedFinal = isVerified || verificationStatus === 'approved' || verificationStatus === 'auto-approved';
   const isPending = verificationStatus === 'pending' || verificationStatus === 'manual-review';
   const verLabel = isVerifiedFinal ? 'UT Austin - approved' : isPending ? 'Pending review' : 'Not verified';
-
-
-  const handleDelete = () => {
-    const currentUser = firebaseAuth.currentUser;
-    if (!currentUser) {
-      Alert.alert('Not signed in');
-      return;
-    }
-
-    Alert.alert(
-      'Delete Account?',
-      'This permanently removes your account, profile, and all data. This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete Forever',
-          style: 'destructive',
-          onPress: async () => {
-            setDeleting(true);
-            try {
-              try { await removeProfilePhoto(); } catch {}
-              try { await deleteDoc(doc(firestore, 'drivers', currentUser.uid)); } catch {}
-              await deleteUser(currentUser);
-              router.replace('/(auth)/sign-in' as any);
-            } catch (error: any) {
-              Alert.alert(
-                error?.code === 'auth/requires-recent-login' ? 'Re-authentication Required' : 'Delete Failed',
-                error?.code === 'auth/requires-recent-login'
-                  ? 'Please sign out and sign back in, then try again.'
-                  : error?.message || 'Could not delete your account.'
-              );
-            } finally {
-              setDeleting(false);
-            }
-          },
-        },
-      ]
-    );
-  };
 
   const openLink = async (url: string) => {
     try {
@@ -253,14 +210,6 @@ export default function SettingsScreen() {
               isLast
             />
           </View>
-
-          <TouchableOpacity
-            style={[s.deleteCard, deleting && { opacity: 0.55 }]}
-            onPress={handleDelete}
-            activeOpacity={0.7}
-          >
-            <Text style={s.deleteText}>{deleting ? 'Deleting account...' : 'Delete Account'}</Text>
-          </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -279,7 +228,7 @@ function NavRow({
       activeOpacity={0.75}
     >
       <View style={s.rowIconWrap}>
-        <Ionicons name={icon as any} size={19} color={NAVY} />
+        <Ionicons name={icon as any} size={19} color={ORANGE} />
       </View>
       <View style={s.rowMid}>
         <Text style={s.rowLabel}>{label}</Text>
@@ -298,7 +247,7 @@ function ToggleRow({
   return (
     <View style={[s.row, !isLast && s.rowBorder]}>
       <View style={s.rowIconWrap}>
-        <Ionicons name={icon as any} size={19} color={NAVY} />
+        <Ionicons name={icon as any} size={19} color={ORANGE} />
       </View>
       <View style={s.rowMid}>
         <Text style={s.rowLabel}>{label}</Text>
@@ -362,19 +311,8 @@ const s = StyleSheet.create({
     paddingVertical: 13,
   },
   rowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  rowIconWrap: { width: 22, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  rowIconWrap: { width: 36, height: 36, borderRadius: 11, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   rowMid: { flex: 1, minWidth: 0 },
   rowLabel: { color: NAVY, fontSize: 15, fontWeight: '600' },
   rowSub: { color: MUTED, fontSize: 12, lineHeight: 18, marginTop: 3 },
-
-  deleteCard: {
-    marginTop: 24,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(185,28,28,0.22)',
-    backgroundColor: 'rgba(185,28,28,0.04)',
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  deleteText: { color: '#B91C1C', fontSize: 14, fontWeight: '600' },
 });

@@ -9,10 +9,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import {
   collection, query, where, onSnapshot, doc,
-  updateDoc, serverTimestamp, Timestamp, getDocs, addDoc,
+  updateDoc, serverTimestamp, Timestamp, addDoc,
 } from 'firebase/firestore';
 import { firebaseAuth, firestore } from '@/constants/services';
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
+import { FlagRideModal } from '@/components/FlagRideModal';
+import { roleKey } from '@/src/utils/roleIdentity';
 
 type BookingRequest = {
   id: string;
@@ -40,6 +42,7 @@ type Posting = {
   to: string;
   date: string;
   time: string;
+  scheduledAt: Date | null;
   seats: number;
   price: number | null;
   status: string;
@@ -64,6 +67,67 @@ function extractAddr(r: any, key: 'pickup' | 'dropoff'): string {
   return '';
 }
 
+function toDate(value: any): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (value instanceof Timestamp) return value.toDate();
+  if (typeof value?.toDate === 'function') {
+    const d = value.toDate();
+    return d instanceof Date && !Number.isNaN(d.getTime()) ? d : null;
+  }
+  if (typeof value === 'number') {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof value === 'string') {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+function parseDateTime(dateValue: any, timeValue: any): Date | null {
+  const direct = toDate(dateValue);
+  if (direct && direct.getHours() + direct.getMinutes() + direct.getSeconds() > 0) return direct;
+
+  if (typeof dateValue !== 'string' || !dateValue.trim()) return direct;
+  const dateMatch = dateValue.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (!dateMatch) return direct;
+
+  let hours = 23;
+  let minutes = 59;
+  if (typeof timeValue === 'string' && timeValue.trim()) {
+    const timeMatch = timeValue.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+    if (timeMatch) {
+      hours = Number(timeMatch[1]);
+      minutes = Number(timeMatch[2] || 0);
+      const meridiem = timeMatch[3]?.toLowerCase();
+      if (meridiem === 'pm' && hours < 12) hours += 12;
+      if (meridiem === 'am' && hours === 12) hours = 0;
+    }
+  }
+
+  const d = new Date(
+    Number(dateMatch[1]),
+    Number(dateMatch[2]) - 1,
+    Number(dateMatch[3]),
+    hours,
+    minutes,
+  );
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function postingScheduledAt(r: any): Date | null {
+  return (
+    toDate(r.departureTime) ||
+    toDate(r.scheduledAt) ||
+    toDate(r.dateTime) ||
+    toDate(r.requestedTime) ||
+    toDate(r.pickupTime) ||
+    parseDateTime(r.date || r.departureDate || r.scheduledDate, r.time || r.departureTimeText || r.scheduledTime)
+  );
+}
+
 function toPosting(id: string, r: any): Posting {
   return {
     id,
@@ -71,6 +135,7 @@ function toPosting(id: string, r: any): Posting {
     to: extractAddr(r, 'dropoff') || 'Dropoff pending',
     date: r.date || '',
     time: r.time || '',
+    scheduledAt: postingScheduledAt(r),
     seats: Number(r.availableSeats ?? r.seats ?? r.seatsAvailable ?? 1),
     price: r.pricePerSeat != null ? Number(r.pricePerSeat) : r.contributionAmount != null ? Number(r.contributionAmount) : null,
     status: String(r.status || 'active').toLowerCase(),
@@ -81,8 +146,20 @@ function toPosting(id: string, r: any): Posting {
   };
 }
 
-const ACTIVE_STATUSES = new Set(['active', 'open', 'available', 'posted']);
+const ACTIVE_STATUSES = new Set([
+  'active', 'open', 'available', 'posted',
+  'accepted', 'confirmed', 'booked',
+  'in_progress', 'in progress', 'in-progress',
+  'driver_completed', 'driver completed', 'rider_completed', 'rider completed',
+]);
 const INACTIVE_STATUSES = new Set(['cancelled', 'canceled', 'completed', 'complete', 'finished', 'expired']);
+
+function isPostingOutdated(p: Posting, now = Date.now()): boolean {
+  const status = p.status.toLowerCase();
+  if (INACTIVE_STATUSES.has(status)) return true;
+  if (!p.scheduledAt) return false;
+  return p.scheduledAt.getTime() < now;
+}
 
 export default function MyPostingsScreen() {
   const { goBack: handleBack } = useReturnNavigation('/(driver)');
@@ -92,6 +169,7 @@ export default function MyPostingsScreen() {
   const [tab, setTab]           = useState<'active' | 'past'>('active');
   const [requestsByPostingId, setRequestsByPostingId] = useState<Record<string, BookingRequest[]>>({});
   const [actingOnRequest, setActingOnRequest] = useState<string | null>(null);
+  const [confirmedIdByPostingId, setConfirmedIdByPostingId] = useState<Record<string, string>>({});
 
   // Subscribe to incoming rider booking requests for this driver's postings
   useEffect(() => {
@@ -99,7 +177,7 @@ export default function MyPostingsScreen() {
     const email = firebaseAuth.currentUser?.email;
     if (!uid) return;
 
-    const inactive = new Set(['cancelled', 'canceled', 'rejected', 'declined', 'completed', 'accepted', 'confirmed']);
+    const inactive = new Set(['cancelled', 'canceled', 'rejected', 'declined', 'completed']);
     const snapA: Map<string, BookingRequest> = new Map();
     const snapB: Map<string, BookingRequest> = new Map();
 
@@ -163,6 +241,21 @@ export default function MyPostingsScreen() {
     return () => { unsubA(); unsubB(); };
   }, []);
 
+  // Track confirmedRides so PostingCard can show a flag button
+  useEffect(() => {
+    const uid = firebaseAuth.currentUser?.uid;
+    if (!uid) return;
+    const q = query(collection(firestore, 'confirmedRides'), where('driverId', '==', uid));
+    return onSnapshot(q, (snap) => {
+      const map: Record<string, string> = {};
+      snap.forEach((d) => {
+        const postingId = d.data().ridePostingId;
+        if (postingId) map[String(postingId)] = d.id;
+      });
+      setConfirmedIdByPostingId(map);
+    });
+  }, []);
+
   const acceptRequest = useCallback(async (req: BookingRequest) => {
     setActingOnRequest(req.id);
     try {
@@ -207,7 +300,10 @@ export default function MyPostingsScreen() {
       // Always create a fresh thread for this specific booking request
       const chatRef = await addDoc(collection(firestore, 'chats'), {
         participants: [uid, req.riderId],
+        participantKeys: [roleKey('driver', uid), roleKey('rider', req.riderId)],
         participantRoles: { [uid]: 'driver', [req.riderId]: 'rider' },
+        driverId: uid,
+        riderId: req.riderId,
         ridePostingId: req.ridePostingId || null,
         ridePostingRequestId: req.id,
         context: 'booking-request',
@@ -293,8 +389,9 @@ export default function MyPostingsScreen() {
     } as any);
   }, []);
 
-  const active = postings.filter((p) => ACTIVE_STATUSES.has(p.status));
-  const past   = postings.filter((p) => INACTIVE_STATUSES.has(p.status));
+  const now = Date.now();
+  const active = postings.filter((p) => ACTIVE_STATUSES.has(p.status) && !isPostingOutdated(p, now));
+  const past = postings.filter((p) => INACTIVE_STATUSES.has(p.status) || isPostingOutdated(p, now));
   const shown  = tab === 'active' ? active : past;
 
   return (
@@ -384,6 +481,7 @@ export default function MyPostingsScreen() {
               onAccept={acceptRequest}
               onDecline={declineRequest}
               onMessage={openChatWithRider}
+              confirmedId={confirmedIdByPostingId[p.id]}
             />
           ))}
         </ScrollView>
@@ -403,6 +501,7 @@ function PostingCard({
   onAccept,
   onDecline,
   onMessage,
+  confirmedId,
 }: {
   posting: Posting;
   isPast: boolean;
@@ -414,17 +513,22 @@ function PostingCard({
   onAccept: (req: BookingRequest) => void;
   onDecline: (req: BookingRequest) => void;
   onMessage: (req: BookingRequest) => void;
+  confirmedId?: string;
 }) {
   const hasRequests = incomingRequests.length > 0;
+  const [flagVisible, setFlagVisible] = useState(false);
+  const isExpired = isPostingOutdated(p);
 
   const statusLabel = p.status === 'cancelled' ? 'Cancelled'
     : p.status === 'completed' ? 'Completed'
+    : isExpired ? 'Expired'
     : p.status === 'expired' ? 'Expired'
     : hasRequests ? `${incomingRequests.length} Request${incomingRequests.length > 1 ? 's' : ''}`
     : 'Active';
 
   const statusColor = p.status === 'cancelled' ? '#DC2626'
     : p.status === 'completed' ? '#16A34A'
+    : isExpired ? MUTED
     : hasRequests ? '#D97706'
     : ORANGE;
 
@@ -433,11 +537,19 @@ function PostingCard({
       {/* Status row */}
       <View style={s.cardTop}>
         <View style={[s.statusPill, { backgroundColor: `${statusColor}15` }]}>
+          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: statusColor, marginRight: 5 }} />
           <Text style={[s.statusText, { color: statusColor }]}>{statusLabel.toUpperCase()}</Text>
         </View>
-        {p.date || p.time ? (
-          <Text style={s.dateText}>{[p.date, p.time].filter(Boolean).join(' - ')}</Text>
-        ) : null}
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+          {(p.date || p.time) ? (
+            <Text style={s.dateText}>{[p.date, p.time].filter(Boolean).join(' - ')}</Text>
+          ) : null}
+          {confirmedId ? (
+            <TouchableOpacity style={s.cardFlagBtn} onPress={() => setFlagVisible(true)} activeOpacity={0.75}>
+              <Ionicons name="flag-outline" size={14} color="#B54A4A" />
+            </TouchableOpacity>
+          ) : null}
+        </View>
       </View>
 
       {/* Route */}
@@ -457,8 +569,8 @@ function PostingCard({
       <View style={s.meta}>
         {p.price != null && (
           <View style={s.metaChip}>
-            <Ionicons name="cash-outline" size={13} color={MUTED} />
-            <Text style={s.metaLabel}>${p.price.toFixed(2)}/seat</Text>
+            <Ionicons name="cash-outline" size={13} color={ORANGE} />
+            <Text style={[s.metaLabel, { color: ORANGE, fontWeight: '700' }]}>${p.price.toFixed(2)}/seat</Text>
           </View>
         )}
         <View style={s.metaChip}>
@@ -572,6 +684,14 @@ function PostingCard({
           </TouchableOpacity>
         </View>
       )}
+
+      <FlagRideModal
+        visible={flagVisible}
+        rideId={confirmedId || null}
+        role="driver"
+        onClose={() => setFlagVisible(false)}
+        onFlagged={() => setFlagVisible(false)}
+      />
     </View>
   );
 }
@@ -633,14 +753,15 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 }, elevation: 2,
   },
   cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
-  statusPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+  statusPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+  cardFlagBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#FDECEC', alignItems: 'center', justifyContent: 'center' },
   statusText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.4 },
   dateText: { fontSize: 12, color: MUTED, fontWeight: '500' },
   route: { flexDirection: 'row', gap: 12, marginBottom: 14 },
   routeDots: { alignItems: 'center', paddingTop: 3 },
   dotFilled: { width: 8, height: 8, borderRadius: 4, backgroundColor: NAVY },
   routeLine: { width: 1.5, height: 22, backgroundColor: BORDER, marginVertical: 2 },
-  dotOutline: { width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: NAVY },
+  dotOutline: { width: 8, height: 8, borderRadius: 4, backgroundColor: ORANGE },
   routeText: { fontSize: 14, lineHeight: 18, fontWeight: '600', color: NAVY },
   meta: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
   metaChip: {
@@ -698,5 +819,3 @@ const s = StyleSheet.create({
   },
   declineBtnText: { fontSize: 13, fontWeight: '700', color: '#DC2626' },
 });
-
-

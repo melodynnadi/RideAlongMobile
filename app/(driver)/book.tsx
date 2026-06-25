@@ -19,15 +19,16 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 const BRAND = { orange: '#DE5D20' } as const;
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { firestore, firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import { addDoc, collection, serverTimestamp, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
 import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import * as Location from 'expo-location';
-import { computeMaxPrice } from '@/src/utils/pricing';
+import { computeMaxPrice, computeDriverMaxPrice, formatPricingBreakdown } from '@/src/utils/pricing';
 import EmailTriggerService from '@/services/EmailTriggerService';
 import { Ionicons } from '@expo/vector-icons';
 import { DriverBottomNav } from '@/components/DriverBottomNav';
+import { DatePickerModal, TimePickerModal, formatDateLabel } from '@/components/DateTimePickerModals';
 
 type Coords = { lat: number; lng: number };
 type Suggestion = { description: string; place_id: string; mainText: string; secondaryText: string };
@@ -125,7 +126,10 @@ function AddressAutocomplete({
       {open && (items.length > 0 || loading) && (
         <View style={styles.autoPanel}>
           {loading ? (
-            <View style={styles.autoEmpty}><Text style={styles.placesEmptyText}>Searching...</Text></View>
+            <View style={styles.autoStateRow}>
+              <View style={styles.autoIconWrap}><Ionicons name="search-outline" size={15} color={BRAND.orange} /></View>
+              <Text style={styles.placesEmptyText}>Searching locations...</Text>
+            </View>
           ) : (
             items.slice(0, 10).map((s, idx) => (
               <TouchableOpacity
@@ -139,6 +143,9 @@ function AddressAutocomplete({
                   setTimeout(() => Keyboard.dismiss(), 50);
                 }}
               >
+                <View style={styles.autoIconWrap}>
+                  <Ionicons name={idx === 0 ? 'location' : 'location-outline'} size={15} color={BRAND.orange} />
+                </View>
                 <View style={styles.autoItemRow}>
                   <Text style={styles.autoMainText} numberOfLines={1}>{s.mainText}</Text>
                   {s.secondaryText ? <Text style={styles.autoSecondaryText} numberOfLines={1}>{s.secondaryText}</Text> : null}
@@ -188,6 +195,43 @@ function getMonthMatrix(d: Date) {
     weeks.push(row);
   }
   return weeks;
+}
+
+async function geocodeAddress(address: string): Promise<Coords | null> {
+  const q = address.trim();
+  if (!q || !GOOGLE_MAPS_API_KEY) return null;
+  try {
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(q)}&components=country:US&key=${GOOGLE_MAPS_API_KEY}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    const loc = json?.results?.[0]?.geometry?.location;
+    if (typeof loc?.lat === 'number' && typeof loc?.lng === 'number') {
+      return { lat: loc.lat, lng: loc.lng };
+    }
+  } catch {}
+  return null;
+}
+
+async function fetchRouteMetricsForCoords(origin: Coords, destination: Coords) {
+  if (!GOOGLE_MAPS_API_KEY) return null;
+  try {
+    const origins = `${origin.lat},${origin.lng}`;
+    const destinations = `${destination.lat},${destination.lng}`;
+    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?units=imperial&origins=${encodeURIComponent(origins)}&destinations=${encodeURIComponent(destinations)}&key=${GOOGLE_MAPS_API_KEY}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    const element = json?.rows?.[0]?.elements?.[0];
+    const distanceMeters = element?.distance?.value;
+    const durationSeconds = element?.duration?.value;
+    if (typeof distanceMeters !== 'number' || typeof durationSeconds !== 'number') return null;
+    return {
+      distanceText: element?.distance?.text || null,
+      durationText: element?.duration?.text || null,
+      distanceMiles: distanceMeters / 1609.34,
+      durationMinutes: durationSeconds / 60,
+    };
+  } catch {}
+  return null;
 }
 
 function CalendarModal({ visible, month, selectedDate, primaryColor, secondaryColor, onClose, onSelect }: {
@@ -404,8 +448,10 @@ function SeatsModal({ visible, selected, primaryColor, onClose, onSelect }: {
 
 export default function BookScreen() {
   const insets = useSafeAreaInsets();
-  const [date, setDate] = useState('');
-  const [time, setTime] = useState('');
+  const params = useLocalSearchParams<{ pickup?: string; dropoff?: string; date?: string; time?: string }>();
+  const paramText = (value?: string | string[]) => Array.isArray(value) ? value[0] || '' : value || '';
+  const [date, setDate] = useState(() => paramText(params.date));
+  const [time, setTime] = useState(() => paramText(params.time));
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
     if (!date) return new Date();
@@ -418,9 +464,10 @@ export default function BookScreen() {
     return new Date();
   });
   const [timeOpen, setTimeOpen] = useState(false);
-  const [pickupLocation, setPickupLocation] = useState('');
-  const [dropoffLocation, setDropoffLocation] = useState('');
+  const [pickupLocation, setPickupLocation] = useState(() => paramText(params.pickup));
+  const [dropoffLocation, setDropoffLocation] = useState(() => paramText(params.dropoff));
   const [contribution, setContribution] = useState('');
+  const [priceEdited, setPriceEdited] = useState(false);
   // seats limited to 1 or 2
   const [seats, setSeats] = useState<1 | 2>(1);
   const [maxPrice, setMaxPrice] = useState<number>(0);
@@ -437,6 +484,29 @@ export default function BookScreen() {
   const [calcLoading, setCalcLoading] = useState<boolean>(false);
   const [distanceMiles, setDistanceMiles] = useState<number | null>(null);
   const [durationMinutes, setDurationMinutes] = useState<number | null>(null);
+
+  const incomingPickup = paramText(params.pickup);
+  const incomingDropoff = paramText(params.dropoff);
+  const incomingDate = paramText(params.date);
+  const incomingTime = paramText(params.time);
+
+  useEffect(() => {
+    if (incomingPickup || incomingDropoff) {
+      setPickupCoords(null);
+      setDropoffCoords(null);
+      setDistanceText('--');
+      setDurationText('--');
+      setDistanceMiles(null);
+      setDurationMinutes(null);
+      setContribution('');
+      setPriceEdited(false);
+    }
+
+    setPickupLocation(incomingPickup);
+    setDropoffLocation(incomingDropoff);
+    setDate(incomingDate);
+    setTime(incomingTime);
+  }, [incomingPickup, incomingDropoff, incomingDate, incomingTime]);
 
   const to24h = (t: string): string => {
     // Convert 'h:mm AM/PM' or 'h:mmAM' to 'HH:mm'
@@ -552,7 +622,22 @@ export default function BookScreen() {
         return;
       }
 
-      if (!pickupCoords || !dropoffCoords) {
+      setSubmitting(true);
+
+      let submitPickupCoords = pickupCoords;
+      let submitDropoffCoords = dropoffCoords;
+
+      if (!submitPickupCoords) {
+        submitPickupCoords = await geocodeAddress(pickupLocation);
+        if (submitPickupCoords) setPickupCoords(submitPickupCoords);
+      }
+
+      if (!submitDropoffCoords) {
+        submitDropoffCoords = await geocodeAddress(dropoffLocation);
+        if (submitDropoffCoords) setDropoffCoords(submitDropoffCoords);
+      }
+
+      if (!submitPickupCoords || !submitDropoffCoords) {
         Alert.alert(
           'Select locations',
           'Please choose pickup and dropoff from the suggestions so we can place your ride on the map.'
@@ -560,7 +645,23 @@ export default function BookScreen() {
         return;
       }
 
-      setSubmitting(true);
+      let submitDistanceMiles = distanceMiles;
+      let submitDurationMinutes = durationMinutes;
+      let submitDistanceText = distanceText;
+      let submitDurationText = durationText;
+      if (submitDistanceMiles == null || submitDurationMinutes == null) {
+        const metrics = await fetchRouteMetricsForCoords(submitPickupCoords, submitDropoffCoords);
+        if (metrics) {
+          submitDistanceMiles = metrics.distanceMiles;
+          submitDurationMinutes = metrics.durationMinutes;
+          submitDistanceText = metrics.distanceText || '--';
+          submitDurationText = metrics.durationText || '--';
+          setDistanceMiles(metrics.distanceMiles);
+          setDurationMinutes(metrics.durationMinutes);
+          setDistanceText(metrics.distanceText || '--');
+          setDurationText(metrics.durationText || '--');
+        }
+      }
 
       // Parse contribution (price per seat)
       const priceNum = (() => {
@@ -568,10 +669,13 @@ export default function BookScreen() {
         return isNaN(n) ? null : n;
       })();
 
-  // Seats already constrained to 1 or 2
-  const seatsNum: 1 | 2 = seats >= 2 ? 2 : 1;
+      // Seats already constrained to 1 or 2
+      const seatsNum: 1 | 2 = seats >= 2 ? 2 : 1;
 
-      if (priceNum == null || priceNum <= 0) {
+      const dist = typeof submitDistanceMiles === 'number' ? submitDistanceMiles : 0;
+      const fallbackDriverPrice = computeDriverMaxPrice(dist, seatsNum);
+      const resolvedPriceNum = priceNum && priceNum > 0 ? priceNum : fallbackDriverPrice;
+      if (!resolvedPriceNum || resolvedPriceNum <= 0) {
         Alert.alert('Invalid price', 'Please enter a valid price per seat.');
         return;
       }
@@ -582,14 +686,11 @@ export default function BookScreen() {
       }
 
       // Enforce max price cap based on distance & seats
-      const dist = typeof distanceMiles === 'number' ? distanceMiles : 0;
       const cap = computeMaxPrice(dist, seatsNum);
-      if (priceNum > cap) {
+      if (cap > 0 && resolvedPriceNum > cap) {
         Alert.alert('Price exceeds maximum', `The maximum for ${seatsNum} seat(s) is $${cap.toFixed(2)} based on ${dist ? dist.toFixed(1) : '--'} mi.`);
         return;
       }
-
-  // No maximum cap enforcement; only suggest minimum.
 
       const requestedTime = toRequestedDate(date || undefined, time || undefined);
 
@@ -605,54 +706,54 @@ export default function BookScreen() {
         pickupAddress: pickupLocation || null,
         dropoffAddress: dropoffLocation || null,
 
-        pickupGeo: pickupCoords
+        pickupGeo: submitPickupCoords
           ? {
               address: pickupLocation || null,
-              latitude: pickupCoords.lat,
-              longitude: pickupCoords.lng,
-              lat: pickupCoords.lat,
-              lng: pickupCoords.lng,
+              latitude: submitPickupCoords.lat,
+              longitude: submitPickupCoords.lng,
+              lat: submitPickupCoords.lat,
+              lng: submitPickupCoords.lng,
             }
           : null,
 
-        dropoffGeo: dropoffCoords
+        dropoffGeo: submitDropoffCoords
           ? {
               address: dropoffLocation || null,
-              latitude: dropoffCoords.lat,
-              longitude: dropoffCoords.lng,
-              lat: dropoffCoords.lat,
-              lng: dropoffCoords.lng,
+              latitude: submitDropoffCoords.lat,
+              longitude: submitDropoffCoords.lng,
+              lat: submitDropoffCoords.lat,
+              lng: submitDropoffCoords.lng,
             }
           : null,
 
-        pickupCoords: pickupCoords || null,
-        dropoffCoords: dropoffCoords || null,
-        pickupLat: pickupCoords?.lat ?? null,
-        pickupLng: pickupCoords?.lng ?? null,
-        dropoffLat: dropoffCoords?.lat ?? null,
-        dropoffLng: dropoffCoords?.lng ?? null,
+        pickupCoords: submitPickupCoords || null,
+        dropoffCoords: submitDropoffCoords || null,
+        pickupLat: submitPickupCoords?.lat ?? null,
+        pickupLng: submitPickupCoords?.lng ?? null,
+        dropoffLat: submitDropoffCoords?.lat ?? null,
+        dropoffLng: submitDropoffCoords?.lng ?? null,
         date: date || null,
         time: time || null,
         departureTime: requestedTime || null,
         availableSeats: seatsNum,
-        pricePerSeat: priceNum,
+        pricePerSeat: resolvedPriceNum,
         postType: 'ride_offer',
         // Legacy fallbacks some lists use
-        contributionAmount: priceNum,
+        contributionAmount: resolvedPriceNum,
         estimatedFare: null,
         notes: notes || null,
         rideVibe: selectedVibes,
         preferences: selectedVibes,
         // Include distance/duration details if available
-        distance: (distanceText || distanceMiles != null) ? {
-          text: distanceText || null,
-          miles: distanceMiles != null ? Number(distanceMiles.toFixed(3)) : null,
-          meters: distanceMiles != null ? Math.round(distanceMiles * 1609.34) : null,
+        distance: (submitDistanceText || submitDistanceMiles != null) ? {
+          text: submitDistanceText || null,
+          miles: submitDistanceMiles != null ? Number(submitDistanceMiles.toFixed(3)) : null,
+          meters: submitDistanceMiles != null ? Math.round(submitDistanceMiles * 1609.34) : null,
         } : null,
-        duration: (durationText || durationMinutes != null) ? {
-          text: durationText || null,
-          minutes: durationMinutes != null ? Number(durationMinutes.toFixed(3)) : null,
-          seconds: durationMinutes != null ? Math.round((durationMinutes || 0) * 60) : null,
+        duration: (submitDurationText || submitDurationMinutes != null) ? {
+          text: submitDurationText || null,
+          minutes: submitDurationMinutes != null ? Number(submitDurationMinutes.toFixed(3)) : null,
+          seconds: submitDurationMinutes != null ? Math.round((submitDurationMinutes || 0) * 60) : null,
         } : null,
         status: 'active',
         createdAt: serverTimestamp(),
@@ -698,7 +799,7 @@ export default function BookScreen() {
                 dropoff: dropoffLocation,
                 date: date,
                 time: time,
-                price: contribution,
+                price: String(resolvedPriceNum),
               }
             );
           }
@@ -712,6 +813,7 @@ export default function BookScreen() {
         setPickupLocation('');
         setDropoffLocation('');
         setContribution('');
+        setPriceEdited(false);
         setSeats(1);
         setNotes('');
 
@@ -813,12 +915,15 @@ export default function BookScreen() {
     setMaxPrice(cap);
     // Clamp price if above cap
     const priceNum = Number(String(contribution).replace(/[^0-9.\-]/g, ''));
-    if (!isNaN(priceNum) && priceNum > cap) {
+    if (!isNaN(priceNum) && cap > 0 && priceNum > cap) {
       setContribution(cap.toFixed(2));
+      setPriceEdited(false);
       setShowCapBanner(`Price capped at $${cap.toFixed(2)} for ${s} seat(s).`);
       setTimeout(() => setShowCapBanner(null), 2500);
+    } else if (!priceEdited && cap > 0) {
+      setContribution(cap.toFixed(2));
     }
-  }, [seats, distanceMiles]);
+  }, [seats, distanceMiles, contribution, priceEdited]);
 
   // Clamp on contribution changes (prevent above max)
   useEffect(() => {
@@ -844,13 +949,9 @@ export default function BookScreen() {
     ? (distanceMiles * 2.1 + 2.5).toFixed(2) : null;
   const riderSavings = uberEstimate && priceNum > 0
     ? Math.max(0, Number(uberEstimate) - priceNum).toFixed(2) : null;
-  const suggestedMin = distanceMiles && distanceMiles > 0
-    ? Math.max(3, Math.round(distanceMiles * 0.7)) : 5;
-  const suggestedMax = distanceMiles && distanceMiles > 0
-    ? Math.max(7, Math.round(distanceMiles * 1.1)) : 9;
   const routeIsReady = !!(pickupLocation && dropoffLocation && pickupCoords && dropoffCoords);
   const suggestedText = distanceMiles && distanceMiles > 0
-    ? `$${suggestedMin}-${suggestedMax} · gas split for ${Math.round(durationMinutes || 0) || '--'}min`
+    ? formatPricingBreakdown(distanceMiles, seats, 'driver')
     : 'Select route to estimate';
 
 
@@ -919,29 +1020,24 @@ export default function BookScreen() {
                 <Text style={styles.fieldGroupLabel}>WHEN</Text>
                 <View style={styles.whenRow}>
                   <TouchableOpacity style={styles.ceoInputBtn} onPress={() => setCalendarOpen(true)}>
-                    <Text style={styles.ceoInputText}>{date || 'Fri, Nov 20'}</Text>
+                    <Text style={[styles.ceoInputText, !date && styles.ceoInputPlaceholder]}>{date ? formatDateLabel(date) : 'Fri, Nov 20'}</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity style={[styles.ceoInputBtn, styles.timeBtn]} onPress={() => setTimeOpen(true)}>
-                    <Text style={styles.ceoInputText}>{time || '3:00 PM'}</Text>
+                    <Text style={[styles.ceoInputText, !time && styles.ceoInputPlaceholder]}>{time || '3:00 PM'}</Text>
                   </TouchableOpacity>
                 </View>
 
-                <CalendarModal
+                <DatePickerModal
                   visible={calendarOpen}
-                  month={date ? new Date(date) : new Date()}
                   selectedDate={date}
-                  primaryColor={BRAND.orange}
-                  secondaryColor="#13213A"
                   onClose={() => setCalendarOpen(false)}
                   onSelect={setDate}
                 />
 
-                <TimeModal
+                <TimePickerModal
                   visible={timeOpen}
-                  initialTime={time}
-                  primaryColor={BRAND.orange}
-                  secondaryColor="#13213A"
+                  selectedTime={time}
                   onClose={() => setTimeOpen(false)}
                   onSelect={setTime}
                 />
@@ -964,7 +1060,10 @@ export default function BookScreen() {
                   <Text style={styles.priceDollar}>$</Text>
                   <TextInput
                     value={contribution}
-                    onChangeText={setContribution}
+                    onChangeText={(value) => {
+                      setPriceEdited(true);
+                      setContribution(value);
+                    }}
                     placeholder="28"
                     placeholderTextColor="#94A3B8"
                     keyboardType="decimal-pad"
@@ -1031,6 +1130,7 @@ const styles = StyleSheet.create({
   formCard: { marginHorizontal: 20, borderRadius: 20, borderWidth: 1, borderColor: '#E5E0D8', backgroundColor: '#FFFFFF', padding: 14 },
   ceoInputBtn: { flex: 1, minHeight: 48, borderRadius: 14, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', justifyContent: 'center', paddingHorizontal: 14 },
   ceoInputText: { color: '#15233A', fontSize: 14, fontWeight: '600' },
+  ceoInputPlaceholder: { color: '#8B94A6' },
   seatPill: { height: 40, minWidth: 64, borderRadius: 20, borderWidth: 1, borderColor: '#E5E0D8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
   seatPillText: { color: '#8B94A6', fontSize: 14, fontWeight: '700' },
   priceBox: { marginHorizontal: 20, minHeight: 70, borderRadius: 18, borderWidth: 1, borderColor: '#E5E0D8', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
@@ -1298,36 +1398,41 @@ continueText: {
     left: 0,
     right: 0,
     backgroundColor: '#FFFFFF',
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: '#E5E0D8',
-    maxHeight: 220,
+    maxHeight: 268,
     overflow: 'hidden',
-    elevation: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
+    elevation: 24,
+    shadowColor: '#15233A',
+    shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.12,
-    shadowRadius: 20,
+    shadowRadius: 18,
     zIndex: 999,
   },
-  autoItem:       { paddingHorizontal:14, paddingVertical:12, borderBottomWidth:1, borderBottomColor:'#E5E0D8' },
-  autoItemRow:    { flexDirection:'column' },
+  autoItem:       { minHeight:56, paddingHorizontal:12, paddingVertical:10, borderBottomWidth:1, borderBottomColor:'#F1EEE8', flexDirection:'row', alignItems:'center', gap:10 },
+  autoIconWrap:   { width:28, height:28, borderRadius:14, backgroundColor:'#FEF0E8', alignItems:'center', justifyContent:'center', flexShrink:0 },
+  autoItemRow:    { flex:1, minWidth:0 },
   autoMainText: {
     color: '#13213A',
     fontSize: 14,
-    fontWeight: '600',
+    lineHeight: 18,
+    fontWeight: '700',
   },
   autoSecondaryText: {
     color: '#7A8FA8',
     fontSize: 12,
+    lineHeight: 16,
     marginTop: 2,
+    fontWeight: '500',
   },
   autoText: {
     color: '#13213A',
     fontSize: 14,
   },
+  autoStateRow:   { minHeight:54, paddingHorizontal:12, paddingVertical:12, flexDirection:'row', alignItems:'center', gap:10 },
   autoEmpty:      { padding:14 },
-  placesEmptyText:{ color:'#7A8FA8', fontSize:13, textAlign:'center' },
+  placesEmptyText:{ flex:1, color:'#7A8FA8', fontSize:13, lineHeight:18, fontWeight:'600' },
 
   // ── Calendar Modal (keep existing light theme for modals) ─────────────────
   modalBackdrop:  { flex:1, backgroundColor:'rgba(0,0,0,0.65)', justifyContent:'center', alignItems:'center', padding:20 },

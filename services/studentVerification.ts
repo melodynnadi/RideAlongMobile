@@ -1,8 +1,6 @@
 import { collection, doc, getDoc, getDocs, query, Timestamp, where } from 'firebase/firestore';
 
-import { firebaseAuth, firestore } from '@/constants/services';
-
-const RAW_BASE = process.env.EXPO_PUBLIC_API_URL || 'https://us-central1-ridealong-33528.cloudfunctions.net';
+import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 
 export type StudentDocumentType =
   | 'enrollment_letter'
@@ -35,6 +33,8 @@ export interface VerificationSubmission {
     currentTerm?: string | null;
     statusKeywords?: string[];
   } | null;
+  fileName?: string | null;
+  fileUrl?: string | null;
 }
 
 export interface StudentVerificationStatusResponse {
@@ -61,6 +61,7 @@ export interface VerificationUploadFile {
 function normalizeStatus(value: unknown, isVerified = false): VerificationStatus {
   if (isVerified) return 'approved';
   const status = String(value || '').toLowerCase();
+  if (status === 'verified') return 'approved';
   return ['none', 'submitted', 'pending', 'approved', 'auto-approved', 'manual-review', 'rejected'].includes(status)
     ? status as VerificationStatus
     : 'none';
@@ -101,7 +102,7 @@ async function getFirestoreVerificationUser() {
 }
 
 function apiUrl(path: string) {
-  const base = RAW_BASE.replace(/\/$/, '');
+  const base = getApiBaseUrl().replace(/\/$/, '');
   const root = /\/api$/.test(base) ? base : `${base}/api`;
   return `${root}/${path.replace(/^\//, '')}`;
 }
@@ -126,6 +127,21 @@ function toDate(value: unknown): Date | null {
     return Number.isNaN(date.getTime()) ? null : date;
   }
   return null;
+}
+
+function mapVerificationSubmission(id: string, data: any): VerificationSubmission {
+  return {
+    id,
+    status: normalizeStatus(data.status || data.verificationStatus || data.resolution || 'submitted'),
+    docType: (data.docType || data.documentType || data.type || 'student_id') as StudentDocumentType,
+    createdAt: toDate(data.createdAt || data.submittedAt || data.reviewedAt || data.updatedAt || data.verificationSubmittedAt || data.verificationApprovedAt),
+    decisionReason: data.decisionReason || data.rejectionReason || data.reason || data.verificationFailureReason || null,
+    requiresManualReview: Boolean(data.requiresManualReview || data.resolution === 'pending'),
+    matchScores: data.matchScores || data.ocrScores || null,
+    extractedFields: data.extractedFields || null,
+    fileName: data.fileName || data.documentName || null,
+    fileUrl: data.fileUrl || data.documentUrl || null,
+  };
 }
 
 export async function getStudentVerificationStatus(): Promise<StudentVerificationStatusResponse> {
@@ -184,27 +200,59 @@ export async function getStudentVerificationHistory(): Promise<VerificationSubmi
   const user = firebaseAuth.currentUser;
   if (!user) return [];
 
-  // Sort locally so history does not depend on a composite Firestore index being
-  // deployed to the same Firebase project as the mobile build.
-  const historyQuery = query(
-    collection(firestore, 'studentVerifications'),
-    where('userId', '==', user.uid),
-  );
-  const snapshot = await getDocs(historyQuery);
-  return snapshot.docs
-    .map((item) => {
-      const data = item.data();
-      return {
-        id: item.id,
-        status: (data.status || data.verificationStatus || 'submitted') as VerificationStatus,
-        docType: (data.docType || data.documentType || 'student_id') as StudentDocumentType,
-        createdAt: toDate(data.createdAt || data.submittedAt || data.updatedAt),
-        decisionReason: data.decisionReason || data.rejectionReason || data.reason || null,
-        requiresManualReview: Boolean(data.requiresManualReview),
-        matchScores: data.matchScores || data.ocrScores || null,
-        extractedFields: data.extractedFields || null,
-      };
-    })
+  const [riderSnap, driverSnap, userSnap] = await Promise.all([
+    getDoc(doc(firestore, 'riders', user.uid)).catch(() => null),
+    getDoc(doc(firestore, 'drivers', user.uid)).catch(() => null),
+    getDoc(doc(firestore, 'users', user.uid)).catch(() => null),
+  ]);
+  const profiles = [riderSnap, driverSnap, userSnap]
+    .filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot?.exists()))
+    .map((snapshot) => snapshot.data() || {});
+
+  const byId = new Map<string, VerificationSubmission>();
+  const addSubmission = (id: string, data: any) => {
+    if (!id || byId.has(id)) return;
+    byId.set(id, mapVerificationSubmission(id, data || {}));
+  };
+
+  const directIds = Array.from(new Set(profiles
+    .flatMap((profile) => [
+      profile.lastVerificationId,
+      profile.studentVerificationId,
+      profile.verificationId,
+      profile.latestVerificationId,
+    ])
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)));
+
+  await Promise.all(directIds.map(async (id) => {
+    const snap = await getDoc(doc(firestore, 'studentVerifications', id)).catch(() => null);
+    if (snap?.exists()) addSubmission(snap.id, snap.data());
+  }));
+
+  const emails = Array.from(new Set([
+    user.email,
+    ...profiles.flatMap((profile) => [profile.email, profile.schoolEmail]),
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0)));
+  const queryPairs: [string, string][] = [
+    ['userId', user.uid],
+    ['uid', user.uid],
+    ['userUid', user.uid],
+    ['riderId', user.uid],
+    ['driverId', user.uid],
+    ...emails.flatMap((email) => [
+      ['email', email] as [string, string],
+      ['userEmail', email] as [string, string],
+    ]),
+  ];
+
+  const snapshots = await Promise.all(queryPairs.map(([field, value]) =>
+    getDocs(query(collection(firestore, 'studentVerifications'), where(field, '==', value))).catch(() => null),
+  ));
+  snapshots.forEach((snapshot) => {
+    snapshot?.docs.forEach((item) => addSubmission(item.id, item.data()));
+  });
+
+  return Array.from(byId.values())
     .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0))
     .slice(0, 5);
 }

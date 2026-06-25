@@ -4,6 +4,7 @@ import { showToast, rideToasts } from '@/src/utils/showToast';
 import { shouldShowToastEvent, buildToastKey } from '@/src/utils/toastDeduper';
 import { showLocalNotification } from '@/services/messagingService';
 import { AppState } from 'react-native';
+import { chatBelongsToRole, roleUnreadField } from '@/src/utils/roleIdentity';
 
 /**
  * Sets up real-time listeners for ride-related events that should trigger notifications
@@ -196,7 +197,7 @@ export function setupDriverNotificationListeners(driverId: string, driverEmail?:
   try {
     const chatsQuery = query(
       collection(firestore, 'chats'),
-      where('participants', 'array-contains', driverId)
+      where('driverId', '==', driverId)
     );
     
     const unsubChats = onSnapshot(chatsQuery, async (snapshot) => {
@@ -211,12 +212,13 @@ export function setupDriverNotificationListeners(driverId: string, driverEmail?:
       snapshot.docChanges().forEach(async (change: DocumentChange) => {
         const docId = change.doc.id;
         const data = change.doc.data();
+        if (!chatBelongsToRole(data, driverId, 'driver')) return;
         
         // Only process modified chats (when lastMessage changes)
         if (change.type === 'modified' && processedDocs.has(`chat_${docId}`)) {
           const lastMessage = data?.lastMessage;
           const lastMessageTimestamp = data?.lastMessageTimestamp;
-          const unreadField = `unreadCount_${driverId}`;
+          const unreadField = roleUnreadField('driver', driverId);
           const unreadCount = data?.[unreadField] || 0;
           
           // Only show notification if user has unread messages and app is in background

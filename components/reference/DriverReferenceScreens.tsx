@@ -3,7 +3,7 @@ import { Image, Platform, StyleSheet, Text as RNText, TouchableOpacity, View } f
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { hitSlop } from '@/theme/designSystem';
-import { badgeLabel, useRiderUnreadCounts } from '@/hooks/useRiderUnreadCounts';
+import { badgeLabel, useDriverUnreadCounts } from '@/hooks/useRiderUnreadCounts';
 
 const NAVY = '#15233A';
 const ORANGE = '#DE5D20';
@@ -23,7 +23,7 @@ export function DriverHomeUtilityBar({
   initial: string;
   avatarUrl?: string | null;
 }) {
-  const { notificationCount } = useRiderUnreadCounts();
+  const { notificationCount } = useDriverUnreadCounts();
 
   return (
     <View style={styles.homeUtilityBar}>

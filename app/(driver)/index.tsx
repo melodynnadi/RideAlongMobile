@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import {
   View, ScrollView, StyleSheet, Text, TouchableOpacity, Modal,
+  TextInput, Keyboard,
   ActivityIndicator, Alert, Image, Share, Linking, Dimensions,
   RefreshControl, useColorScheme, StatusBar, Animated,
 } from 'react-native';
@@ -9,7 +10,7 @@ import MapView, { Marker, Circle, PROVIDER_GOOGLE } from '@/components/platform/
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { firestore, firebaseAuth, storage, getApiBaseUrl } from '@/constants/services';
+import { firestore, firebaseAuth, storage, getApiBaseUrl, GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import { listenDriverCompletedRides, ConfirmedRide } from '@/src/services/ridesData';
 import {
   confirmPickup as actionConfirmPickup,
@@ -35,6 +36,7 @@ import {
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { DriverBottomNav } from '@/components/DriverBottomNav';
 import { DriverHomeUtilityBar } from '@/components/reference/DriverReferenceScreens';
+import { DatePickerModal, TimePickerModal, formatDateLabel } from '@/components/DateTimePickerModals';
 
 // ─── Design Tokens (rider palette) ───────────────────────────────────────────
 const NAVY   = '#15233A';
@@ -69,6 +71,126 @@ const COLORS = {
   text: '#15233A',
   sub: '#8B94A6',
 };
+
+type DriverHomeSuggestion = { description: string; place_id: string; displayText: string };
+
+function DriverHomeAutocomplete({
+  value,
+  onChangeText,
+  placeholder,
+  zIndex,
+}: {
+  value: string;
+  onChangeText: (value: string) => void;
+  placeholder: string;
+  zIndex: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState<DriverHomeSuggestion[]>([]);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidHide', () => setOpen(false));
+    return () => sub.remove();
+  }, []);
+
+  const fetchSuggestions = async (input: string) => {
+    const q = input.trim();
+    if (q.length < 2) {
+      setItems([]);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      let json: any = null;
+      const token = await firebaseAuth.currentUser?.getIdToken().catch(() => null);
+
+      if (token) {
+        const res = await fetch(`${getApiBaseUrl()}/api/places/autocomplete?input=${encodeURIComponent(q)}`, {
+          headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+        }).catch(() => null);
+        if (res?.ok) json = await res.json().catch(() => null);
+      }
+
+      if (!json && GOOGLE_MAPS_API_KEY) {
+        const res = await fetch(`https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(q)}&key=${GOOGLE_MAPS_API_KEY}&components=country:us`).catch(() => null);
+        if (res?.ok) json = await res.json().catch(() => null);
+      }
+
+      const suggestions = (json?.predictions || []).map((p: any) => {
+        const description = String(p.description || p.structured_formatting?.main_text || '').trim();
+        return {
+          description,
+          place_id: String(p.place_id || description),
+          displayText: description,
+        };
+      }).filter((item: DriverHomeSuggestion) => item.description);
+      setItems(suggestions);
+    } catch {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <View style={[s.driverHomeAutocompleteWrap, { zIndex }]}>
+      <TextInput
+        style={[s.driverHomeInputPill, s.driverHomeInputText]}
+        value={value}
+        onChangeText={(text) => {
+          onChangeText(text);
+          setOpen(true);
+          if (timerRef.current) clearTimeout(timerRef.current);
+          timerRef.current = setTimeout(() => void fetchSuggestions(text), 250);
+        }}
+        onFocus={() => {
+          setOpen(true);
+          if (value.trim().length >= 2) void fetchSuggestions(value);
+        }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder}
+        placeholderTextColor={MUTED}
+        returnKeyType="next"
+      />
+      {open && (loading || items.length > 0) ? (
+        <View style={s.driverHomeAutocompletePanel}>
+          {loading ? (
+            <View style={s.driverHomeAutocompleteState}>
+              <View style={s.driverHomeAutocompleteIcon}>
+                <Ionicons name="search-outline" size={15} color={ORANGE} />
+              </View>
+              <Text style={s.driverHomeAutocompleteSubText}>Searching locations...</Text>
+            </View>
+          ) : (
+            items.slice(0, 6).map((item, index) => (
+              <TouchableOpacity
+                key={item.place_id}
+                style={s.driverHomeAutocompleteItem}
+                onPress={() => {
+                  onChangeText(item.displayText);
+                  setOpen(false);
+                  setItems([]);
+                }}
+                activeOpacity={0.78}
+              >
+                <View style={s.driverHomeAutocompleteIcon}>
+                  <Ionicons name={index === 0 ? 'location' : 'location-outline'} size={15} color={ORANGE} />
+                </View>
+                <View style={s.driverHomeAutocompleteCopy}>
+                  <Text style={s.driverHomeAutocompleteText} numberOfLines={1}>{item.displayText.split(',')[0]}</Text>
+                  <Text style={s.driverHomeAutocompleteSubText} numberOfLines={1}>{item.description}</Text>
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 function useDriverHomeTheme() {
   return {
@@ -139,6 +261,17 @@ function DriverUberStylePromotionCard({
 }
 
 function DriverHomePostRideCard() {
+  const [pickup, setPickup] = useState('');
+  const [dropoff, setDropoff] = useState('');
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('');
+  const [dateModalOpen, setDateModalOpen] = useState(false);
+  const [timeModalOpen, setTimeModalOpen] = useState(false);
+  const openPostRide = () => router.push({
+    pathname: '/(driver)/book',
+    params: { pickup, dropoff, ...(date.trim() ? { date } : {}), ...(time.trim() ? { time } : {}) },
+  } as any);
+
   return (
     <View style={s.driverHomeSearchCard}>
       <View style={s.driverHomeRouteRow}>
@@ -148,25 +281,43 @@ function DriverHomePostRideCard() {
           <View style={s.driverHomeOrangeDot} />
         </View>
         <View style={s.driverHomeRouteInputs}>
-          <View style={s.driverHomeInputPill}>
-            <Text style={s.driverHomeInputText}>Austin, TX</Text>
-          </View>
-          <View style={s.driverHomeInputPill}>
-            <Text style={s.driverHomeInputText}>Houston, TX</Text>
-          </View>
+          <DriverHomeAutocomplete
+            value={pickup}
+            onChangeText={setPickup}
+            placeholder="Austin, TX"
+            zIndex={80}
+          />
+          <DriverHomeAutocomplete
+            value={dropoff}
+            onChangeText={setDropoff}
+            placeholder="Houston, TX"
+            zIndex={70}
+          />
         </View>
       </View>
       <View style={s.driverHomeMetaRow}>
-        <View style={s.driverHomeMetaPill}>
-          <Text style={s.driverHomeMetaText}>Fri, Nov 20</Text>
-        </View>
-        <View style={s.driverHomeMetaPill}>
-          <Text style={s.driverHomeMetaText}>Anytime</Text>
-        </View>
+        <TouchableOpacity style={s.driverHomeMetaPill} onPress={() => setDateModalOpen(true)} activeOpacity={0.78} accessibilityRole="button">
+          <Text style={[s.driverHomeMetaText, !date && s.driverHomePlaceholderText]}>{date ? formatDateLabel(date) : 'Fri, Nov 20'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={s.driverHomeMetaPill} onPress={() => setTimeModalOpen(true)} activeOpacity={0.78} accessibilityRole="button">
+          <Text style={[s.driverHomeMetaText, !time && s.driverHomePlaceholderText]}>{time || 'Anytime'}</Text>
+        </TouchableOpacity>
       </View>
+      <DatePickerModal
+        visible={dateModalOpen}
+        selectedDate={date}
+        onClose={() => setDateModalOpen(false)}
+        onSelect={setDate}
+      />
+      <TimePickerModal
+        visible={timeModalOpen}
+        selectedTime={time}
+        onClose={() => setTimeModalOpen(false)}
+        onSelect={setTime}
+      />
       <TouchableOpacity
         style={s.driverHomePrimaryBtn}
-        onPress={() => router.push('/(driver)/book' as any)}
+        onPress={openPostRide}
         activeOpacity={0.88}
         accessibilityRole="button"
         accessibilityLabel="Post a ride"
@@ -535,6 +686,7 @@ export default function HomeScreen() {
   const [driverAvatarUrl, setDriverAvatarUrl] = useState<string | null>(null);
   const [driverUniversity, setDriverUniversity] = useState<string | undefined>(undefined);
   const [stats, setStats] = useState({ totalRides: 0, totalEarnings: 0, avgRating: null as number | null, ratingCount: null as number | null });
+  const [monthlyStats, setMonthlyStats] = useState<{ rides: number; earnings: number; rating: number | null; loaded: boolean }>({ rides: 0, earnings: 0, rating: null, loaded: false });
   const [offersByRideId, setOffersByRideId] = useState<Record<string, OfferInfo>>({});
   // Map postingId -> pending request info (to flip posting card to Offer Received)
   const [postingReqByPostingId, setPostingReqByPostingId] = useState<Record<string, { id: string; status: string }>>({});
@@ -542,6 +694,7 @@ export default function HomeScreen() {
   const notifReadMapRef = useRef<Record<string, boolean>>({});
   const [confirmedByReqId, setConfirmedByReqId] = useState<Record<string, boolean>>({});
   const [confirmedByPostingId, setConfirmedByPostingId] = useState<Record<string, boolean>>({});
+  const [historyOnlySourceKeys, setHistoryOnlySourceKeys] = useState<Set<string>>(new Set());
 
   const [currentPromotionIndex, setCurrentPromotionIndex] = useState(0);
   const promotionScrollRef = useRef<ScrollView | null>(null);
@@ -1470,28 +1623,44 @@ export default function HomeScreen() {
         const reqMap: Record<string, boolean> = {};
         const postMap: Record<string, boolean> = {};
         const cards: Record<string, UpcomingRideCard> = {};
+        const historyOnlyKeys = new Set<string>();
         const groupBuckets: Record<string, Array<{ id: string; data: any }>> = {};
           snap.forEach((d) => {
           const r = d.data() || {};
           const statusRaw = String(r?.status || '').toUpperCase();
+          const statusAtFlagRaw = String(r?.statusAtFlag || r?.statusBeforeFlag || r?.flaggedFromStatus || r?.previousStatus || '').replace(/[-\s]/g, '_').toUpperCase();
+          const isHistoryOnly = statusRaw === 'COMPLETED' || (statusRaw === 'FLAGGED' && statusAtFlagRaw === 'COMPLETED');
           console.log(`[confirmedRides listener] Doc ${d.id}: status="${r?.status}", statusRaw="${statusRaw}"`);
           // Always flag maps so we can hide posting/request cards even when completed
           if (r.rideRequestId) reqMap[String(r.rideRequestId)] = true;
           if (r.ridePostingId) postMap[String(r.ridePostingId)] = true;
+          if (isHistoryOnly) {
+            if (r.rideRequestId) historyOnlyKeys.add(`rideRequest:${String(r.rideRequestId)}`);
+            if (r.ridePostingId) historyOnlyKeys.add(`ridePosting:${String(r.ridePostingId)}`);
+            if (r.ridePostingRequestId) historyOnlyKeys.add(`ridePostingRequest:${String(r.ridePostingRequestId)}`);
+          }
           // Accumulate by posting for potential group ride aggregation
           if (r.ridePostingId) {
             const pid = String(r.ridePostingId);
             if (!groupBuckets[pid]) groupBuckets[pid] = [];
             groupBuckets[pid].push({ id: d.id, data: r });
           }
-          if (statusRaw === 'COMPLETED') {
-            // Do not render an individual confirmed card for completed; Recent/History handles it,
-            // but keep it in groupBuckets so group ride remains visible until all complete.
-            return;
-          }
-          // Hide flagged rides from upcoming section if they were COMPLETED when flagged
-          if (statusRaw === 'FLAGGED' && String(r?.statusAtFlag || '').toUpperCase() === 'COMPLETED') {
-            console.log(`[confirmedRides] Hiding flagged ride ${d.id} from upcoming (was COMPLETED)`);
+          if (isHistoryOnly) {
+            // Add a stub card so it overrides any stale posting/request card in the dedup merge.
+            // displayUpcoming will filter it out (completed is in inactiveStatuses), so nothing renders.
+            if (r.ridePostingId) {
+              cards[`ridePosting-${String(r.ridePostingId)}`] = {
+                id: String(r.ridePostingId), type: 'ridePosting',
+                status: 'completed', confirmedStatus: 'COMPLETED',
+                from: '', to: '', confirmedId: d.id,
+              } as any;
+            } else if (r.rideRequestId) {
+              cards[`rideRequest-${String(r.rideRequestId)}`] = {
+                id: String(r.rideRequestId), type: 'rideRequest',
+                status: 'completed', confirmedStatus: 'COMPLETED',
+                from: '', to: '', confirmedId: d.id,
+              } as any;
+            }
             return;
           }
             // Build an UpcomingRideCard directly from confirmed ride
@@ -1618,7 +1787,7 @@ export default function HomeScreen() {
             // Check if any flagged ride was COMPLETED when flagged
             const anyFlaggedWasCompleted = items.some((it) => 
               String(it.data?.status || '').toUpperCase() === 'FLAGGED' && 
-              String(it.data?.statusAtFlag || '').toUpperCase() === 'COMPLETED'
+              String(it.data?.statusAtFlag || it.data?.statusBeforeFlag || it.data?.flaggedFromStatus || it.data?.previousStatus || '').replace(/[-\s]/g, '_').toUpperCase() === 'COMPLETED'
             );
             // Skip group ride if any child was flagged after COMPLETED (hide from upcoming)
             if (anyFlaggedWasCompleted) {
@@ -1692,6 +1861,7 @@ export default function HomeScreen() {
         setConfirmedCountByPostingId((prev) => ({ ...prev, ...counts }));
         setConfirmedByReqId((prev) => ({ ...prev, ...reqMap }));
         setConfirmedByPostingId((prev) => ({ ...prev, ...postMap }));
+        setHistoryOnlySourceKeys(historyOnlyKeys);
         // Set confirmed cards - useEffect will merge with other sources
         const simple: Record<string, UpcomingRideCard> = {};
         Object.values(cards).forEach((c) => { simple[`${c.type}-${c.id}`] = c; });
@@ -2059,6 +2229,80 @@ export default function HomeScreen() {
     return () => { mounted = false; };
   }, [uid]);
 
+  useEffect(() => {
+    if (!uid) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        const toTs = (v: any): Date | null => {
+          if (!v) return null;
+          if (v instanceof Timestamp) return v.toDate();
+          if (v instanceof Date) return v;
+          if (typeof v === 'number') return new Date(v);
+          if (typeof v === 'string') { const d = new Date(v); return isNaN(d.getTime()) ? null : d; }
+          return null;
+        };
+        const toNum = (v: any): number => {
+          if (typeof v === 'number') return v;
+          if (typeof v === 'string') { const n = Number(v.replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; }
+          return 0;
+        };
+
+        const snap = await getDocs(query(
+          collection(firestore, 'confirmedRides'),
+          where('driverId', '==', uid),
+          where('status', '==', 'COMPLETED'),
+        ));
+
+        let rides = 0;
+        let earnings = 0;
+        const monthlyRideIds: string[] = [];
+
+        snap.forEach((d) => {
+          const r = d.data() as any;
+          const rideDate = toTs(r.completedAt ?? r.confirmedAt ?? r.updatedAt ?? r.createdAt);
+          if (!rideDate || rideDate < startOfMonth) return;
+          rides++;
+          monthlyRideIds.push(d.id);
+          const raw = r.paymentAmount ?? r.contributionAmount ?? r.price ?? r.fare
+            ?? r.originalRidePosting?.pricePerSeat ?? r.originalRideRequest?.maxPrice ?? 0;
+          earnings += toNum(raw);
+        });
+
+        // Fetch ratings for this month's rides
+        let monthlyRating: number | null = null;
+        if (monthlyRideIds.length > 0) {
+          const stars: number[] = [];
+          for (let i = 0; i < monthlyRideIds.length; i += 10) {
+            const chunk = monthlyRideIds.slice(i, i + 10);
+            try {
+              const ratingSnap = await getDocs(query(
+                collection(firestore, 'rideRatings'),
+                where('rateeId', '==', uid),
+                where('rideId', 'in', chunk),
+              ));
+              ratingSnap.forEach((rd) => {
+                const s = (rd.data() as any).stars;
+                if (typeof s === 'number' && isFinite(s)) stars.push(s);
+              });
+            } catch { /* ignore chunk errors */ }
+          }
+          if (stars.length > 0) {
+            monthlyRating = stars.reduce((a, b) => a + b, 0) / stars.length;
+          }
+        }
+
+        if (mounted) setMonthlyStats({ rides, earnings, rating: monthlyRating, loaded: true });
+      } catch {
+        if (mounted) setMonthlyStats((s) => ({ ...s, loaded: true }));
+      }
+    })();
+    return () => { mounted = false; };
+  }, [uid]);
+
   const sortedUpcoming = useMemo(() => sortByDate(upcoming), [upcoming]);
   // Dedupe across sources (rideRequest vs ridePosting) by route + time bucket, preferring rideRequest
   // Filter out any items that are cancelled so we do not render cancelled cards in Upcoming
@@ -2067,7 +2311,8 @@ export default function HomeScreen() {
     return (sortedUpcoming || []).filter((r) => {
       const s = String((r as any)?.status || '').replace(/[-\s]/g, '_').toLowerCase();
       const cs = String((r as any)?.confirmedStatus || '').replace(/[-\s]/g, '_').toLowerCase();
-      const statusAtFlag = String((r as any)?.statusAtFlag || '').replace(/[-\s]/g, '_').toLowerCase();
+      const raw = (r as any)?.raw || {};
+      const statusAtFlag = String((r as any)?.statusAtFlag || (r as any)?.statusBeforeFlag || (r as any)?.flaggedFromStatus || (r as any)?.previousStatus || raw.statusAtFlag || raw.statusBeforeFlag || raw.flaggedFromStatus || raw.previousStatus || '').replace(/[-\s]/g, '_').toLowerCase();
       return !inactiveStatuses.has(s) && !inactiveStatuses.has(cs) && statusAtFlag !== 'completed';
     });
   }, [sortedUpcoming]);
@@ -2098,6 +2343,17 @@ export default function HomeScreen() {
   // This prevents stale-closure issues from individual listeners calling setCombinedUpcoming
   // with out-of-date views of other maps (e.g., after posting a ride, confirmed could be dropped).
   useEffect(() => {
+    const isHistoryOnlyCard = (card: UpcomingRideCard) => {
+      if (card.type === 'rideRequest') return historyOnlySourceKeys.has(`rideRequest:${card.id}`);
+      if (card.type === 'ridePosting') return historyOnlySourceKeys.has(`ridePosting:${card.id}`);
+      if (card.type === 'ridePostingRequest') {
+        return historyOnlySourceKeys.has(`ridePostingRequest:${card.id}`)
+          || (!!card.ridePostingId && historyOnlySourceKeys.has(`ridePosting:${card.ridePostingId}`));
+      }
+      if (card.type === 'groupRide') return historyOnlySourceKeys.has(`ridePosting:${card.id}`);
+      return false;
+    };
+
     const acceptedPostingRequests = [
       ...Object.values(upcPostingReqDriver || {}),
       ...Object.values(upcPostingReqEmail || {}),
@@ -2108,17 +2364,18 @@ export default function HomeScreen() {
       const postingId = card.ridePostingId;
       return ['accepted', 'confirmed'].includes(status)
         && (!postingId || (confirmedCountByPostingId[postingId] || 0) === 0);
-    }).map((card) => ({ ...card, status: 'CONFIRMED', confirmedStatus: 'CONFIRMED' }));
+    }).filter((card) => !isHistoryOnlyCard(card) && (!card.ridePostingId || !historyOnlySourceKeys.has(`ridePosting:${card.ridePostingId}`)))
+      .map((card) => ({ ...card, status: 'CONFIRMED', confirmedStatus: 'CONFIRMED' }));
     const acceptedPostingIds = new Set(
       acceptedPostingRequests.map((card) => card.ridePostingId).filter((id): id is string => Boolean(id)),
     );
 
     const arr: UpcomingRideCard[] = [
-      ...Object.values(upcOffersSent || {}),
-      ...Object.values(upcReqDriver || {}),
-      ...Object.values(upcReqUserId || {}),
-      ...Object.values(upcReqEmail || {}),
-      ...Object.values(upcReqEmailAlt || {}),
+      ...Object.values(upcOffersSent || {}).filter((c) => !isHistoryOnlyCard(c)),
+      ...Object.values(upcReqDriver || {}).filter((c) => !isHistoryOnlyCard(c)),
+      ...Object.values(upcReqUserId || {}).filter((c) => !isHistoryOnlyCard(c)),
+      ...Object.values(upcReqEmail || {}).filter((c) => !isHistoryOnlyCard(c)),
+      ...Object.values(upcReqEmailAlt || {}).filter((c) => !isHistoryOnlyCard(c)),
       // We do not render posting request cards directly; they only flip posting cards
       // ...Object.values(upcPostingReqDriver || {}),
       // ...Object.values(upcPostingReqEmail || {}),
@@ -2127,11 +2384,13 @@ export default function HomeScreen() {
       // Keep posting cards visible until ALL seats are filled (not just ANY)
       // This allows showing "Posted 1/2" or "Offer received" badges for partial fills
   ...Object.values(upcPostingsDriver || {}).filter((c) => {
+        if (isHistoryOnlyCard(c)) return false;
         if (c.type !== 'ridePosting') return true;
         const seatsFilled = confirmedCountByPostingId[c.id] || 0;
         return seatsFilled === 0 && !acceptedPostingIds.has(c.id);
       }),
   ...Object.values(upcPostingsEmail || {}).filter((c) => {
+        if (isHistoryOnlyCard(c)) return false;
         if (c.type !== 'ridePosting') return true;
         const seatsFilled = confirmedCountByPostingId[c.id] || 0;
         return seatsFilled === 0 && !acceptedPostingIds.has(c.id);
@@ -2141,10 +2400,12 @@ export default function HomeScreen() {
       // Confirmed at the end so it overrides placeholders with the same (type-id)
   // Include only active confirmed rides in Upcoming.
   ...Object.values(upcConfirmed || {}).filter((c) => {
+    if (isHistoryOnlyCard(c)) return false;
     const inactiveStatuses = new Set(['completed', 'complete', 'finished', 'cancelled', 'canceled', 'expired', 'rejected', 'declined']);
     const s = String(c.status || '').replace(/[-\s]/g, '_').toLowerCase();
     const cs = String(c.confirmedStatus || '').replace(/[-\s]/g, '_').toLowerCase();
-    const statusAtFlag = String((c as any).statusAtFlag || '').replace(/[-\s]/g, '_').toLowerCase();
+    const raw = (c as any).raw || {};
+    const statusAtFlag = String((c as any).statusAtFlag || (c as any).statusBeforeFlag || (c as any).flaggedFromStatus || (c as any).previousStatus || raw.statusAtFlag || raw.statusBeforeFlag || raw.flaggedFromStatus || raw.previousStatus || '').replace(/[-\s]/g, '_').toLowerCase();
     return !inactiveStatuses.has(s) && !inactiveStatuses.has(cs) && statusAtFlag !== 'completed';
   }),
     ];
@@ -2165,6 +2426,7 @@ export default function HomeScreen() {
     upcPostingsDriver,
     upcPostingsEmail,
     confirmedCountByPostingId,
+    historyOnlySourceKeys,
   ]);
 
   function sortByDate(arr: UpcomingRideCard[]) {
@@ -2954,7 +3216,7 @@ export default function HomeScreen() {
   const firstName = userName ? capitalize(userName) : 'Driver';
   const driverHeroPrompt = useMemo(() => {
     const next = displayUpcoming[0];
-    if (!next) return 'ready to drive?';
+    if (!next) return 'where to?';
 
     const status = String(next.confirmedStatus || next.status || '').toLowerCase();
     if (status.includes('progress') || status.includes('driver_completed') || status.includes('rider_completed')) return 'your ride is in progress.';
@@ -2967,6 +3229,14 @@ export default function HomeScreen() {
 
     return 'your next ride is coming up.';
   }, [displayUpcoming, postingReqByPostingId]);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: BG, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color={COLORS.orange} />
+      </View>
+    );
+  }
 
   return (
     <View style={[s.root, { backgroundColor: BG }]}>
@@ -3232,9 +3502,7 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
-            {loading && <ActivityIndicator color={COLORS.orange} style={{ marginTop: 16 }} />}
-
-            {!loading && displayUpcoming.length === 0 && (
+            {displayUpcoming.length === 0 && (
               <View style={s.emptyBox}>
                 <View style={s.emptyIconWrap}>
                   <Ionicons name="car-outline" size={28} color={COLORS.orange} />
@@ -3494,57 +3762,52 @@ export default function HomeScreen() {
           </View>}
 
           {/* ══════════════════════════════════════════════════════════
-              CAMPUS LIVE FEED
-          ══════════════════════════════════════════════════════════ */}
-          <View style={s.section}>
-            <View style={s.sectionHdrRow}>
-              <Text style={s.sectionTitle}>Campus Insights</Text>
-            </View>
-            <View style={s.activityCard}>
-              {[
-                { icon: 'time-outline' as const, text: 'Evening windows usually convert faster near housing and dining.', time: 'Pattern' },
-                { icon: 'wallet-outline' as const, text: 'Short routes with clear pickup notes tend to get accepted sooner.', time: 'Tip' },
-                { icon: 'school-outline' as const, text: 'Verified student rides help keep the marketplace trusted.', time: 'Trust' },
-              ].map((item, i, arr) => (
-                <View key={i} style={[
-                  s.activityRow,
-                  i < arr.length - 1 && { borderBottomWidth: 1, borderBottomColor: BORDER },
-                ]}>
-                  <View style={s.activityIconWrap}>
-                    <Ionicons name={item.icon} size={16} color={ORANGE} />
-                  </View>
-                  <Text style={s.activityText} numberOfLines={2}>{item.text}</Text>
-                  <Text style={s.activityTime}>{item.time}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-
-          {/* ══════════════════════════════════════════════════════════
-              DRIVER CHALLENGE
+              THIS MONTH SUMMARY
           ══════════════════════════════════════════════════════════ */}
           <View style={[s.section, { marginBottom: 8 }]}>
-            <View style={s.challengeCard}>
-              <View style={s.challengeHeaderRow}>
-                <View style={s.challengeIconWrap}>
-                  <Ionicons name="checkmark-circle-outline" size={22} color={ORANGE} />
+            <View style={s.sectionHdrRow}>
+              <Text style={s.sectionTitle}>This month</Text>
+              <TouchableOpacity onPress={() => router.push('/(driver)/earnings' as any)}>
+                <Text style={s.viewAll}>View earnings</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={s.monthCard}>
+              <View style={s.monthStatRow}>
+                <View style={s.monthStat}>
+                  <View style={s.monthStatIconWrap}>
+                    <Ionicons name="car-outline" size={18} color={ORANGE} />
+                  </View>
+                  <Text style={s.monthStatValue}>
+                    {monthlyStats.loaded ? String(monthlyStats.rides) : '—'}
+                  </Text>
+                  <Text style={s.monthStatLabel}>Rides</Text>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.challengeLabel}>{"Today's goal"}</Text>
-                  <Text style={s.challengeTitle}>Complete 2 rides today</Text>
-                  <Text style={s.challengeSub}>Build trust, earnings, and campus momentum.</Text>
+                <View style={s.monthDivider} />
+                <View style={s.monthStat}>
+                  <View style={s.monthStatIconWrap}>
+                    <Ionicons name="cash-outline" size={18} color={ORANGE} />
+                  </View>
+                  <Text style={s.monthStatValue}>
+                    {monthlyStats.loaded ? `$${Math.round(monthlyStats.earnings)}` : '—'}
+                  </Text>
+                  <Text style={s.monthStatLabel}>Earned</Text>
+                </View>
+                <View style={s.monthDivider} />
+                <View style={s.monthStat}>
+                  <View style={s.monthStatIconWrap}>
+                    <Ionicons name="star-outline" size={18} color={ORANGE} />
+                  </View>
+                  <Text style={s.monthStatValue}>
+                    {monthlyStats.loaded ? (monthlyStats.rating != null ? monthlyStats.rating.toFixed(1) : '—') : '—'}
+                  </Text>
+                  <Text style={s.monthStatLabel}>Rating</Text>
                 </View>
               </View>
-              <View style={s.challengeProgressBg}>
-                <View
-                  style={[s.challengeProgressFill, { width: `${Math.min(Math.round((stats.totalRides / 2) * 100), 100)}%` as any, backgroundColor: COLORS.orange }]}
-                />
-              </View>
-              <Text style={s.challengeStatus}>
-                {stats.totalRides >= 2
-                  ? 'Challenge complete. Great work.'
-                  : `${Math.max(2 - stats.totalRides, 0)} ride${Math.max(2 - stats.totalRides, 0) !== 1 ? 's' : ''} to go. Keep momentum.`}
-              </Text>
+              {monthlyStats.loaded && monthlyStats.rides === 0 && (
+                <View style={s.monthEmptyRow}>
+                  <Text style={s.monthEmptyText}>No completed rides yet this month — get out there.</Text>
+                </View>
+              )}
             </View>
           </View>
 
@@ -4381,7 +4644,7 @@ const s = StyleSheet.create({
 
   // ── Sections ──────────────────────────────────────────────────────────────
   section:          { paddingHorizontal:16, marginBottom:24 },
-  homePrimaryBlock: { marginBottom: 34 },
+  homePrimaryBlock: { marginBottom: 34, zIndex: 20, elevation: 20 },
   sectionHdrRow:    { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:14 },
   sectionTitle:     { fontSize:18, fontWeight:'800', color:NAVY, letterSpacing:-0.3 },
   sectionSub:       { fontSize:12, color:MUTED, fontWeight:'500' },
@@ -4389,18 +4652,42 @@ const s = StyleSheet.create({
   livePillSmall:    { flexDirection:'row', alignItems:'center', gap:5, backgroundColor:'#F9E8DB', paddingHorizontal:9, paddingVertical:4, borderRadius:12 },
   livePillText:     { color:ORANGE, fontSize:11, fontWeight:'700' },
 
-  driverHomeSearchCard: { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1, borderColor: BORDER, padding: 14, shadowColor: NAVY, shadowOpacity: 0.06, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 2 },
+  driverHomeSearchCard: { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1, borderColor: BORDER, padding: 14, shadowColor: NAVY, shadowOpacity: 0.06, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 20, zIndex: 20 },
   driverHomeRouteRow: { flexDirection: 'row' },
   driverHomeRouteRail: { width: 28, alignItems: 'center', paddingTop: 16, paddingBottom: 16 },
   driverHomeNavyDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: NAVY },
   driverHomeOrangeDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: ORANGE },
   driverHomeDashedLine: { flex: 1, width: 1, borderLeftWidth: 1, borderStyle: 'dashed', borderColor: '#CBD5E1', marginVertical: 7 },
   driverHomeRouteInputs: { flex: 1, gap: 9 },
+  driverHomeAutocompleteWrap: { position: 'relative' },
   driverHomeInputPill: { height: 48, borderRadius: 13, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', paddingHorizontal: 14, justifyContent: 'center' },
   driverHomeInputText: { color: NAVY, fontSize: 15, fontWeight: '500' },
+  driverHomeAutocompletePanel: {
+    position: 'absolute',
+    top: 52,
+    left: 0,
+    right: 0,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E5E0D8',
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+    shadowColor: NAVY,
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
+  },
+  driverHomeAutocompleteItem: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F1EEE8' },
+  driverHomeAutocompleteState: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 12 },
+  driverHomeAutocompleteIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#FEF0E8', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  driverHomeAutocompleteCopy: { flex: 1, minWidth: 0 },
+  driverHomeAutocompleteText: { color: NAVY, fontSize: 14, lineHeight: 18, fontWeight: '700' },
+  driverHomeAutocompleteSubText: { flex: 1, color: MUTED, fontSize: 12, lineHeight: 16, fontWeight: '500' },
   driverHomeMetaRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
   driverHomeMetaPill: { flex: 1, height: 44, borderRadius: 13, borderWidth: 1, borderColor: '#D7DCE3', justifyContent: 'center', paddingHorizontal: 13 },
   driverHomeMetaText: { color: NAVY, fontSize: 13, fontWeight: '500' },
+  driverHomePlaceholderText: { color: MUTED },
   driverHomePrimaryBtn: { height: 48, borderRadius: 24, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
   driverHomePrimaryText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
   driverActivityCard: { borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 18, minHeight: 150, shadowColor: NAVY, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 14, elevation: 2 },
@@ -4498,17 +4785,17 @@ const s = StyleSheet.create({
   activityIconWrap: { width:34, height:34, borderRadius:17, backgroundColor:'#F9E8DB', alignItems:'center', justifyContent:'center', flexShrink:0 },
   activityText:     { flex:1, fontSize:13, color:NAVY, lineHeight:18, fontWeight:'500' },
   activityTime:     { fontSize:11, color:MUTED, fontWeight:'700', minWidth:42, textAlign:'right' },
+  monthCard:        { borderRadius:18, borderWidth:1, borderColor:BORDER, backgroundColor:'#FFFFFF', overflow:'hidden', marginTop:2 },
+  monthStatRow:     { flexDirection:'row', alignItems:'stretch', paddingVertical:4 },
+  monthStat:        { flex:1, alignItems:'center', justifyContent:'center', paddingVertical:18, paddingHorizontal:8, gap:6 },
+  monthStatIconWrap:{ width:38, height:38, borderRadius:19, backgroundColor:'#FFF2E9', alignItems:'center', justifyContent:'center' },
+  monthStatValue:   { fontSize:22, fontWeight:'800', color:NAVY, letterSpacing:-0.5 },
+  monthStatLabel:   { fontSize:11, color:MUTED, fontWeight:'600', textTransform:'uppercase', letterSpacing:0.5 },
+  monthDivider:     { width:1, backgroundColor:BORDER, marginVertical:16 },
+  monthEmptyRow:    { borderTopWidth:1, borderTopColor:BORDER, paddingHorizontal:16, paddingVertical:14 },
+  monthEmptyText:   { fontSize:13, color:MUTED, lineHeight:18, textAlign:'center' },
 
   // ── Challenge ─────────────────────────────────────────────────────────────
-  challengeCard:        { borderRadius:18, padding:16, overflow:'hidden', borderWidth:1, borderColor:BORDER, backgroundColor:'#FFFFFF' },
-  challengeHeaderRow:   { flexDirection:'row', alignItems:'center', gap:12, marginBottom:14 },
-  challengeIconWrap:    { width:42, height:42, borderRadius:21, backgroundColor:'#F9E8DB', alignItems:'center', justifyContent:'center' },
-  challengeLabel:       { color:ORANGE, fontSize:12, fontWeight:'700', marginBottom:3 },
-  challengeTitle:       { color:NAVY, fontSize:17, fontWeight:'800' },
-  challengeSub:         { color:MUTED, fontSize:12, lineHeight:17, marginTop:2 },
-  challengeProgressBg:  { height:6, backgroundColor:'#EFE9E1', borderRadius:3, marginBottom:10, overflow:'hidden' },
-  challengeProgressFill:{ height:'100%' as any, borderRadius:3 },
-  challengeStatus:      { color:NAVY, fontSize:12, lineHeight:17, fontWeight:'600' },
 
   // ── Empty State ───────────────────────────────────────────────────────────
   emptyBox:         { alignItems:'center', paddingVertical:32, gap:8 },

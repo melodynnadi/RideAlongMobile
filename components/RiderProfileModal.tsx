@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, Image, Modal, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { X, Star, User, Phone, Music, Thermometer, MessageCircle, Cigarette, Heart } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { RidePreferences } from '@/types';
 
@@ -99,13 +100,19 @@ export default function RiderProfileModal({ visible, onClose, rider }: RiderProf
     },
     header: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
       alignItems: 'center',
+      gap: 10,
       padding: theme.spacing.lg,
       borderBottomWidth: 1,
       borderBottomColor: theme.colors.muted + '20',
     },
+    headerIcon: {
+      width: 34, height: 34, borderRadius: 10,
+      backgroundColor: '#FFF2E9',
+      alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+    },
     title: {
+      flex: 1,
       fontSize: 20,
       fontWeight: '600',
       color: theme.colors.text,
@@ -215,7 +222,10 @@ export default function RiderProfileModal({ visible, onClose, rider }: RiderProf
       <View style={styles.overlay}>
         <View style={styles.modal}>
           <View style={styles.header}>
-            <Text style={styles.title}>Rider Profile</Text>
+            <View style={styles.headerIcon}>
+              <Ionicons name="person-outline" size={17} color="#DE5D20" />
+            </View>
+            <Text style={[styles.title, { flex: 1 }]}>Rider Profile</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
               <X size={24} color={theme.colors.muted} />
             </TouchableOpacity>

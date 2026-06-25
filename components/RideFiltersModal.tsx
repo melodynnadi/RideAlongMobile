@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { View, Text, Modal, TouchableOpacity, TextInput, StyleSheet, ScrollView, Platform, Keyboard } from 'react-native';
 import { X, Calendar, MapPin } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { TimeBucket, type RideFilterOptions, getDefaultFilters } from '@/utils/rideFilters';
 import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
@@ -104,6 +105,9 @@ export function RideFiltersModal({
           <View style={styles.dragHandle} />
           {/* Header */}
           <View style={styles.header}>
+            <View style={styles.headerIcon}>
+              <Ionicons name="funnel-outline" size={16} color="#DE5D20" />
+            </View>
             <View style={styles.headerCopy}>
               <Text style={styles.headerTitle}>Filter rides</Text>
               <Text style={styles.headerSubtitle}>Narrow results by trip details</Text>
@@ -135,100 +139,32 @@ export function RideFiltersModal({
             <View style={styles.filterGroup}>
               <Text style={styles.filterLabel}>Time of day</Text>
               <View style={styles.timeBucketContainer}>
-                <TouchableOpacity
-                  style={[
-                    styles.timeBucketButton,
-                    filters.timeBucket === TimeBucket.MORNING && styles.timeBucketButtonActive
-                  ]}
-                  onPress={() =>
-                    updateFilter(
-                      'timeBucket',
-                      filters.timeBucket === TimeBucket.MORNING ? null : TimeBucket.MORNING
-                    )
-                  }
-                >
-                  <Text
-                    style={[
-                      styles.timeBucketText,
-                      filters.timeBucket === TimeBucket.MORNING && styles.timeBucketTextActive
-                    ]}
-                  >
-                    Morning
-                  </Text>
-                  <Text
-                    style={[
-                      styles.timeBucketSubtext,
-                      filters.timeBucket === TimeBucket.MORNING && styles.timeBucketSubtextActive
-                    ]}
-                  >
-                    5 AM - 12 PM
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.timeBucketButton,
-                    filters.timeBucket === TimeBucket.AFTERNOON && styles.timeBucketButtonActive
-                  ]}
-                  onPress={() =>
-                    updateFilter(
-                      'timeBucket',
-                      filters.timeBucket === TimeBucket.AFTERNOON ? null : TimeBucket.AFTERNOON
-                    )
-                  }
-                >
-                  <Text
-                    style={[
-                      styles.timeBucketText,
-                      filters.timeBucket === TimeBucket.AFTERNOON && styles.timeBucketTextActive
-                    ]}
-                  >
-                    Afternoon
-                  </Text>
-                  <Text
-                    style={[
-                      styles.timeBucketSubtext,
-                      filters.timeBucket === TimeBucket.AFTERNOON && styles.timeBucketSubtextActive
-                    ]}
-                  >
-                    12 PM - 5 PM
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.timeBucketButton,
-                    filters.timeBucket === TimeBucket.EVENING && styles.timeBucketButtonActive
-                  ]}
-                  onPress={() =>
-                    updateFilter(
-                      'timeBucket',
-                      filters.timeBucket === TimeBucket.EVENING ? null : TimeBucket.EVENING
-                    )
-                  }
-                >
-                  <Text
-                    style={[
-                      styles.timeBucketText,
-                      filters.timeBucket === TimeBucket.EVENING && styles.timeBucketTextActive
-                    ]}
-                  >
-                    Evening
-                  </Text>
-                  <Text
-                    style={[
-                      styles.timeBucketSubtext,
-                      filters.timeBucket === TimeBucket.EVENING && styles.timeBucketSubtextActive
-                    ]}
-                  >
-                    5 PM - 12 AM
-                  </Text>
-                </TouchableOpacity>
+                {([
+                  { key: TimeBucket.MORNING, icon: 'sunny-outline', label: 'Morning', sub: '5 AM–12 PM' },
+                  { key: TimeBucket.AFTERNOON, icon: 'partly-sunny-outline', label: 'Afternoon', sub: '12–5 PM' },
+                  { key: TimeBucket.EVENING, icon: 'moon-outline', label: 'Evening', sub: '5 PM–12 AM' },
+                ] as const).map(({ key, icon, label, sub }) => {
+                  const active = filters.timeBucket === key;
+                  return (
+                    <TouchableOpacity
+                      key={key}
+                      style={[styles.timePill, active && styles.timePillActive]}
+                      onPress={() => updateFilter('timeBucket', active ? null : key)}
+                      activeOpacity={0.75}
+                    >
+                      <Ionicons name={icon} size={15} color={active ? '#DE5D20' : '#8B94A6'} />
+                      <View style={{ marginLeft: 6 }}>
+                        <Text style={[styles.timePillLabel, active && styles.timePillLabelActive]}>{label}</Text>
+                        <Text style={[styles.timePillSub, active && styles.timePillSubActive]}>{sub}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             </View>
 
             {/* Pickup Location */}
-            <View style={[styles.filterGroup, { zIndex: 12 }]}>
+            <View style={styles.filterGroup}>
               <Text style={styles.filterLabel}>Pickup location</Text>
               <View style={styles.inputContainer}>
                 <MapPin size={19} color="#8B94A6" style={styles.inputIcon} />
@@ -242,15 +178,21 @@ export function RideFiltersModal({
                     if (pickupTimer.current) clearTimeout(pickupTimer.current);
                     pickupTimer.current = setTimeout(() => fetchSuggestions(text, setPickupSuggestions, setShowPickupSuggestions), 250);
                   }}
+                  onBlur={() => setTimeout(() => setShowPickupSuggestions(false), 150)}
                   placeholderTextColor="#A0AEC0"
                 />
+                {filters.pickupLocation ? (
+                  <TouchableOpacity onPress={() => { updateFilter('pickupLocation', null); setPickupSuggestions([]); }} style={{ paddingRight: 12 }}>
+                    <Ionicons name="close-circle" size={17} color="#8B94A6" />
+                  </TouchableOpacity>
+                ) : null}
               </View>
               {showPickupSuggestions && pickupSuggestions.length > 0 && (
                 <View style={styles.suggestionsPanel}>
                   {pickupSuggestions.slice(0, 5).map((s, idx) => (
                     <TouchableOpacity
                       key={`${s.place_id}-${idx}`}
-                      style={styles.suggestionItem}
+                      style={[styles.suggestionItem, idx === pickupSuggestions.slice(0, 5).length - 1 && { borderBottomWidth: 0 }]}
                       onPress={() => {
                         const displayText = s.secondaryText ? `${s.mainText}, ${s.secondaryText}` : s.mainText;
                         updateFilter('pickupLocation', displayText);
@@ -259,8 +201,13 @@ export function RideFiltersModal({
                         Keyboard.dismiss();
                       }}
                     >
-                      <Text style={styles.suggestionMainText} numberOfLines={1}>{s.mainText}</Text>
-                      {s.secondaryText ? <Text style={styles.suggestionSecondaryText} numberOfLines={1}>{s.secondaryText}</Text> : null}
+                      <View style={styles.suggestionIconWrap}>
+                        <Ionicons name={idx === 0 ? 'location' : 'location-outline'} size={14} color="#DE5D20" />
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.suggestionMainText} numberOfLines={1}>{s.mainText}</Text>
+                        {s.secondaryText ? <Text style={styles.suggestionSecondaryText} numberOfLines={1}>{s.secondaryText}</Text> : null}
+                      </View>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -268,7 +215,7 @@ export function RideFiltersModal({
             </View>
 
             {/* Dropoff Location */}
-            <View style={[styles.filterGroup, { zIndex: 11 }]}>
+            <View style={styles.filterGroup}>
               <Text style={styles.filterLabel}>Destination</Text>
               <View style={styles.inputContainer}>
                 <MapPin size={19} color="#8B94A6" style={styles.inputIcon} />
@@ -282,15 +229,21 @@ export function RideFiltersModal({
                     if (dropoffTimer.current) clearTimeout(dropoffTimer.current);
                     dropoffTimer.current = setTimeout(() => fetchSuggestions(text, setDropoffSuggestions, setShowDropoffSuggestions), 250);
                   }}
+                  onBlur={() => setTimeout(() => setShowDropoffSuggestions(false), 150)}
                   placeholderTextColor="#A0AEC0"
                 />
+                {filters.dropoffLocation ? (
+                  <TouchableOpacity onPress={() => { updateFilter('dropoffLocation', null); setDropoffSuggestions([]); }} style={{ paddingRight: 12 }}>
+                    <Ionicons name="close-circle" size={17} color="#8B94A6" />
+                  </TouchableOpacity>
+                ) : null}
               </View>
               {showDropoffSuggestions && dropoffSuggestions.length > 0 && (
                 <View style={styles.suggestionsPanel}>
                   {dropoffSuggestions.slice(0, 5).map((s, idx) => (
                     <TouchableOpacity
                       key={`${s.place_id}-${idx}`}
-                      style={styles.suggestionItem}
+                      style={[styles.suggestionItem, idx === dropoffSuggestions.slice(0, 5).length - 1 && { borderBottomWidth: 0 }]}
                       onPress={() => {
                         const displayText = s.secondaryText ? `${s.mainText}, ${s.secondaryText}` : s.mainText;
                         updateFilter('dropoffLocation', displayText);
@@ -299,8 +252,13 @@ export function RideFiltersModal({
                         Keyboard.dismiss();
                       }}
                     >
-                      <Text style={styles.suggestionMainText} numberOfLines={1}>{s.mainText}</Text>
-                      {s.secondaryText ? <Text style={styles.suggestionSecondaryText} numberOfLines={1}>{s.secondaryText}</Text> : null}
+                      <View style={styles.suggestionIconWrap}>
+                        <Ionicons name={idx === 0 ? 'location' : 'location-outline'} size={14} color="#DE5D20" />
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.suggestionMainText} numberOfLines={1}>{s.mainText}</Text>
+                        {s.secondaryText ? <Text style={styles.suggestionSecondaryText} numberOfLines={1}>{s.secondaryText}</Text> : null}
+                      </View>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -434,12 +392,13 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 12,
     paddingHorizontal: 20,
     paddingTop: 14,
     paddingBottom: 18,
   },
+  headerIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   headerCopy: {
     flex: 1,
   },
@@ -509,42 +468,40 @@ const styles = StyleSheet.create({
     color: '#15233A',
   },
   timeBucketContainer: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     gap: 8,
   },
-  timeBucketButton: {
-    flex: 1,
-    minHeight: 62,
-    paddingVertical: 10,
-    paddingHorizontal: 5,
-    borderWidth: 1,
-    borderColor: '#D7DCE3',
-    borderRadius: 14,
-    backgroundColor: '#FCFCFB',
+  timePill: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#D7DCE3',
+    backgroundColor: '#FCFCFB',
   },
-  timeBucketButtonActive: {
-    borderColor: '#15233A',
-    backgroundColor: '#15233A',
+  timePillActive: {
+    borderColor: '#DE5D20',
+    backgroundColor: '#FFF2E9',
   },
-  timeBucketText: {
+  timePillLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: '#15233A',
-    marginBottom: 2,
-    textAlign: 'center',
+    lineHeight: 18,
   },
-  timeBucketTextActive: {
-    color: '#FFFFFF',
+  timePillLabelActive: {
+    color: '#DE5D20',
   },
-  timeBucketSubtext: {
+  timePillSub: {
     fontSize: 11,
     color: '#8B94A6',
-    textAlign: 'center',
+    lineHeight: 15,
   },
-  timeBucketSubtextActive: {
-    color: 'rgba(255, 255, 255, 0.9)',
+  timePillSubActive: {
+    color: '#DE5D20',
+    opacity: 0.8,
   },
   priceRangeContainer: {
     flexDirection: 'row',
@@ -646,35 +603,41 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   suggestionsPanel: {
-    position: 'absolute',
-    top: '100%',
-    left: 0,
-    right: 0,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#D7DCE3',
+    marginTop: 8,
     borderRadius: 14,
-    marginTop: 6,
+    borderWidth: 1,
+    borderColor: '#E5E0D8',
+    backgroundColor: '#FFFFFF',
     overflow: 'hidden',
-    ...Platform.select({
-      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 6 },
-      android: { elevation: 6 },
-    }),
   },
   suggestionItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
     borderBottomWidth: 1,
-    borderBottomColor: '#EEEAE3',
+    borderBottomColor: '#F1EEE8',
+  },
+  suggestionIconWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#FEF0E8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   suggestionMainText: {
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
     color: '#15233A',
+    lineHeight: 18,
   },
   suggestionSecondaryText: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#8B94A6',
     marginTop: 1,
+    lineHeight: 16,
   },
 });

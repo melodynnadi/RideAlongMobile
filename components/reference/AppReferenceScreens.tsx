@@ -42,7 +42,6 @@ import { submitRating } from '@/src/services/functions';
 import { notificationService } from '@/src/services/notificationService';
 import { settingsService } from '@/src/services/settingsService';
 import { hasUserRatedRide } from '@/src/services/ratings';
-import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 import { FlagRideModal } from '@/components/FlagRideModal';
 
 const NAVY = '#15233A';
@@ -132,11 +131,10 @@ function Phone({
                 <TouchableOpacity
                   style={s.circle}
                   onPress={() => {
-                    if (onBack) onBack();
-                    else if (router.canGoBack()) router.back();
-                    else if (returnTo) router.replace(returnTo as any);
-                    else if (backTarget) router.replace(backTarget as any);
-                    else if (backHref) router.replace(backHref as any);
+                    if (onBack) { onBack(); return; }
+                    const dest = returnTo || backTarget || backHref;
+                    if (dest) { router.replace(dest as any); return; }
+                    if (router.canGoBack()) router.back();
                   }}
                   accessibilityRole="button"
                   accessibilityLabel="Go back"
@@ -479,23 +477,79 @@ function RiderRequestsReferencePlaceholder() {
 export function RiderRequestsReference() {
   const uid = firebaseAuth.currentUser?.uid;
   const [requests, setRequests] = useState<MobileRideRequest[]>([]);
+  const [postingRequests, setPostingRequests] = useState<MobileRideRequest[]>([]);
   const [filter, setFilter] = useState<'open' | 'matched' | 'past'>('open');
 
   useEffect(() => uid ? subscribeRiderRequests(uid, setRequests) : undefined, [uid]);
 
-  const filtered = requests.filter((request) => {
+  useEffect(() => {
+    if (!uid) return;
+    const q = query(collection(firestore, 'ridePostingRequests'), where('riderId', '==', uid));
+    return onSnapshot(q, (snap) => {
+      const items: MobileRideRequest[] = snap.docs.map((d) => {
+        const r = d.data() as any;
+        const rawDate = r.date || '';
+        let parsedDate: Date | null = null;
+        if (rawDate) {
+          const iso = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+          parsedDate = iso
+            ? new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]))
+            : (isNaN(new Date(rawDate).getTime()) ? null : new Date(rawDate));
+        }
+        return {
+          id: d.id,
+          from: r.pickup || r.from || 'Pickup pending',
+          to: r.dropoff || r.to || 'Destination pending',
+          date: parsedDate,
+          dateLabel: rawDate,
+          seats: Number(r.passengers || 1),
+          price: Number(r.contributionAmount ?? r.price ?? 0),
+          status: String(r.status || 'pending').toLowerCase(),
+          raw: r,
+        };
+      });
+      setPostingRequests(items);
+    });
+  }, [uid]);
+
+  const allRequests = [...requests, ...postingRequests];
+
+  const OPEN = new Set(['pending', 'open', 'posted', 'offer', 'offer_received']);
+  const MATCHED = new Set(['accepted', 'confirmed', 'matched', 'in_progress', 'in-progress', 'driver_completed', 'rider_completed']);
+  const PAST = new Set(['completed', 'cancelled', 'canceled', 'rejected', 'expired']);
+
+  const isDateExpired = (request: MobileRideRequest): boolean => {
+    // Prefer request.date; fall back to parsing dateLabel
+    let rideDate = request.date;
+    if (!rideDate && request.dateLabel && request.dateLabel !== 'Date pending') {
+      const iso = request.dateLabel.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (iso) {
+        rideDate = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+      } else {
+        const d = new Date(request.dateLabel);
+        if (!isNaN(d.getTime())) rideDate = d;
+      }
+    }
+    if (!rideDate) return false;
+    const endOfDay = new Date(rideDate);
+    endOfDay.setHours(23, 59, 59, 999);
+    return endOfDay < new Date();
+  };
+
+  const filtered = allRequests.filter((request) => {
     const status = request.status;
-    if (filter === 'open') return ['pending', 'open', 'posted', 'offer', 'offer_received'].includes(status);
-    if (filter === 'matched') return ['accepted', 'confirmed', 'matched', 'in_progress'].includes(status);
-    return ['completed', 'cancelled', 'canceled', 'rejected', 'expired'].includes(status);
+    const expired = isDateExpired(request);
+    if (filter === 'open') return OPEN.has(status) && !expired;
+    if (filter === 'matched') return MATCHED.has(status) && !expired;
+    return PAST.has(status) || expired;
   });
 
   return (
     <Phone title="My requests" back activeTab="rides">
       <View style={s.pillRow}>
-        <TouchableOpacity onPress={() => setFilter('open')}><Pill label={`Open · ${requests.filter((r) => ['pending', 'open', 'posted', 'offer', 'offer_received'].includes(r.status)).length}`} active={filter === 'open'} /></TouchableOpacity>
-        <TouchableOpacity onPress={() => setFilter('matched')}><Pill label="Matched" active={filter === 'matched'} /></TouchableOpacity>
-        <TouchableOpacity onPress={() => setFilter('past')}><Pill label="Past" active={filter === 'past'} /></TouchableOpacity>
+        <TouchableOpacity onPress={() => setFilter('open')}><Pill label={`Open · ${allRequests.filter((r) => OPEN.has(r.status) && !isDateExpired(r)).length}`} active={filter === 'open'} /></TouchableOpacity>
+        <TouchableOpacity onPress={() => setFilter('matched')}><Pill label={`Matched · ${allRequests.filter((r) => MATCHED.has(r.status) && !isDateExpired(r)).length}`} active={filter === 'matched'} /></TouchableOpacity>
+        <TouchableOpacity onPress={() => setFilter('past')}><Pill label={`Past · ${allRequests.filter((r) => PAST.has(r.status) || isDateExpired(r)).length}`} active={filter === 'past'} /></TouchableOpacity>
       </View>
       {filtered.map((request) => (
         <TouchableOpacity key={request.id} style={s.requestCard} onPress={() => router.push(`/(rider)/ride/${request.id}` as any)}>
@@ -622,9 +676,14 @@ export function RiderHistoryReference() {
     if (['COMPLETED', 'COMPLETE', 'FINISHED'].includes(ride.status) || (ride.status === 'FLAGGED' && ride.statusAtFlag === 'COMPLETED')) return 'past';
     return 'upcoming';
   };
-  const historyRides = rides.filter((ride) => categoryFor(ride) !== 'upcoming');
-  const completedCount = historyRides.filter((ride) => categoryFor(ride) === 'past').length;
-  const totalSpent = historyRides
+  const allHistoryRides = rides.filter((ride) => categoryFor(ride) !== 'upcoming');
+  const [historyTab, setHistoryTab] = useState<'all' | 'past' | 'cancelled'>('all');
+  const historyRides = historyTab === 'all' ? allHistoryRides
+    : historyTab === 'past' ? allHistoryRides.filter((r) => categoryFor(r) === 'past')
+    : allHistoryRides.filter((r) => categoryFor(r) === 'cancelled');
+  const completedCount = allHistoryRides.filter((ride) => categoryFor(ride) === 'past').length;
+  const cancelledCount = allHistoryRides.filter((ride) => categoryFor(ride) === 'cancelled').length;
+  const totalSpent = allHistoryRides
     .filter((ride) => categoryFor(ride) === 'past')
     .reduce((sum, ride) => sum + ride.price, 0);
   const formatWhen = (date: Date | null) => date
@@ -634,16 +693,33 @@ export function RiderHistoryReference() {
   return (
     <>
       <Phone title="Ride history" back backTarget="/(rider)/profile" compactContent>
-        <View style={s.riderHistorySummary}>
-          <View style={s.riderHistorySummaryItem}>
-            <Text style={s.riderHistoryStat}>{completedCount}</Text>
-            <Text style={s.riderHistoryStatLabel}>Completed rides</Text>
+        {/* Stats banner */}
+        <View style={s.riderHistoryStatsRow}>
+          <View style={s.riderHistoryStatCard}>
+            <Text style={s.riderHistoryStatValue}>{completedCount}</Text>
+            <Text style={s.riderHistoryStatLabel}>Completed</Text>
           </View>
-          <View style={s.riderHistorySummaryDivider} />
-          <View style={s.riderHistorySummaryItem}>
-            <Text style={s.riderHistoryStat}>${totalSpent.toFixed(0)}</Text>
+          <View style={s.riderHistoryStatDivider} />
+          <View style={s.riderHistoryStatCard}>
+            <Text style={[s.riderHistoryStatValue, { color: ORANGE }]}>${totalSpent.toFixed(0)}</Text>
             <Text style={s.riderHistoryStatLabel}>Total spent</Text>
           </View>
+        </View>
+
+        {/* Filter tabs */}
+        <View style={s.riderHistoryTabRow}>
+          {(['all', 'past', 'cancelled'] as const).map((t) => (
+            <TouchableOpacity
+              key={t}
+              style={[s.riderHistoryTab, historyTab === t && s.riderHistoryTabActive]}
+              onPress={() => setHistoryTab(t)}
+              activeOpacity={0.75}
+            >
+              <Text style={[s.riderHistoryTabText, historyTab === t && s.riderHistoryTabTextActive]}>
+                {t === 'all' ? `All (${allHistoryRides.length})` : t === 'past' ? `Done (${completedCount})` : `Cancelled (${cancelledCount})`}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         {loading ? <View style={s.riderHistoryLoading}><ActivityIndicator color={ORANGE} size="large" /></View> : null}
@@ -651,60 +727,82 @@ export function RiderHistoryReference() {
         {!loading && historyRides.map((ride) => {
           const category = categoryFor(ride);
           const isFlagged = ride.status === 'FLAGGED';
-          const statusLabel = isFlagged ? 'Flagged' : category === 'cancelled' ? 'Cancelled' : 'Completed';
+          const isCancelled = category === 'cancelled';
+          const statusLabel = isFlagged ? 'Flagged' : isCancelled ? 'Cancelled' : 'Completed';
+          const statusColor = isFlagged ? '#B91C1C' : isCancelled ? MUTED : '#16A34A';
+          const statusBg = isFlagged ? '#FEF2F2' : isCancelled ? '#F1F3F6' : '#EDFAF3';
           const initials = ride.driverName.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
           const shortFrom = ride.from.split(',')[0]?.trim() || ride.from;
           const shortTo = ride.to.split(',')[0]?.trim() || ride.to;
           return (
             <View key={`${ride.confirmedRideId || ride.id}-${ride.status}`} style={s.riderHistoryCard}>
-              <View style={s.riderHistoryCardTop}>
-                <View style={[s.riderHistoryStatus, (isFlagged || category === 'cancelled') && s.riderHistoryStatusAlert]}>
-                  <Text style={[s.riderHistoryStatusText, (isFlagged || category === 'cancelled') && s.riderHistoryStatusTextAlert]}>{statusLabel}</Text>
+              <View style={[s.riderHistoryCardAccent, { backgroundColor: statusColor }]} />
+              <View style={s.riderHistoryCardInner}>
+                {/* Top row */}
+                <View style={s.riderHistoryCardTop}>
+                  <View style={[s.riderHistoryStatusBadge, { backgroundColor: statusBg }]}>
+                    <View style={[s.riderHistoryStatusDot, { backgroundColor: statusColor }]} />
+                    <Text style={[s.riderHistoryStatusText, { color: statusColor }]}>{statusLabel.toUpperCase()}</Text>
+                  </View>
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                    <Text style={s.riderHistoryTripMeta}>{formatWhen(ride.date)}</Text>
+                    {ride.price > 0 ? <Text style={s.riderHistoryPrice}>${ride.price.toFixed(0)}</Text> : null}
+                  </View>
                 </View>
-                <Text style={s.riderHistoryTripMeta}>{formatWhen(ride.date)}</Text>
-                {ride.price > 0 ? <Text style={s.riderHistoryPrice}>${ride.price.toFixed(0)}</Text> : null}
-              </View>
 
-              <View style={s.riderHistoryRouteBlock}>
-                <View style={s.riderHistoryRouteRail}>
-                  <View style={s.riderHistoryNavyDot} />
-                  <View style={s.riderHistoryRouteLine} />
-                  <View style={s.riderHistoryOrangeDot} />
+                {/* Route */}
+                <View style={s.riderHistoryRouteBlock}>
+                  <View style={s.riderHistoryRouteRail}>
+                    <View style={s.riderHistoryNavyDot} />
+                    <View style={s.riderHistoryRouteLine} />
+                    <View style={s.riderHistoryOrangeDot} />
+                  </View>
+                  <View style={s.riderHistoryRouteDetails}>
+                    <View>
+                      <Text style={s.riderHistoryRouteLabel}>FROM</Text>
+                      <Text style={s.riderHistoryRouteText} numberOfLines={1}>{shortFrom}</Text>
+                    </View>
+                    <View>
+                      <Text style={s.riderHistoryRouteLabel}>TO</Text>
+                      <Text style={s.riderHistoryRouteText} numberOfLines={1}>{shortTo}</Text>
+                    </View>
+                  </View>
                 </View>
-                <View style={s.riderHistoryRouteDetails}>
-                  <View><Text style={s.riderHistoryRouteLabel}>PICKUP</Text><Text style={s.riderHistoryRouteText} numberOfLines={1}>{shortFrom}</Text></View>
-                  <View><Text style={s.riderHistoryRouteLabel}>DROPOFF</Text><Text style={s.riderHistoryRouteText} numberOfLines={1}>{shortTo}</Text></View>
-                </View>
-              </View>
 
-              <View style={s.riderHistoryFooter}>
-                <TouchableOpacity
-                  style={s.riderHistoryAvatar}
-                  disabled={!ride.driverId}
-                  onPress={() => ride.driverId && router.push({ pathname: '/(rider)/driver/[driverId]', params: { driverId: ride.driverId, returnTo: '/(rider)/settings/ride-history' } } as any)}
-                >
-                  {ride.driverAvatarUrl ? (
-                    <Image source={{ uri: ride.driverAvatarUrl }} style={s.riderHistoryAvatarImage} contentFit="cover" />
-                  ) : ride.driverId ? (
-                    <Text style={s.riderHistoryAvatarText}>{initials || 'D'}</Text>
-                  ) : (
-                    <Ionicons name="person-outline" size={18} color={MUTED} />
-                  )}
-                </TouchableOpacity>
-                <View style={s.riderHistoryDriverInfo}>
-                  <Text style={s.riderHistoryDriverName} numberOfLines={1}>{ride.driverName}</Text>
-                  <Text style={s.riderHistoryDriverMeta}>{ride.seats} {ride.seats === 1 ? 'seat' : 'seats'}</Text>
-                </View>
-                {ride.confirmedRideId && !isFlagged ? (
+                {/* Footer */}
+                <View style={s.riderHistoryFooter}>
                   <TouchableOpacity
-                    style={s.riderHistoryFlagButton}
-                    onPress={() => setFlagRideId(ride.confirmedRideId || null)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Report ride"
+                    style={s.riderHistoryAvatar}
+                    disabled={!ride.driverId}
+                    onPress={() => ride.driverId && router.push({ pathname: '/(rider)/driver/[driverId]', params: { driverId: ride.driverId, returnTo: '/(rider)/settings/ride-history' } } as any)}
                   >
-                    <Ionicons name="flag-outline" size={17} color="#B54A4A" />
+                    {ride.driverAvatarUrl ? (
+                      <Image source={{ uri: ride.driverAvatarUrl }} style={s.riderHistoryAvatarImage} contentFit="cover" />
+                    ) : ride.driverId ? (
+                      <Text style={s.riderHistoryAvatarText}>{initials || 'D'}</Text>
+                    ) : (
+                      <Ionicons name="person-outline" size={18} color={MUTED} />
+                    )}
                   </TouchableOpacity>
-                ) : null}
+                  <View style={s.riderHistoryDriverInfo}>
+                    <Text style={s.riderHistoryDriverName} numberOfLines={1}>{ride.driverName}</Text>
+                    <Text style={s.riderHistoryDriverMeta}>{ride.seats} {ride.seats === 1 ? 'seat' : 'seats'}</Text>
+                  </View>
+                  {ride.confirmedRideId && !isFlagged ? (
+                    <TouchableOpacity
+                      style={s.riderHistoryFlagButton}
+                      onPress={() => setFlagRideId(ride.confirmedRideId || null)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Report ride"
+                    >
+                      <Ionicons name="flag-outline" size={16} color="#B54A4A" />
+                    </TouchableOpacity>
+                  ) : isFlagged ? (
+                    <View style={[s.riderHistoryFlagButton, { backgroundColor: '#FDECEC' }]}>
+                      <Ionicons name="flag" size={16} color="#B54A4A" />
+                    </View>
+                  ) : null}
+                </View>
               </View>
             </View>
           );
@@ -713,12 +811,14 @@ export function RiderHistoryReference() {
         {!loading && !historyRides.length ? (
           <View style={s.riderHistoryEmpty}>
             <View style={s.riderHistoryEmptyIcon}><Ionicons name="car-outline" size={26} color={ORANGE} /></View>
-            <Text style={s.riderHistoryEmptyTitle}>No ride history yet</Text>
-            <Text style={s.riderHistoryEmptyText}>Completed and cancelled rides will appear here.</Text>
-            <TouchableOpacity style={s.riderHistoryBrowseButton} onPress={() => router.push('/(rider)/available-rides' as any)}>
-              <Ionicons name="search-outline" size={17} color="#FFFFFF" />
-              <Text style={s.riderHistoryBrowseText}>Browse available rides</Text>
-            </TouchableOpacity>
+            <Text style={s.riderHistoryEmptyTitle}>{historyTab === 'all' ? 'No ride history yet' : historyTab === 'past' ? 'No completed rides' : 'No cancelled rides'}</Text>
+            <Text style={s.riderHistoryEmptyText}>{historyTab === 'all' ? 'Completed and cancelled rides will appear here.' : 'Switch to another tab to see your rides.'}</Text>
+            {historyTab === 'all' && (
+              <TouchableOpacity style={s.riderHistoryBrowseButton} onPress={() => router.push('/(rider)/available-rides' as any)}>
+                <Ionicons name="search-outline" size={17} color="#FFFFFF" />
+                <Text style={s.riderHistoryBrowseText}>Browse available rides</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ) : null}
       </Phone>
@@ -734,9 +834,10 @@ export function RiderHistoryReference() {
   );
 }
 export function DriverPublicProfileReference() {
-  const { driverId } = useLocalSearchParams<{ driverId?: string }>();
-  const { goBack } = useReturnNavigation('/(rider)');
+  const { driverId, returnTo } = useLocalSearchParams<{ driverId?: string; returnTo?: string | string[] }>();
   const id = Array.isArray(driverId) ? driverId[0] : driverId;
+  const returnTarget = Array.isArray(returnTo) ? returnTo[0] : returnTo;
+  const goBack = () => router.replace((returnTarget || '/(rider)/available-rides') as any);
   const insets = useSafeAreaInsets();
 
   const [loading, setLoading] = useState(true);
@@ -1317,11 +1418,13 @@ export function RiderMessagesReference() {
         <View style={s.messageContent}>
           <View style={s.messageTopLine}>
             <Text style={s.messageName} numberOfLines={1}>{chat.name}</Text>
-            {chat.unread > 0 ? <Text style={s.newBadge}>{chat.unread} NEW</Text> : null}
           </View>
           <Text style={s.messagePreview} numberOfLines={1}>{chat.preview}</Text>
         </View>
-        <Text style={s.messageTime}>{formatChatTime(chat.updatedAt)}</Text>
+        <View style={s.messageMeta}>
+          <Text style={s.messageTime}>{formatChatTime(chat.updatedAt)}</Text>
+          {chat.unread > 0 ? <Text style={s.newBadge}>{chat.unread} NEW</Text> : null}
+        </View>
       </TouchableOpacity>
     </Swipeable>
   );
@@ -1405,7 +1508,7 @@ export function RiderChatReference() {
 
   useEffect(() => {
     if (!id || !uid) return;
-    void markChatAsRead(id, uid).catch(() => undefined);
+    void markChatAsRead(id, uid, 'rider').catch(() => undefined);
 
     // Load chat metadata
     (async () => {
@@ -1460,7 +1563,7 @@ export function RiderChatReference() {
     if (!id || !uid || !draft.trim() || sending) return;
     setSending(true);
     try {
-      await sendChatMessage(id, uid, draft);
+      await sendChatMessage(id, uid, draft, 'rider');
       setDraft('');
     } finally {
       setSending(false);
@@ -1499,7 +1602,7 @@ export function RiderChatReference() {
           {/* Header */}
           <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BDR, backgroundColor: BG2, gap: 10 }}>
             <TouchableOpacity
-              onPress={() => router.back()}
+              onPress={() => router.replace('/(rider)/messages' as any)}
               style={{ width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BDR, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center' }}
               activeOpacity={0.75}
             >
@@ -1542,7 +1645,7 @@ export function RiderChatReference() {
               </View>
             ) : null}
             {messages.map((msg) => {
-              const isMine = msg.senderId === uid;
+    const isMine = msg.senderId === uid && (!msg.senderRole || msg.senderRole === 'rider');
               return (
                 <View key={msg.id} style={[{ marginBottom: 14 }, isMine ? { alignItems: 'flex-end' } : { alignItems: 'flex-start' }]}>
                   <View style={isMine
@@ -1657,7 +1760,15 @@ export function RiderNotificationsReference() {
           </TouchableOpacity>
         </Swipeable>
       ))}
-      {!items.length ? <View style={s.panel}><Text style={s.routeTitle}>You are all caught up</Text><Text style={s.messagePreview}>Ride, payment, and message updates will appear here.</Text></View> : null}
+      {!items.length ? (
+        <View style={s.notificationEmptyCard}>
+          <View style={s.notificationEmptyIcon}>
+            <Ionicons name="notifications-outline" size={24} color={ORANGE} />
+          </View>
+          <Text style={s.notificationEmptyTitle}>You are all caught up</Text>
+          <Text style={s.notificationEmptyText}>Ride updates, messages, and account alerts will appear here.</Text>
+        </View>
+      ) : null}
     </Phone>
   );
 }
@@ -1708,15 +1819,37 @@ function RiderProfileReferencePlaceholder() {
 }
 
 export function RiderProfileReference() {
-  const { signOut } = useAuthStore();
+  const { signOut, role, switchRole } = useAuthStore();
   const uid = firebaseAuth.currentUser?.uid;
   const [profile, setProfile] = useState<RiderProfile | null>(null);
   const [requests, setRequests] = useState<MobileRideRequest[]>([]);
+  const [roleActionLoading, setRoleActionLoading] = useState(false);
   useEffect(() => uid ? subscribeRiderProfile(uid, setProfile) : undefined, [uid]);
   useEffect(() => uid ? subscribeRiderRequests(uid, setRequests) : undefined, [uid]);
   const initials = (profile?.displayName || firebaseAuth.currentUser?.email || 'RA').split(/\s+|@/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
   const completedRides = requests.filter((request) => ['completed', 'complete', 'finished'].includes(request.status)).length;
   const cancelledRides = requests.filter((request) => ['cancelled', 'canceled', 'declined', 'rejected'].includes(request.status)).length;
+
+  const hasDriverAccount = role === 'both';
+  const showSwitchBtn = role !== 'driver';
+
+  const handleDriverMode = async () => {
+    if (roleActionLoading) return;
+    if (hasDriverAccount) {
+      setRoleActionLoading(true);
+      try {
+        await switchRole('driver');
+        router.replace('/(driver)' as any);
+      } catch {
+        Alert.alert('Could not switch', 'Please try again.');
+      } finally {
+        setRoleActionLoading(false);
+      }
+    } else {
+      router.push('/(auth)/driver-signup' as any);
+    }
+  };
+
   return (
     <Phone title="Profile" back backTarget="/(rider)" compactContent bottom={<PrimaryButton onPress={signOut}>Log out</PrimaryButton>} bottomOffset={4}>
       <TouchableOpacity style={s.profileSettingsBtn} onPress={() => router.push({ pathname: '/(rider)/settings', params: { returnTo: '/(rider)/profile' } } as any)}><Ionicons name="settings" size={20} color={NAVY} /></TouchableOpacity>
@@ -1740,6 +1873,29 @@ export function RiderProfileReference() {
         <View style={s.profileActivityDivider} />
         <View style={s.profileActivityItem}><Text style={[s.profileActivityValue, cancelledRides > 0 && s.profileActivityCancelled]}>{cancelledRides}</Text><Text style={s.profileActivityLabel}>Cancelled</Text></View>
       </View>
+      {profile?.about ? (
+        <View style={s.profileAboutCard}>
+          <Text style={s.profileAboutTitle}>About</Text>
+          <Text style={s.profileAboutText}>{profile.about}</Text>
+        </View>
+      ) : null}
+      {showSwitchBtn ? (
+        <TouchableOpacity style={s.driverSwitchBtn} onPress={handleDriverMode} disabled={roleActionLoading} activeOpacity={0.82}>
+          {roleActionLoading ? (
+            <ActivityIndicator color="#FFFFFF" size="small" />
+          ) : (
+            <>
+              <View style={s.driverSwitchIconWrap}>
+                <Ionicons name="car-outline" size={17} color="#FFFFFF" />
+              </View>
+              <Text style={s.driverSwitchBtnText}>
+                {hasDriverAccount ? 'Switch to driver mode' : 'Become a driver'}
+              </Text>
+              <Ionicons name="chevron-forward" size={15} color="rgba(255,255,255,0.6)" />
+            </>
+          )}
+        </TouchableOpacity>
+      ) : null}
       <View style={s.menuCard}><MenuRow icon="wallet" title="Payment methods" href="/(rider)/settings/payment-methods" returnTo="/(rider)/profile" /><MenuRow icon="time" title="Ride history" href="/(rider)/settings/ride-history" returnTo="/(rider)/profile" /><MenuRow icon="notifications" title="Notifications" href="/(rider)/notifications" returnTo="/(rider)/profile" /></View>
     </Phone>
   );
@@ -1768,7 +1924,7 @@ function MenuRow({ icon, title, sub, href, returnTo }: { icon: keyof typeof Ioni
 
   return (
     <TouchableOpacity style={s.menuRow} onPress={handlePress} disabled={!href} accessibilityRole={href ? "link" : undefined}>
-      <View style={s.menuIcon}><Ionicons name={icon} size={18} color="#6B7280" /></View>
+      <View style={s.menuIcon}><Ionicons name={icon} size={18} color={ORANGE} /></View>
       <View style={{ flex: 1 }}><Text style={s.menuTitle}>{title}</Text>{sub ? <Text style={s.menuSub}>{sub}</Text> : null}</View>
       <Ionicons name="chevron-forward" size={17} color={MUTED} />
     </TouchableOpacity>
@@ -1778,7 +1934,7 @@ function MenuRow({ icon, title, sub, href, returnTo }: { icon: keyof typeof Ioni
 function SettingsToggleRow({ icon, title, sub, value, onChange, isLast = false }: { icon: keyof typeof Ionicons.glyphMap; title: string; sub: string; value: boolean; onChange: (value: boolean) => void; isLast?: boolean }) {
   return (
     <View style={[s.menuRow, isLast && s.menuRowLast]}>
-      <View style={s.menuIcon}><Ionicons name={icon} size={18} color="#6B7280" /></View>
+      <View style={s.menuIcon}><Ionicons name={icon} size={18} color={ORANGE} /></View>
       <View style={{ flex: 1 }}><Text style={s.menuTitle}>{title}</Text><Text style={s.menuSub}>{sub}</Text></View>
       <View style={s.settingsSwitchWrap}>
         <Switch value={value} onValueChange={onChange} trackColor={{ false: '#D1D5DB', true: ORANGE }} thumbColor="#FFFFFF" ios_backgroundColor="#D1D5DB" style={s.settingsSwitch} />
@@ -2444,36 +2600,42 @@ const s = StyleSheet.create({
   navyBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
   pastRow: { borderRadius: 15, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 16, fontSize: 13, marginTop: 12, color: NAVY },
   historyCard: { borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 18, marginBottom: 16 },
-  riderHistorySummary: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, borderRadius: 16, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', paddingVertical: 15 },
-  riderHistorySummaryItem: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  riderHistorySummaryDivider: { width: 1, height: 34, backgroundColor: BORDER },
-  riderHistoryStat: { color: NAVY, fontSize: 21, fontWeight: '700', marginBottom: 2 },
-  riderHistoryStatLabel: { color: MUTED, fontSize: 11, fontWeight: '600' },
+  riderHistoryStatsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, borderRadius: 16, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', paddingVertical: 18 },
+  riderHistoryStatCard: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  riderHistoryStatDivider: { width: 1, height: 36, backgroundColor: BORDER },
+  riderHistoryStatValue: { color: NAVY, fontSize: 24, fontWeight: '800', marginBottom: 3 },
+  riderHistoryStatLabel: { color: MUTED, fontSize: 11, fontWeight: '600', letterSpacing: 0.3 },
+  riderHistoryTabRow: { flexDirection: 'row', gap: 8, marginBottom: 18 },
+  riderHistoryTab: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: BORDER, backgroundColor: '#FFFFFF' },
+  riderHistoryTabActive: { borderColor: ORANGE, backgroundColor: `${ORANGE}10` },
+  riderHistoryTabText: { color: MUTED, fontSize: 12, fontWeight: '600' },
+  riderHistoryTabTextActive: { color: ORANGE, fontWeight: '700' },
   riderHistoryLoading: { alignItems: 'center', paddingTop: 60 },
-  riderHistoryCard: { borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 16, marginBottom: 14, shadowColor: NAVY, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 1 },
-  riderHistoryCardTop: { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 16 },
-  riderHistoryStatus: { borderRadius: 10, backgroundColor: '#EAF6EF', paddingHorizontal: 9, paddingVertical: 4 },
-  riderHistoryStatusAlert: { backgroundColor: '#FDECEC' },
-  riderHistoryStatusText: { color: '#168454', fontSize: 10, fontWeight: '700' },
-  riderHistoryStatusTextAlert: { color: '#B54A4A' },
-  riderHistoryTripMeta: { flex: 1, color: MUTED, fontSize: 11, fontWeight: '500' },
-  riderHistoryPrice: { color: ORANGE, fontSize: 20, fontWeight: '700' },
-  riderHistoryRouteBlock: { minHeight: 82, flexDirection: 'row', paddingHorizontal: 2 },
-  riderHistoryRouteRail: { width: 18, alignItems: 'center', paddingVertical: 5 },
+  riderHistoryCard: { borderRadius: 16, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', marginBottom: 14, overflow: 'hidden', flexDirection: 'row', shadowColor: NAVY, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 1 },
+  riderHistoryCardAccent: { width: 4, flexShrink: 0 },
+  riderHistoryCardInner: { flex: 1, padding: 15 },
+  riderHistoryCardTop: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
+  riderHistoryStatusBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 5 },
+  riderHistoryStatusDot: { width: 6, height: 6, borderRadius: 3 },
+  riderHistoryStatusText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.4 },
+  riderHistoryTripMeta: { color: MUTED, fontSize: 11, fontWeight: '500' },
+  riderHistoryPrice: { color: ORANGE, fontSize: 18, fontWeight: '800' },
+  riderHistoryRouteBlock: { minHeight: 78, flexDirection: 'row', marginBottom: 2 },
+  riderHistoryRouteRail: { width: 18, alignItems: 'center', paddingVertical: 3 },
   riderHistoryNavyDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: NAVY, flexShrink: 0 },
-  riderHistoryRouteLine: { flex: 1, width: 1, marginVertical: 4, backgroundColor: '#D8DDE5' },
+  riderHistoryRouteLine: { flex: 1, width: 1.5, marginVertical: 4, backgroundColor: '#D8DDE5' },
   riderHistoryOrangeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: ORANGE, flexShrink: 0 },
-  riderHistoryRouteDetails: { flex: 1, justifyContent: 'space-between', paddingLeft: 8 },
+  riderHistoryRouteDetails: { flex: 1, justifyContent: 'space-between', paddingLeft: 10 },
   riderHistoryRouteLabel: { color: MUTED, fontSize: 9, lineHeight: 12, fontWeight: '700', letterSpacing: 1 },
-  riderHistoryRouteText: { color: NAVY, fontSize: 15, lineHeight: 20, fontWeight: '600', marginTop: 1 },
-  riderHistoryFooter: { minHeight: 48, flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: BORDER, marginTop: 14, paddingTop: 13, gap: 10 },
+  riderHistoryRouteText: { color: NAVY, fontSize: 14, lineHeight: 19, fontWeight: '600', marginTop: 2 },
+  riderHistoryFooter: { minHeight: 44, flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: BORDER, marginTop: 13, paddingTop: 12, gap: 10 },
   riderHistoryAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F9E8DB', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   riderHistoryAvatarImage: { width: 36, height: 36, borderRadius: 18 },
   riderHistoryAvatarText: { color: ORANGE, fontSize: 12, fontWeight: '700' },
   riderHistoryDriverInfo: { flex: 1, minWidth: 0 },
   riderHistoryDriverName: { color: NAVY, fontSize: 13, fontWeight: '700' },
-  riderHistoryDriverMeta: { color: MUTED, fontSize: 11, marginTop: 2 },
-  riderHistoryFlagButton: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FDECEC' },
+  riderHistoryDriverMeta: { color: MUTED, fontSize: 11, marginTop: 1 },
+  riderHistoryFlagButton: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FEF2F2' },
   riderHistoryEmpty: { borderRadius: 20, borderWidth: 1, borderStyle: 'dashed', borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 32, alignItems: 'center', marginTop: 4 },
   riderHistoryEmptyIcon: { width: 54, height: 54, borderRadius: 27, backgroundColor: '#FEF0E8', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   riderHistoryEmptyTitle: { color: NAVY, fontSize: 18, fontWeight: '700', marginBottom: 6 },
@@ -2515,11 +2677,16 @@ const s = StyleSheet.create({
   messageAvatarText: { color: ORANGE, fontSize: 18, fontWeight: '600' },
   messageContent: { flex: 1, minWidth: 0 },
   messageTopLine: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 },
-  messageTime: { color: MUTED, fontSize: 11, fontWeight: '600', flexShrink: 0 },
+  messageMeta: { alignItems: 'flex-end', gap: 4, flexShrink: 0 },
+  messageTime: { color: MUTED, fontSize: 11, fontWeight: '600' },
   messageEmptyCard: { marginTop: 40, borderRadius: 20, borderWidth: 1, borderStyle: 'dashed', borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 24, alignItems: 'center', justifyContent: 'center', minHeight: 180 },
   messageEmptyIcon: { width: 54, height: 54, borderRadius: 27, backgroundColor: '#F9E8DB', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   messageEmptyTitle: { color: NAVY, fontSize: 19, lineHeight: 25, fontWeight: '700', textAlign: 'center', letterSpacing: -0.2 },
   messageEmptyText: { maxWidth: 280, color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 6 },
+  notificationEmptyCard: { flex: 1, minHeight: 420, paddingHorizontal: 24, paddingVertical: 28, alignItems: 'center', justifyContent: 'center' },
+  notificationEmptyIcon: { width: 54, height: 54, borderRadius: 27, backgroundColor: '#FEF0E8', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  notificationEmptyTitle: { color: NAVY, fontSize: 19, lineHeight: 25, fontWeight: '700', textAlign: 'center', letterSpacing: -0.2 },
+  notificationEmptyText: { maxWidth: 278, color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 6, fontWeight: '500' },
   swipeDelete: { width: 80, alignSelf: 'stretch', backgroundColor: '#C94747', alignItems: 'center', justifyContent: 'center', gap: 5 },
   swipeDeleteText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
   bigAvatarTextSmall: { color: ORANGE, fontSize: 18, fontWeight: '600' },
@@ -2547,6 +2714,12 @@ const s = StyleSheet.create({
   profileActivityCancelled: { color: '#C94747' },
   profileActivityLabel: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 2 },
   profileActivityDivider: { width: 1, height: 32, backgroundColor: BORDER },
+  profileAboutCard: { borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 16, marginBottom: 18 },
+  profileAboutTitle: { color: NAVY, fontSize: 15, lineHeight: 20, fontWeight: '700', marginBottom: 6 },
+  profileAboutText: { color: '#5F6878', fontSize: 13, lineHeight: 20, fontWeight: '500' },
+  driverSwitchBtn: { height: 50, borderRadius: 25, backgroundColor: NAVY, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 10, marginBottom: 18 },
+  driverSwitchIconWrap: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
+  driverSwitchBtnText: { flex: 1, color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   statsRow: { flexDirection: 'row', gap: 10, marginBottom: 18 },
   statBox: { flex: 1, minHeight: 88, borderRadius: 14, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 15, justifyContent: 'center' },
   statValue: { fontSize: 30, fontWeight: '300' },
@@ -2554,7 +2727,7 @@ const s = StyleSheet.create({
   menuCard: { borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', overflow: 'hidden', marginBottom: 18 },
   menuRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 18, borderBottomWidth: 1, borderBottomColor: BORDER },
   menuRowLast: { borderBottomWidth: 0 },
-  menuIcon: { width: 22, alignItems: 'center', justifyContent: 'center' },
+  menuIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   menuTitle: { fontSize: 15, fontWeight: '600' },
   menuSub: { color: MUTED, fontSize: 12, lineHeight: 18, marginTop: 3 },
   settingsSectionLabel: { fontFamily: FONT_MONO, color: '#8B94A6', fontSize: 10, lineHeight: 15, letterSpacing: 1.5, fontWeight: '600', marginBottom: 8, paddingHorizontal: 2 },

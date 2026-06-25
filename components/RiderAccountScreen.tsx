@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { deleteUser, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { deleteDoc, doc } from 'firebase/firestore';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,8 +13,8 @@ import { useAuthStore } from '@/stores/authStore';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { hitSlop, layout } from '@/theme/designSystem';
 import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
-
-import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
+import { UniversitySearch } from '@/components/ui/UniversitySearch';
+import { MAJORS } from '@/constants/universities';
 
 const NAVY = '#15233A';
 const ORANGE = '#DE5D20';
@@ -54,7 +54,9 @@ function AccountField({ label, value, onChangeText, placeholder, keyboardType, e
 }
 
 export default function RiderAccountScreen() {
-  const { goBack } = useReturnNavigation('/(rider)/settings');
+  const { returnTo } = useLocalSearchParams<{ returnTo?: string | string[] }>();
+  const returnTarget = Array.isArray(returnTo) ? returnTo[0] : returnTo;
+  const goBack = () => router.replace((returnTarget || '/(rider)/settings') as any);
   const refreshProfiles = useAuthStore((state) => state.refreshProfiles);
   const [profile, setProfile] = useState<RiderAccountProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,6 +66,8 @@ export default function RiderAccountScreen() {
   const [deleting, setDeleting] = useState(false);
   const [deletePasswordHidden, setDeletePasswordHidden] = useState(true);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [showMajorPicker, setShowMajorPicker] = useState(false);
+  const [majorSearch, setMajorSearch] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -214,7 +218,31 @@ export default function RiderAccountScreen() {
                     <Ionicons name="chevron-forward" size={18} color={MUTED} />
                   </TouchableOpacity>
                 </View>
-                <AccountField label="UNIVERSITY" value={profile.university} onChangeText={(university) => setProfile({ ...profile, university })} placeholder="Your university" />
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.label}>UNIVERSITY</Text>
+                  <UniversitySearch value={profile.university} onSelect={(university) => setProfile({ ...profile, university: university?.name || '' })} placeholder="Search your university..." allowCustom />
+                </View>
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.label}>MAJOR</Text>
+                  <TouchableOpacity style={styles.selectInput} onPress={() => setShowMajorPicker(true)} accessibilityRole="button">
+                    <Text style={profile.major ? styles.selectInputText : styles.selectInputPlaceholder}>{profile.major || 'Select your major'}</Text>
+                    <Ionicons name="chevron-down" size={18} color={MUTED} />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.label}>ABOUT</Text>
+                  <TextInput
+                    value={profile.about}
+                    onChangeText={(about) => setProfile({ ...profile, about })}
+                    placeholder="Share what classmates should know about riding with you."
+                    placeholderTextColor="#9AA3B2"
+                    multiline
+                    maxLength={240}
+                    style={[styles.inputWrap, styles.aboutInput]}
+                    textAlignVertical="top"
+                  />
+                  <Text style={styles.fieldNote}>{profile.about.length}/240 characters</Text>
+                </View>
               </View>
 
               <View style={styles.section}>
@@ -262,6 +290,58 @@ export default function RiderAccountScreen() {
           </View>
         </KeyboardAwareModalView>
       </Modal>
+
+      <Modal visible={showMajorPicker} transparent animationType="slide" onRequestClose={() => { setShowMajorPicker(false); setMajorSearch(''); }}>
+        <View style={styles.pickerOverlay}>
+          <View style={styles.pickerSheet}>
+            <View style={styles.pickerHandle} />
+            <View style={styles.pickerHeader}>
+              <View style={styles.pickerHeaderIcon}><Ionicons name="book-outline" size={16} color={ORANGE} /></View>
+              <Text style={styles.pickerTitle}>Select Major</Text>
+              <TouchableOpacity style={styles.pickerClose} onPress={() => { setShowMajorPicker(false); setMajorSearch(''); }} hitSlop={hitSlop}>
+                <Ionicons name="close" size={20} color={MUTED} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.pickerSearchWrap}>
+              <Ionicons name="search-outline" size={16} color={MUTED} />
+              <TextInput
+                style={styles.pickerSearchInput}
+                placeholder="Search majors..."
+                placeholderTextColor={MUTED}
+                value={majorSearch}
+                onChangeText={setMajorSearch}
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+              {majorSearch.length > 0 ? (
+                <TouchableOpacity onPress={() => setMajorSearch('')} hitSlop={hitSlop}>
+                  <Ionicons name="close-circle" size={16} color={MUTED} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {MAJORS.filter((major) => major.toLowerCase().includes(majorSearch.toLowerCase())).map((major) => (
+                <TouchableOpacity
+                  key={major}
+                  style={styles.pickerItem}
+                  onPress={() => {
+                    setProfile((current) => current ? { ...current, major } : current);
+                    setMajorSearch('');
+                    setShowMajorPicker(false);
+                  }}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.pickerItemText, profile?.major === major && styles.pickerItemTextActive]}>{major}</Text>
+                  {profile?.major === major ? <Ionicons name="checkmark" size={18} color={ORANGE} /> : null}
+                </TouchableOpacity>
+              ))}
+              {MAJORS.filter((major) => major.toLowerCase().includes(majorSearch.toLowerCase())).length === 0 ? (
+                <View style={styles.pickerEmpty}><Text style={styles.pickerEmptyText}>{`No majors match "${majorSearch}"`}</Text></View>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -292,9 +372,13 @@ const styles = StyleSheet.create({
   fieldGroup: { marginBottom: 16 },
   label: { color: '#8B94A6', fontSize: 10, lineHeight: 15, letterSpacing: 1.3, fontWeight: '700', marginBottom: 7 },
   inputWrap: { minHeight: 54, borderRadius: 14, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15 },
+  aboutInput: { minHeight: 112, alignItems: 'flex-start', color: NAVY, fontSize: 15, lineHeight: 21, paddingTop: 14, paddingBottom: 14 },
   inputReadOnly: { backgroundColor: PAPER },
   input: { flex: 1, color: NAVY, fontSize: 15, paddingVertical: 14 },
   readOnlyText: { color: '#5F6878' },
+  selectInput: { minHeight: 54, borderRadius: 14, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, gap: 10 },
+  selectInputText: { flex: 1, color: NAVY, fontSize: 15, fontWeight: '500' },
+  selectInputPlaceholder: { flex: 1, color: '#9AA3B2', fontSize: 15 },
   fieldNote: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 6, paddingHorizontal: 2 },
   phoneRow: { minHeight: 68, borderRadius: 14, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14 },
   phoneIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center' },
@@ -324,4 +408,18 @@ const styles = StyleSheet.create({
   modalClose: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
   deletePasswordWrap: { minHeight: 54, borderRadius: 14, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, marginBottom: 16 },
   deleteButton: { minHeight: 54, borderRadius: 27, backgroundColor: '#C94747', alignItems: 'center', justifyContent: 'center' },
+  pickerOverlay: { flex: 1, backgroundColor: 'rgba(21,35,58,0.42)', justifyContent: 'flex-end' },
+  pickerSheet: { backgroundColor: BG, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 36, maxHeight: '88%' },
+  pickerHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: BORDER, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
+  pickerHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: BORDER, gap: 10 },
+  pickerHeaderIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center' },
+  pickerTitle: { flex: 1, color: NAVY, fontSize: 17, fontWeight: '700' },
+  pickerClose: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F1F3F6', alignItems: 'center', justifyContent: 'center' },
+  pickerSearchWrap: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginVertical: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', gap: 8 },
+  pickerSearchInput: { flex: 1, fontSize: 14, color: NAVY, padding: 0 },
+  pickerItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 15, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  pickerItemText: { color: NAVY, fontSize: 15, fontWeight: '500', flex: 1 },
+  pickerItemTextActive: { color: ORANGE, fontWeight: '700' },
+  pickerEmpty: { alignItems: 'center', paddingVertical: 32 },
+  pickerEmptyText: { color: MUTED, fontSize: 14 },
 });
