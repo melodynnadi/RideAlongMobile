@@ -41,6 +41,29 @@ const MUTED = '#8B94A6';
 const FONT_SANS = Platform.OS === 'web' ? '"Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, sans-serif' : undefined;
 const FONT_MONO = Platform.OS === 'web' ? '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace' : undefined;
 
+function formatCurrentLocationAddress(result?: Location.LocationGeocodedAddress | null): string {
+  if (!result) return 'Current location';
+  return [result.name, result.street, result.city, result.region].filter(Boolean).join(', ') || 'Current location';
+}
+
+async function getCurrentLocationAddressAsync(): Promise<string | null> {
+  try {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') return null;
+    const pos =
+      (await Location.getLastKnownPositionAsync()) ||
+      (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+    if (!pos) return null;
+    const rev = await Location.reverseGeocodeAsync({
+      latitude: pos.coords.latitude,
+      longitude: pos.coords.longitude,
+    });
+    return formatCurrentLocationAddress(rev?.[0]);
+  } catch {
+    return null;
+  }
+}
+
 type TabKey = 'home' | 'find' | 'rides' | 'inbox' | 'you';
 type RNTextProps = React.ComponentProps<typeof RNText>;
 type Coords = { lat: number; lng: number };
@@ -536,6 +559,20 @@ export function RiderHomeReference() {
     }, 5000);
     return () => clearInterval(interval);
   }, [promotions.length, promotionSnapInterval]);
+
+  useEffect(() => {
+    if (from.trim()) return;
+    let cancelled = false;
+
+    (async () => {
+      const current = await getCurrentLocationAddressAsync();
+      if (!cancelled && current) setFrom(current);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [from]);
 
   const nextRide = useMemo(() => {
     const inProgress = confirmed.find((r) => String(r.status || '').toUpperCase() === 'IN_PROGRESS');
@@ -1355,7 +1392,8 @@ function RiderRequestReferencePlaceholder() {
 
 export function RiderRequestReference() {
   const params = useLocalSearchParams<{ pickup?: string; dropoff?: string }>();
-  const [pickup, setPickup] = useState(String(params.pickup || ''));
+  const initialPickup = String(params.pickup || '');
+  const [pickup, setPickup] = useState(initialPickup);
   const [dropoff, setDropoff] = useState(String(params.dropoff || ''));
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');

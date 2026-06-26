@@ -842,26 +842,39 @@ export default function BookScreen() {
   setDropoffCoords(prevPickupCoords || null);
   };
 
-  const useCurrentLocation = async () => {
+  const useCurrentLocation = async (opts?: { silent?: boolean }) => {
+    const silent = !!opts?.silent;
     try {
       setLocLoading(true);
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission required', 'Location permission is needed to use your current location.');
+        if (!silent) {
+          Alert.alert('Permission required', 'Location permission is needed to use your current location.');
+        }
         return;
       }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const pos =
+        (await Location.getLastKnownPositionAsync()) ||
+        (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+      if (!pos) return;
       const results = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
   const r = results?.[0];
   const address = r ? [r.name, r.street, r.city, r.region].filter(Boolean).join(', ') : 'Current location';
   setPickupLocation(address);
   setPickupCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
     } catch (e) {
-      Alert.alert('Location error', 'Could not get your location. Please try again.');
+      if (!silent) {
+        Alert.alert('Location error', 'Could not get your location. Please try again.');
+      }
     } finally {
       setLocLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (pickupLocation.trim()) return;
+    useCurrentLocation({ silent: true });
+  }, []);
 
   // Distance/Duration calculation using Google Distance Matrix API
   useEffect(() => {
@@ -990,7 +1003,10 @@ export default function BookScreen() {
                         label=""
                         placeholder="Austin, TX"
                         value={pickupLocation}
-                        onChangeText={setPickupLocation}
+                        onChangeText={(t) => {
+                          setPickupLocation(t);
+                          setPickupCoords(null);
+                        }}
                         onSelected={({ address, coords }) => {
                           setPickupLocation(address);
                           setPickupCoords(coords);
@@ -1005,7 +1021,10 @@ export default function BookScreen() {
                         label=""
                         placeholder="Houston, TX"
                         value={dropoffLocation}
-                        onChangeText={setDropoffLocation}
+                        onChangeText={(t) => {
+                          setDropoffLocation(t);
+                          setDropoffCoords(null);
+                        }}
                         onSelected={({ address, coords }) => {
                           setDropoffLocation(address);
                           setDropoffCoords(coords);
