@@ -1458,6 +1458,36 @@ export function RiderRequestReference() {
     if (!user) return Alert.alert('Sign in required', 'Please sign in again.');
     if (!pickup.trim() || !dropoff.trim() || !date.trim()) return Alert.alert('Missing details', 'Add pickup, destination, and date.');
     try {
+      const riderDoc = await getDoc(doc(firestore, 'riders', user.uid));
+      if (riderDoc.exists()) {
+        const vData = riderDoc.data() as any;
+        const isVerified = vData?.isVerified === true;
+        const deadline = vData?.verificationDeadline;
+        const isPastDeadline = deadline
+          ? new Date() > (typeof deadline?.toDate === 'function' ? deadline.toDate() : new Date(deadline))
+          : false;
+        if (!isVerified && isPastDeadline) {
+          Alert.alert(
+            'Verification Required',
+            'Your verification deadline has passed. Please verify your student status to post ride requests.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Verify Now', onPress: async () => {
+                try {
+                  const token = await firebaseAuth.currentUser?.getIdToken();
+                  if (token) {
+                    const { Linking } = require('react-native');
+                    await Linking.openURL(`https://ridealongapp.com/pages/verify?token=${encodeURIComponent(token)}`);
+                  }
+                } catch {}
+              }},
+            ]
+          );
+          return;
+        }
+      }
+    } catch {}
+    try {
       setSubmitting(true);
       let submitPickupCoords = pickupCoords;
       let submitDropoffCoords = dropoffCoords;
@@ -1490,6 +1520,34 @@ export function RiderRequestReference() {
       const enteredPrice = Number(String(price).replace(/[^0-9.\-]/g, ''));
       const resolvedPrice = !Number.isNaN(enteredPrice) && enteredPrice > 0 ? enteredPrice : routeSuggestedPrice;
       if (!resolvedPrice || resolvedPrice <= 0) return Alert.alert('Missing price', 'Add a max price or enter a route so we can suggest one.');
+
+      // Prevent duplicate pending requests for the same route + date
+      try {
+        const dupSnap = await getDocs(
+          query(
+            collection(firestore, 'rideRequests'),
+            where('riderId', '==', user.uid),
+            where('status', '==', 'pending'),
+          )
+        );
+        const isDuplicate = dupSnap.docs.some((d) => {
+          const r = d.data() as any;
+          return (
+            String(r.pickup || r.pickupAddress || '').trim().toLowerCase() === pickup.trim().toLowerCase() &&
+            String(r.dropoff || r.dropoffAddress || '').trim().toLowerCase() === dropoff.trim().toLowerCase() &&
+            String(r.date || '').trim() === date.trim()
+          );
+        });
+        if (isDuplicate) {
+          Alert.alert(
+            'Request already pending',
+            'You already have a pending request for this route and date.',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+      } catch {}
+
       await addDoc(collection(firestore, 'rideRequests'), {
         riderId: user.uid,
         riderEmail: user.email || null,
@@ -1659,6 +1717,7 @@ type TimeFilter = RiderRideFilter;
 
 export function RiderAvailableReference() {
   const { from, to } = useLocalSearchParams<{ from?: string; to?: string }>();
+  const uid = firebaseAuth.currentUser?.uid;
   const [liveRides, setLiveRides] = useState<MobileRidePosting[]>([]);
   const [loading, setLoading] = useState(true);
   const [myRequestedPostingIds, setMyRequestedPostingIds] = useState<Set<string>>(new Set());
@@ -1682,7 +1741,6 @@ export function RiderAvailableReference() {
 
   // Track which posting IDs this rider has already requested (so we can hide them)
   useEffect(() => {
-    const uid = firebaseAuth.currentUser?.uid;
     if (!uid) return undefined;
     const inactive = new Set(['cancelled', 'canceled', 'rejected', 'declined', 'completed']);
     const q = query(collection(firestore, 'ridePostingRequests'), where('riderId', '==', uid));
@@ -1697,7 +1755,7 @@ export function RiderAvailableReference() {
       });
       setMyRequestedPostingIds(ids);
     });
-  }, []);
+  }, [uid]);
 
   const filteredRides = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -1918,6 +1976,49 @@ export function RiderDetailReference() {
   const [confirmedRequest, setConfirmedRequest] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [paymentVisible, setPaymentVisible] = useState(false);
+  const [checkingVerification, setCheckingVerification] = useState(false);
+
+  const handleRequestSeat = async () => {
+    const user = firebaseAuth.currentUser;
+    if (!user) {
+      Alert.alert('Sign in required', 'Please sign in again.');
+      return;
+    }
+    try {
+      setCheckingVerification(true);
+      const riderDoc = await getDoc(doc(firestore, 'riders', user.uid));
+      if (riderDoc.exists()) {
+        const vData = riderDoc.data() as any;
+        const isVerified = vData?.isVerified === true;
+        const deadline = vData?.verificationDeadline;
+        const isPastDeadline = deadline
+          ? new Date() > (typeof deadline?.toDate === 'function' ? deadline.toDate() : new Date(deadline))
+          : false;
+        if (!isVerified && isPastDeadline) {
+          Alert.alert(
+            'Verification Required',
+            'Your verification deadline has passed. Please verify your student status to book rides.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Verify Now', onPress: async () => {
+                try {
+                  const token = await firebaseAuth.currentUser?.getIdToken();
+                  if (token) {
+                    const { Linking } = require('react-native');
+                    await Linking.openURL(`https://ridealongapp.com/pages/verify?token=${encodeURIComponent(token)}`);
+                  }
+                } catch {}
+              }},
+            ]
+          );
+          return;
+        }
+      }
+    } catch {} finally {
+      setCheckingVerification(false);
+    }
+    setPaymentVisible(true);
+  };
 
   const rawText = (value: any): string => {
     if (typeof value === 'string') return value.trim();
@@ -2216,7 +2317,7 @@ export function RiderDetailReference() {
         title="Ride Details"
         showBack
         onBack={goBackFromDetails}
-        bottomAction={<TouchableOpacity style={styles.primaryBtnFull} onPress={() => setPaymentVisible(true)}><Text style={styles.primaryText}>Request seat - ${ride.price.toFixed(2)}</Text></TouchableOpacity>}
+        bottomAction={<TouchableOpacity style={[styles.primaryBtnFull, (checkingVerification || paymentVisible) && { opacity: 0.6 }]} onPress={handleRequestSeat} disabled={checkingVerification || paymentVisible}><Text style={styles.primaryText}>{checkingVerification ? 'Checking...' : `Request seat - $${ride.price.toFixed(2)}`}</Text></TouchableOpacity>}
       >
         <View style={styles.detailCard}>
           <TouchableOpacity
@@ -2284,118 +2385,125 @@ export function RiderDetailReference() {
           const riderId = firebaseAuth.currentUser?.uid;
           const user = firebaseAuth.currentUser;
 
-          try {
-            if (riderId) {
-              // ride.raw is the raw Firestore data already loaded when this screen opened.
-              // Use it directly — avoids a redundant getDoc and works even if Firestore
-              // security rules restrict direct reads in this context.
-              const raw = ride.raw ?? {} as any;
-
-              const rawStr = (v: unknown): string | null =>
-                typeof v === 'string' && v.trim() ? v.trim() : null;
-
-              const pickup =
-                rawStr(raw.pickup) || rawStr(raw.pickupAddress) || rawStr(raw.from) || rawStr(raw.origin)
-                || rawStr(raw.pickupGeo?.address) || rawStr(raw.pickupLocation?.address) || '';
-              const dropoff =
-                rawStr(raw.dropoff) || rawStr(raw.dropoffAddress) || rawStr(raw.to) || rawStr(raw.destination)
-                || rawStr(raw.dropoffGeo?.address) || rawStr(raw.dropoffLocation?.address) || '';
-              const date = rawStr(raw.date) || rawStr(raw.departureDate) || rawStr(raw.scheduledDate) || '';
-              const time = rawStr(raw.time) || rawStr(raw.departureTime) || rawStr(raw.scheduledTime) || '';
-
-              // Fetch rider profile for name
-              const riderSnap = await getDoc(doc(firestore, 'riders', riderId)).catch(() => null);
-              const rd = riderSnap?.exists() ? riderSnap.data() as any : {};
-              const riderName = [rd.firstName, rd.lastName].filter(Boolean).join(' ').trim()
-                || user?.displayName || 'Rider';
-
-              // driverId is available from ride.raw (same Firestore doc, already loaded)
-              const driverId = rawStr(raw.driverId) || ride.driverId || null;
-              const driverSnap = driverId
-                ? await getDoc(doc(firestore, 'drivers', driverId)).catch(() => null)
-                : null;
-              const dd = driverSnap?.exists() ? driverSnap.data() as any : {};
-              const driverFullName = [dd.firstName, dd.lastName].filter(Boolean).join(' ').trim()
-                || dd.displayName || rawStr(raw.driverName) || ride.driverName || 'Driver';
-              const driverEmail = dd.email || rawStr(raw.driverEmail) || '';
-
-              // Write directly to ridePostingRequests — rider home now subscribes to this collection
-              const reqData: Record<string, any> = {
-                ridePostingId: rideId,
-                rideId,
-                riderId,
-                riderName,
-                riderEmail: user?.email || '',
-                driverId,
-                driverName: driverFullName,
-                driverEmail,
-                pickup,
-                dropoff,
-                from: pickup,
-                to: dropoff,
-                date,
-                time,
-                passengers: 1,
-                contributionAmount: ride.price,
-                price: ride.price,
-                paymentIntentId,
-                paymentStatus: 'authorized',
-                status: 'pending',
-                state: 'pending',
-                distance: raw.distance || null,
-                duration: raw.duration || null,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-                _localCreatedMs: Date.now(),
-              };
-
-              // Use a deterministic doc ID so concurrent calls (race between client + webhook)
-              // overwrite the same doc instead of creating duplicates.
-              const reqDocId = `${riderId}_${rideId}`;
-              const reqRef = doc(firestore, 'ridePostingRequests', reqDocId);
-
-              // Cancel any legacy random-ID docs for this (rider, posting) pair that are still pending.
-              const staleSnap = await getDocs(
-                query(collection(firestore, 'ridePostingRequests'), where('riderId', '==', riderId))
-              ).catch(() => null);
-              if (staleSnap) {
-                const terminal = new Set(['cancelled', 'canceled', 'rejected', 'completed', 'accepted', 'confirmed']);
-                await Promise.all(
-                  staleSnap.docs
-                    .filter((d) => {
-                      if (d.id === reqDocId) return false; // skip the doc we're about to write
-                      const r = d.data() as any;
-                      const pid = r.ridePostingId || r.rideId || '';
-                      return pid === rideId && !terminal.has(String(r.status || '').toLowerCase());
-                    })
-                    .map((d) => updateDoc(doc(firestore, 'ridePostingRequests', d.id), {
-                      status: 'cancelled',
-                      updatedAt: serverTimestamp(),
-                    }))
-                ).catch(() => {});
-              }
-
-              await setDoc(reqRef, reqData);
-
-              // Best-effort: trigger server-side driver notification
-              try {
-                const { getApiBaseUrl } = await import('@/constants/services');
-                const base = getApiBaseUrl();
-                await fetch(`${base}/api/rides/${rideId}/request`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ paymentIntentId, riderId, driverId }),
-                });
-              } catch {}
-            }
-          } catch (e) {
-            console.warn('[booking] ride request creation failed', e);
+          if (!riderId) {
+            Alert.alert('Error', 'Session expired. Please sign in again.');
+            return;
           }
 
-          router.replace({
-            pathname: '/(rider)/booking-confirmed',
-            params: { rideId, driverId: ride.driverId || '', driverName: ride.driverName || '' },
-          } as any);
+          try {
+            // ride.raw is the raw Firestore data already loaded when this screen opened.
+            const raw = ride.raw ?? {} as any;
+
+            const rawStr = (v: unknown): string | null =>
+              typeof v === 'string' && v.trim() ? v.trim() : null;
+
+            const pickup =
+              rawStr(raw.pickup) || rawStr(raw.pickupAddress) || rawStr(raw.from) || rawStr(raw.origin)
+              || rawStr(raw.pickupGeo?.address) || rawStr(raw.pickupLocation?.address) || '';
+            const dropoff =
+              rawStr(raw.dropoff) || rawStr(raw.dropoffAddress) || rawStr(raw.to) || rawStr(raw.destination)
+              || rawStr(raw.dropoffGeo?.address) || rawStr(raw.dropoffLocation?.address) || '';
+            const date = rawStr(raw.date) || rawStr(raw.departureDate) || rawStr(raw.scheduledDate) || '';
+            const time = rawStr(raw.time) || rawStr(raw.departureTime) || rawStr(raw.scheduledTime) || '';
+
+            // Fetch rider profile for name
+            const riderSnap = await getDoc(doc(firestore, 'riders', riderId)).catch(() => null);
+            const rd = riderSnap?.exists() ? riderSnap.data() as any : {};
+            const riderName = [rd.firstName, rd.lastName].filter(Boolean).join(' ').trim()
+              || user?.displayName || 'Rider';
+
+            const driverId = rawStr(raw.driverId) || ride.driverId || null;
+            const driverSnap = driverId
+              ? await getDoc(doc(firestore, 'drivers', driverId)).catch(() => null)
+              : null;
+            const dd = driverSnap?.exists() ? driverSnap.data() as any : {};
+            const driverFullName = [dd.firstName, dd.lastName].filter(Boolean).join(' ').trim()
+              || dd.displayName || rawStr(raw.driverName) || ride.driverName || 'Driver';
+            const driverEmail = dd.email || rawStr(raw.driverEmail) || '';
+
+            const reqData: Record<string, any> = {
+              ridePostingId: rideId,
+              rideId,
+              riderId,
+              riderName,
+              riderEmail: user?.email || '',
+              driverId,
+              driverName: driverFullName,
+              driverEmail,
+              pickup,
+              dropoff,
+              from: pickup,
+              to: dropoff,
+              date,
+              time,
+              passengers: 1,
+              contributionAmount: ride.price,
+              price: ride.price,
+              paymentIntentId,
+              paymentStatus: 'authorized',
+              status: 'pending',
+              state: 'pending',
+              distance: raw.distance || null,
+              duration: raw.duration || null,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+              _localCreatedMs: Date.now(),
+            };
+
+            // Deterministic doc ID prevents duplicate requests from double-taps or retries
+            const reqDocId = `${riderId}_${rideId}`;
+            const reqRef = doc(firestore, 'ridePostingRequests', reqDocId);
+
+            // Cancel any stale pending docs for this (rider, posting) pair
+            const staleSnap = await getDocs(
+              query(collection(firestore, 'ridePostingRequests'), where('riderId', '==', riderId))
+            ).catch(() => null);
+            if (staleSnap) {
+              const terminal = new Set(['cancelled', 'canceled', 'rejected', 'completed', 'accepted', 'confirmed']);
+              await Promise.all(
+                staleSnap.docs
+                  .filter((d) => {
+                    if (d.id === reqDocId) return false;
+                    const r = d.data() as any;
+                    const pid = r.ridePostingId || r.rideId || '';
+                    return pid === rideId && !terminal.has(String(r.status || '').toLowerCase());
+                  })
+                  .map((d) => updateDoc(doc(firestore, 'ridePostingRequests', d.id), {
+                    status: 'cancelled',
+                    updatedAt: serverTimestamp(),
+                  }))
+              ).catch(() => {});
+            }
+
+            await setDoc(reqRef, reqData);
+
+            // Best-effort: notify server so driver receives a push notification
+            try {
+              const { getApiBaseUrl } = await import('@/constants/services');
+              const base = getApiBaseUrl();
+              await fetch(`${base}/api/rides/${rideId}/request`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paymentIntentId, riderId, driverId }),
+              });
+            } catch {}
+
+            // Only navigate to confirmed screen after the booking is persisted
+            router.replace({
+              pathname: '/(rider)/booking-confirmed',
+              params: { rideId, driverId: ride.driverId || '', driverName: ride.driverName || '' },
+            } as any);
+          } catch (e: any) {
+            // Booking creation failed — void the authorized payment so the rider is not charged
+            try {
+              const { cancelRidePayment } = await import('@/services/payments');
+              await cancelRidePayment({ paymentIntentId, rideId });
+            } catch {}
+            Alert.alert(
+              'Booking failed',
+              'Your payment was not charged. Please try again.',
+            );
+          }
         }}
       />
     </>

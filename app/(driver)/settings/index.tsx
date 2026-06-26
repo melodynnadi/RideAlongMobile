@@ -133,6 +133,12 @@ export default function SettingsScreen() {
               onPress={() => router.push({ pathname: '/(driver)/settings/account-settings', params: { returnTo: '/(driver)/settings' } } as any)}
             />
             <NavRow
+              icon="document-attach-outline"
+              label="Driver documents"
+              sub="License & auto insurance"
+              onPress={() => router.push({ pathname: '/(driver)/settings/driver-documents', params: { returnTo: '/(driver)/settings' } } as any)}
+            />
+            <NavRow
               icon="school-outline"
               label=".edu verification"
               sub={verLabel}

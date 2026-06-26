@@ -12,7 +12,7 @@ import type { AddBankAccountPayload, BankAccount } from '@/types';
 import { createDashboardLink, createOnboardingLink, instantDeposit, fetchPayouts, type Payout } from '@/src/services/payouts';
 import { logActivity } from '@/src/services/activity';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
-import { doc, setDoc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, setDoc, getDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 
 const NAVY   = '#15233A';
@@ -62,19 +62,13 @@ export default function EarningsScreen() {
       return;
     }
 
-    const tStart = Date.now();
     setLoading(true);
     setDataLoaded(false);
 
     const firestorePromise = (async () => {
       try {
-        const userRef = doc(firestore, 'drivers', user.uid);
-        const [userDoc, ridesSnap] = await Promise.all([
-          getDoc(userRef),
-          getDocs(query(collection(firestore, 'confirmedRides'), where('driverId', '==', user.uid), where('status', '==', 'COMPLETED'))),
-        ]);
+        const userDoc = await getDoc(doc(firestore, 'drivers', user.uid));
         if (userDoc.exists()) { const data = userDoc.data(); if (data?.stripeAccountId) setAccountId(data.stripeAccountId); }
-        setRidesCompleted(ridesSnap.size);
       } catch {}
     })();
 
@@ -92,7 +86,6 @@ export default function EarningsScreen() {
       setDataLoaded(true);
     } finally {
       setLoading(false);
-      if (__DEV__) console.log(`[Earnings] Load complete in ${Date.now() - tStart}ms`);
     }
   }
 
@@ -107,10 +100,6 @@ export default function EarningsScreen() {
     }
   }, [earnings, ridesCompleted]);
 
-  useEffect(() => {
-    console.log('[Earnings] PayoutStatus updated:', payoutStatus);
-    console.log('[Earnings] Bank accounts count:', bankAccounts.length);
-  }, [payoutStatus]);
 
   useEffect(() => {
     const handleAppStateChange = (nextAppState: string) => {
@@ -118,6 +107,24 @@ export default function EarningsScreen() {
     };
     const sub = AppState.addEventListener('change', handleAppStateChange);
     return () => sub?.remove();
+  }, []);
+
+  // Real-time listener: updates completed ride count as rides finish
+  useEffect(() => {
+    const user = firebaseAuth.currentUser;
+    if (!user) return;
+
+    const q = query(
+      collection(firestore, 'confirmedRides'),
+      where('driverId', '==', user.uid),
+      where('status', '==', 'COMPLETED'),
+    );
+
+    const unsubscribe = onSnapshot(q, (snap) => {
+      setRidesCompleted(snap.size);
+    }, () => {});
+
+    return unsubscribe;
   }, []);
 
   const parseDate = (raw: any): Date | null => {

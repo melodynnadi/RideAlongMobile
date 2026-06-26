@@ -203,6 +203,30 @@ export default function ChatDetailScreen() {
       }
       await updateDoc(doc(firestore, 'chats', chatId as string), updateData);
       setMessageText('');
+
+      // Push notification to the rider
+      const notifyRiderId = riderId || (ps.find((p: string) => p !== currentUser.uid) ?? null);
+      if (notifyRiderId) {
+        try {
+          const riderSnap = await getDoc(doc(firestore, 'riders', String(notifyRiderId)));
+          const pushToken = riderSnap.exists() ? (riderSnap.data() as any)?.expoPushToken : null;
+          if (pushToken && String(pushToken).startsWith('ExponentPushToken')) {
+            const senderName = currentUser.displayName || 'Your driver';
+            const pushRes = await fetch('https://exp.host/--/api/v2/push/send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+              body: JSON.stringify({
+                to: pushToken,
+                title: `Message from ${senderName}`,
+                body: text.length > 100 ? `${text.slice(0, 97)}...` : text,
+                data: { type: 'chat_message', chatId: String(chatId) },
+                sound: 'default',
+              }),
+            });
+            if (!pushRes.ok) throw new Error(`Push failed: ${pushRes.status}`);
+          }
+        } catch {}
+      }
     } catch (e) { console.error('Error sending message:', e); }
     finally { setSending(false); }
   };

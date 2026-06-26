@@ -20,7 +20,6 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
   const riderId = firebaseAuth.currentUser?.uid ?? null;
   const [creating, setCreating] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  // Payment flow bypassed for now; keep minimal state
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<'card' | 'apple' | null>(null);
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
@@ -43,11 +42,8 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
 
   const totals = useMemo(() => computeTotals(baseFare), [baseFare]);
   const baseUrl = getApiBaseUrl();
-  const log = (...args: any[]) => {
-    try {
-      console.log('[PaymentModal]', ...args);
-    } catch {}
-  };
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const log = (..._args: any[]) => {};
 
   useEffect(() => {
     let cancelled = false;
@@ -123,11 +119,8 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
               isDefault: m.isDefault,
             }));
             await updateDoc(userRef, { paymentMethods: stored });
-          } catch (persistErr) {
-            console.error('Failed to persist payment methods', persistErr);
-          }
+          } catch {}
         } catch (err: any) {
-          console.error('Failed to fetch payment methods', err);
           if (!cancelled) {
             const message = err?.message ? `Couldn't refresh payment methods: ${err.message}` : 'Unable to refresh payment methods.';
             setErrorMsg(message);
@@ -137,8 +130,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
             const arr = (snap.data()?.paymentMethods ?? []) as any[];
             const normalized = normalizeCards(arr);
             applyCards(normalized);
-          } catch (fallbackErr) {
-            console.error('Failed to load fallback payment methods', fallbackErr);
+          } catch {
             if (!cancelled) {
               setSavedCards([]);
               setSelectedPaymentMethodId(null);
@@ -418,19 +410,20 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           updatedAt: Timestamp.now()
         };
         
-        console.log('🚀 Creating ridePostingRequest document with data:', JSON.stringify(ridePostingRequestData, null, 2));
-        
         const rprCol = collection(firestore, 'ridePostingRequests');
-        const docRef = await addDoc(rprCol, ridePostingRequestData);
-        
-        console.log('✅ RidePostingRequest created successfully!');
-        console.log('   Document ID:', docRef.id);
-        console.log('   ridePostingId:', rideId);
-        console.log('   riderId:', riderId);
-        console.log('   status:', 'pending');
-        log('RidePostingRequest created:', docRef.id);
-        
-        // Show success message
+        try {
+          await addDoc(rprCol, ridePostingRequestData);
+        } catch (firestoreErr: any) {
+          // Payment was authorized on Stripe but the ride request doc failed to save.
+          // Surface this clearly so the rider can contact support with the payment ID.
+          Alert.alert(
+            'Payment authorized — request not saved',
+            `Your payment was authorized (ref: ${id}) but we could not save your ride request. Please contact support@ridealongapp.com with this reference so we can complete your booking.`,
+            [{ text: 'OK' }]
+          );
+          throw firestoreErr;
+        }
+
         Alert.alert(
           'Request Sent!',
           'Your ride request has been sent to the driver. Payment has been authorized and will be captured when the driver confirms pickup.',
@@ -441,7 +434,6 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       onClose();
       // Success alert removed - handled by the calling component (book.tsx) or shown above
     } catch (err: any) {
-      console.error('Payment flow error', err);
       setErrorMsg(err?.message || 'Payment failed');
     } finally {
       setConfirming(false);

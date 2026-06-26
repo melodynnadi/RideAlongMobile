@@ -247,8 +247,6 @@ export default function MessagesScreen() {
           }
         },
         (error: any) => {
-          console.error('[Chats] Snapshot error:', error?.code, error?.message || error);
-
           if (!isFallback && (error?.code === 'failed-precondition' || error?.message?.includes('index'))) {
             if (activeUnsub) activeUnsub();
             attachListener(plainQuery, true, false);

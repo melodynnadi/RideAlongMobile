@@ -1,6 +1,9 @@
 import { router, Tabs } from 'expo-router';
 import React, { useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { RouteErrorFallback } from '@/components/ErrorBoundary';
+
+export { RouteErrorFallback as ErrorBoundary };
 
 import { HapticTab } from '@/components/HapticTab';
 import TabBarBackground from '@/components/ui/TabBarBackground';
@@ -84,9 +87,6 @@ export default function RiderTabLayout() {
       <Tabs.Screen name="trip-in-progress" options={{ href: null }} />
       <Tabs.Screen name="rate-trip" options={{ href: null }} />
       <Tabs.Screen name="settings" options={{ href: null, tabBarStyle: { display: 'none' } }} />
-      <Tabs.Screen name="legal" options={{ href: null }} />
-      <Tabs.Screen name="legal/privacy" options={{ href: null }} />
-      <Tabs.Screen name="legal/terms" options={{ href: null }} />
       <Tabs.Screen name="messages/[chatId]" options={{ href: null }} />
       <Tabs.Screen name="ride/[id]" options={{ href: null }} />
       <Tabs.Screen name="trip/[confirmedRideId]" options={{ href: null }} />

@@ -6,6 +6,7 @@ import { resolveConfirmedDocId } from '@/src/services/ridesData';
 import { submitDriverFlag, FlagPayload } from '@/src/services/flagService';
 import { logActivity } from '@/src/services/activity';
 import EmailTriggerService from '../../services/EmailTriggerService';
+import { captureRidePayment, cancelRidePayment } from '@/services/payments';
 
 function showRideError(e: any) {
   try { console.warn('updateRideStatus error', e); } catch {}
@@ -151,6 +152,24 @@ export async function riderCompleteRide(confirmedRideId: string): Promise<boolea
       entityId: confirmedRideId,
       metadata: { role: 'rider' },
     });
+
+    // Capture the authorized payment — rider confirming is the final step
+    try {
+      const rideSnap = await getDoc(doc(firestore, 'confirmedRides', confirmedRideId));
+      if (rideSnap.exists()) {
+        const rideData = rideSnap.data() as any;
+        const paymentIntentId: string | null =
+          rideData.paymentIntentId || rideData.stripePaymentIntentId || null;
+        const driverId: string | null = rideData.driverId || null;
+        if (paymentIntentId && driverId) {
+          await captureRidePayment(paymentIntentId, confirmedRideId, driverId);
+        }
+      }
+    } catch (captureErr) {
+      // Don't fail the completion if capture fails — admin can reconcile via Stripe dashboard
+      try { console.warn('[riderComplete] payment capture failed', captureErr); } catch {}
+    }
+
     return true;
   } catch (e) {
     showRideError(e);
@@ -161,16 +180,73 @@ export async function riderCompleteRide(confirmedRideId: string): Promise<boolea
 export async function cancelRide(card: RideCardRef): Promise<boolean> {
   const fallbackId = card.confirmedId || card.rideRequestId || card.ridePostingId || card.riderId || null;
   try {
-    const rideId = await resolveConfirmedDocId(card).catch(() => fallbackId || null);
+    const rideId = await resolveConfirmedDocId(card).catch(() => fallbackId);
+    if (!rideId) {
+      Alert.alert('Error', 'Ride not found. Please refresh and try again.');
+      return false;
+    }
+
+    const rideSnap = await getDoc(doc(firestore, 'confirmedRides', rideId));
+    if (!rideSnap.exists()) {
+      Alert.alert('Error', 'Ride not found. It may have already been cancelled.');
+      return false;
+    }
+    const rideData = rideSnap.data() as any;
+    const currentStatus = String(rideData.status || '').replace(/[-\s]/g, '_').toUpperCase();
+
+    if (['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED', 'COMPLETED'].includes(currentStatus)) {
+      Alert.alert('Cannot cancel', 'This ride cannot be cancelled once it has started.');
+      return false;
+    }
+
+    // Void the authorized payment so the rider is not charged
+    const paymentIntentId: string | null =
+      rideData.paymentIntentId || rideData.stripePaymentIntentId || null;
+    if (paymentIntentId) {
+      try {
+        await cancelRidePayment({ paymentIntentId, rideId });
+      } catch (payErr) {
+        try { console.warn('[cancelRide] payment void failed', payErr); } catch {}
+        // Continue — the ride should still be cancelled even if payment void fails
+      }
+    }
+
+    // Mark the confirmed ride cancelled
+    await updateDoc(doc(firestore, 'confirmedRides', rideId), {
+      status: 'CANCELLED',
+      cancelledAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    // Propagate cancellation to the source request documents
+    const sourceRequestId: string | null = rideData.rideRequestId || null;
+    const sourcePostingRequestId: string | null = rideData.ridePostingRequestId || null;
+    if (sourceRequestId) {
+      await updateDoc(doc(firestore, 'rideRequests', sourceRequestId), {
+        status: 'cancelled',
+        updatedAt: serverTimestamp(),
+      }).catch(() => {});
+    }
+    if (sourcePostingRequestId) {
+      await updateDoc(doc(firestore, 'ridePostingRequests', sourcePostingRequestId), {
+        status: 'cancelled',
+        updatedAt: serverTimestamp(),
+      }).catch(() => {});
+    }
+
     await logActivity({
       type: 'ride_canceled',
       entityType: 'ride',
-      entityId: rideId ?? fallbackId ?? null,
-      metadata: { card, outcome: 'unsupported' },
+      entityId: rideId,
+      metadata: { card },
     });
-  } catch {}
-  Alert.alert('Unsupported', 'Cancelling a confirmed ride is not supported.');
-  return false;
+
+    return true;
+  } catch (e: any) {
+    try { console.warn('[cancelRide] error', e); } catch {}
+    Alert.alert('Error', 'Could not cancel the ride. Please try again.');
+    return false;
+  }
 }
 
 export async function flagRide(card: RideCardRef, payload: FlagPayload): Promise<boolean> {

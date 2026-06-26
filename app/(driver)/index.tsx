@@ -1248,15 +1248,15 @@ export default function HomeScreen() {
         setUnreadCount(unread);
       };
 
-      const uN1 = onSnapshot(qUserId, mergeAndSet, (e) => console.warn('notifications userId listener error', e));
+      const uN1 = onSnapshot(qUserId, mergeAndSet, () => {});
       unsubs.push(uN1);
-      const uN2 = onSnapshot(qRecipientId, mergeAndSet, (e) => console.warn('notifications recipientId listener error', e));
+      const uN2 = onSnapshot(qRecipientId, mergeAndSet, () => {});
       unsubs.push(uN2);
       if (qEmailUser) {
-        const uN3 = onSnapshot(qEmailUser, mergeAndSet, (e) => console.warn('notifications userEmail listener error', e));
+        const uN3 = onSnapshot(qEmailUser, mergeAndSet, () => {});
         unsubs.push(uN3);
       }
-      const uN4 = onSnapshot(qRecipients, mergeAndSet, (e) => console.warn('notifications recipients listener error', e));
+      const uN4 = onSnapshot(qRecipients, mergeAndSet, () => {});
       unsubs.push(uN4);
     } catch (e) {
       console.warn('notifications listeners setup failed', e);
@@ -1630,7 +1630,6 @@ export default function HomeScreen() {
           const statusRaw = String(r?.status || '').toUpperCase();
           const statusAtFlagRaw = String(r?.statusAtFlag || r?.statusBeforeFlag || r?.flaggedFromStatus || r?.previousStatus || '').replace(/[-\s]/g, '_').toUpperCase();
           const isHistoryOnly = statusRaw === 'COMPLETED' || (statusRaw === 'FLAGGED' && statusAtFlagRaw === 'COMPLETED');
-          console.log(`[confirmedRides listener] Doc ${d.id}: status="${r?.status}", statusRaw="${statusRaw}"`);
           // Always flag maps so we can hide posting/request cards even when completed
           if (r.rideRequestId) reqMap[String(r.rideRequestId)] = true;
           if (r.ridePostingId) postMap[String(r.ridePostingId)] = true;
@@ -1724,17 +1723,6 @@ export default function HomeScreen() {
             };
           }
         });
-        console.log('[confirmedRides] groupBuckets:', Object.keys(groupBuckets).map(pid => ({
-          postingId: pid,
-          count: groupBuckets[pid].length,
-          ids: groupBuckets[pid].map(i => i.id),
-          statuses: groupBuckets[pid].map(i => i.data?.status),
-          seatCount: Number(
-            groupBuckets[pid]?.[0]?.data?.seatsAvailable
-            || groupBuckets[pid]?.[0]?.data?.originalRidePosting?.seatsAvailable
-            || 1
-          )
-        })));
         // Aggregate group rides (2+ seats) into a single card per posting as soon as first passenger is confirmed
         Object.entries(groupBuckets).forEach(([pid, items]) => {
           const seatCount = Number(
@@ -1791,7 +1779,6 @@ export default function HomeScreen() {
             );
             // Skip group ride if any child was flagged after COMPLETED (hide from upcoming)
             if (anyFlaggedWasCompleted) {
-              console.log('[groupRide aggregation]', pid, 'skipping - contains flagged completed ride');
               return;
             }
             // Determine aggregated status: PENDING until all seats filled, then follow ride progression
@@ -1804,7 +1791,6 @@ export default function HomeScreen() {
                   : (allConfirmed || anyConfirmed || anyPending)
                     ? 'CONFIRMED'
                     : 'PENDING';
-            console.log('[groupRide aggregation]', pid, 'childStatuses:', childStatuses, '=>', aggregatedStatus);
             // Remove individual posting/request cards for this posting once group view is available
             Object.keys(cards).forEach((k) => { if (k === `ridePosting-${pid}`) delete (cards as any)[k]; });
             items.forEach((it) => {
@@ -1958,7 +1944,6 @@ export default function HomeScreen() {
           snap.forEach((d) => {
             const r = d.data() as any;
             const dt = composeDateTime(r?.date, r?.time) || getRideDateTime(r);
-            console.log(`[ridePostings] Processing posting ${d.id}: date="${r?.date}", time="${r?.time}", dt hours=${dt?.getHours()}`);
             const from = extractAddress(r, 'pickup') || 'Pickup';
             const to = extractAddress(r, 'dropoff') || 'Dropoff';
             const price = r?.pricePerSeat ?? r?.contributionAmount ?? r?.price ?? r?.estimatedFare;
@@ -2204,24 +2189,17 @@ export default function HomeScreen() {
         if (!user) return;
         const token = await user.getIdToken();
         const apiUrl = getApiBaseUrl();
-        console.log('[Earnings] Fetching from:', `${apiUrl}/api/connect/driver-earnings?userId=${uid}&summaryOnly=1`);
         const res = await fetch(`${apiUrl}/api/connect/driver-earnings?userId=${uid}&summaryOnly=1`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        console.log('[Earnings] Response status:', res.status, res.statusText);
         if (!res.ok) {
-          const errorText = await res.text();
-          console.error('[Earnings] Error response:', errorText);
           throw new Error('Failed to fetch earnings');
         }
         const data = await res.json();
-        console.log('[Earnings] Response data:', JSON.stringify(data, null, 2));
-        console.log('[Earnings] Setting totalEarnings to:', data.lifetime || 0);
         if (mounted) {
           setStats((s) => ({ ...s, totalEarnings: data.lifetime || 0 }));
         }
-      } catch (err) {
-        console.error('[Earnings] Error fetching earnings:', err);
+      } catch {
         if (mounted) setStats((s) => ({ ...s, totalEarnings: 0 }));
       }
     }
@@ -4043,9 +4021,7 @@ function formatDate(d: Date) {
   try {
     const dateStr = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     const timeStr = formatTime(d);
-    const result = `${dateStr}, ${timeStr}`;
-    console.log(`[formatDate] Input Date: ${d.toString()}, Output: "${result}"`);
-    return result;
+    return `${dateStr}, ${timeStr}`;
   } catch {
     return d.toString();
   }
@@ -4059,9 +4035,7 @@ function isSameLocalDate(a: Date, b: Date) {
 
 function formatTime(d: Date) {
   try {
-    const result = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-    console.log(`[formatTime] Date hours: ${d.getHours()}, Result: "${result}"`);
-    return result;
+    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   } catch {
     return '';
   }
@@ -4109,25 +4083,11 @@ function prettyStatus(s?: string) {
 function toDateField(v: any): Date | null {
   try {
     if (!v) return null;
-    if (v instanceof Date) {
-      console.log(`[toDateField] Already a Date: ${v.toString()}`);
-      return v;
-    }
-    if (v instanceof Timestamp) {
-      const result = v.toDate();
-      console.log(`[toDateField] Timestamp converted: ${result.toString()}`);
-      return result;
-    }
-    if (typeof v === 'number') {
-      // Assume millis
-      const result = new Date(v);
-      console.log(`[toDateField] Number (millis) converted: ${result.toString()}`);
-      return result;
-    }
+    if (v instanceof Date) return v;
+    if (v instanceof Timestamp) return v.toDate();
+    if (typeof v === 'number') return new Date(v);
     if (typeof v === 'string') {
-      console.log(`[toDateField] String input: "${v}"`);
       const d = new Date(v);
-      console.log(`[toDateField] String parsed to: ${d.toString()}, Hours: ${d.getHours()}`);
       return isNaN(d.getTime()) ? null : d;
     }
     return null;

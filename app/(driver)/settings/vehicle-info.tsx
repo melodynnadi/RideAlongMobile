@@ -173,8 +173,7 @@ export default function VehicleInfoScreen() {
           '',
         imagePath: vd.imagePath || '',
       });
-    } catch (error) {
-      console.error('Error loading vehicle info:', error);
+    } catch {
       Alert.alert('Error', 'Failed to load vehicle information');
     } finally {
       setLoading(false);
@@ -183,6 +182,26 @@ export default function VehicleInfoScreen() {
   const saveVehicleInfo = async () => {
     const user = firebaseAuth.currentUser;
     if (!user) return;
+
+    const make  = vehicleInfo.make?.trim() || '';
+    const model = vehicleInfo.model?.trim() || '';
+    const year  = vehicleInfo.year?.trim() || '';
+    const plate = vehicleInfo.licensePlate?.trim() || '';
+
+    if (!make || !model) {
+      Alert.alert('Missing info', 'Please enter your vehicle make and model.');
+      return;
+    }
+    const yearNum = parseInt(year, 10);
+    const maxYear = new Date().getFullYear() + 1;
+    if (!year || isNaN(yearNum) || yearNum < 1980 || yearNum > maxYear) {
+      Alert.alert('Invalid year', `Please enter a valid vehicle year (1980–${maxYear}).`);
+      return;
+    }
+    if (!plate) {
+      Alert.alert('Missing info', 'Please enter your license plate number.');
+      return;
+    }
 
     try {
       setSaving(true);
@@ -199,10 +218,7 @@ export default function VehicleInfoScreen() {
         imagePath = uploaded.imagePath;
       }
 
-      const year = vehicleInfo.year?.trim() || '';
-      const make = vehicleInfo.make?.trim() || '';
-      const model = vehicleInfo.model?.trim() || '';
-      const licensePlate = vehicleInfo.licensePlate?.trim() || '';
+      const licensePlate = plate;
       const savedVehicle = {
         ...(driverData?.vehicleInfo || {}),
         makeModel: [year, make, model].filter(Boolean).join(' '),

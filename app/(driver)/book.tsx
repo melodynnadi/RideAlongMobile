@@ -519,7 +519,6 @@ export default function BookScreen() {
       if (ampm === 'pm' && h < 12) h += 12;
       if (ampm === 'am' && h === 12) h = 0;
       const result = `${pad2(h)}:${pad2(mm)}`;
-      console.log(`[to24h] Converted "${t}" to "${result}"`);
       return result;
     }
     // If already 24h 'HH:mm'
@@ -529,7 +528,6 @@ export default function BookScreen() {
       const mm = Math.max(0, Math.min(59, parseInt(m2[2], 10)));
       return `${pad2(h)}:${pad2(mm)}`;
     }
-    console.log(`[to24h] No match for "${t}", returning as-is`);
     return t; // fallback
   };
 
@@ -538,14 +536,9 @@ export default function BookScreen() {
       if (!d && !t) return null;
       if (d && t) {
         const t24 = /am|pm/i.test(t) ? to24h(t) : t;
-        console.log(`[toRequestedDate] date="${d}", time="${t}", t24="${t24}"`);
-        // Parse date components to avoid timezone issues
         const [year, month, day] = d.split('-').map(n => parseInt(n, 10));
         const [hours, minutes] = t24.split(':').map(n => parseInt(n, 10));
-        console.log(`[toRequestedDate] Parsed: year=${year}, month=${month}, day=${day}, hours=${hours}, minutes=${minutes}`);
-        // Use local timezone explicitly to avoid UTC conversion
         const dt = new Date(year, month - 1, day, hours, minutes || 0);
-        console.log(`[toRequestedDate] Created Date: ${dt.toString()}`);
         return isNaN(dt.getTime()) ? null : dt;
       }
       if (d) {
@@ -768,8 +761,6 @@ export default function BookScreen() {
 
       // Call backend API to create ride posting and trigger preferred route notifications
       const apiUrl = getApiBaseUrl();
-      console.log('Creating ride posting via API:', `${apiUrl}/api/ride-postings`);
-      
       try {
         const response = await fetch(`${apiUrl}/api/ride-postings`, {
           method: 'POST',
@@ -785,7 +776,6 @@ export default function BookScreen() {
           throw new Error(result.message || result.error || 'Failed to create ride posting');
         }
 
-        console.log('Ride posting created with preferred route notifications:', result);
 
         // Send ride posted email
         try {

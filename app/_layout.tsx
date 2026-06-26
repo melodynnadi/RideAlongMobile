@@ -11,6 +11,7 @@ import '../global.css';
 import { useAuthStore } from '@/stores/authStore';
 import { ThemeProvider} from '@/hooks/ThemeContext';
 import DismissKeyboardView from '@/components/DismissKeyboardView';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 const queryClient = new QueryClient();
 
@@ -92,9 +93,11 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <ThemeProvider>
-            <DismissKeyboardView style={{ flex: 1 }}>
-              <AppStack />
-            </DismissKeyboardView>
+            <ErrorBoundary>
+              <DismissKeyboardView style={{ flex: 1 }}>
+                <AppStack />
+              </DismissKeyboardView>
+            </ErrorBoundary>
           </ThemeProvider>
         </QueryClientProvider>
       </SafeAreaProvider>
