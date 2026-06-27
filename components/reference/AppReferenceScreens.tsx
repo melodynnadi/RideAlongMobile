@@ -1298,25 +1298,42 @@ function RateTripReferenceInner() {
   }, [confirmedRideId, uid]);
 
   const handleSubmit = async () => {
-    if (submitting || stars === 0) {
-      if (stars === 0) Alert.alert('Select a rating', 'Please tap a star before submitting.');
+    const safeStars = Math.round(stars);
+    if (submitting) return;
+    if (safeStars < 1 || safeStars > 5) {
+      Alert.alert('Select a rating', 'Please tap a star before submitting.');
       return;
     }
+    if (!confirmedRideId || !uid) return;
     setSubmitting(true);
     try {
-      if (confirmedRideId) {
-        await submitRating({ rideId: confirmedRideId, stars, comment: note.trim() || undefined });
-        const ratedField = role === 'rider' ? 'riderRated' : 'driverRated';
-        await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), { [ratedField]: true }).catch(() => undefined);
+      // Re-check to prevent duplicate submissions from race conditions
+      const [alreadyRated, rideSnap] = await Promise.all([
+        hasUserRatedRide(confirmedRideId, uid),
+        getDoc(doc(firestore, 'confirmedRides', confirmedRideId)),
+      ]);
+      if (alreadyRated) {
+        router.replace(role === 'driver' ? '/(driver)/' as any : '/(rider)/' as any);
+        return;
       }
+      if (!rideSnap.exists()) {
+        Alert.alert('Ride not found', 'This ride could not be found. It may have been removed.');
+        return;
+      }
+      const rideStatus = String(rideSnap.data()?.status || '').toUpperCase();
+      if (!['COMPLETED', 'RIDER_COMPLETED', 'DRIVER_COMPLETED'].includes(rideStatus)) {
+        Alert.alert('Ride not completed', 'You can only rate a ride after it has been completed.');
+        return;
+      }
+      await submitRating({ rideId: confirmedRideId, stars: safeStars, comment: note.trim() || undefined });
+      const ratedField = role === 'rider' ? 'riderRated' : 'driverRated';
+      await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), { [ratedField]: true }).catch(() => undefined);
       router.replace(role === 'driver' ? '/(driver)/' as any : '/(rider)/' as any);
     } catch (error: any) {
       const code = String(error?.code || error?.message || '');
       if (code.includes('already-exists')) {
-        if (confirmedRideId) {
-          const ratedField = role === 'rider' ? 'riderRated' : 'driverRated';
-          await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), { [ratedField]: true }).catch(() => undefined);
-        }
+        const ratedField = role === 'rider' ? 'riderRated' : 'driverRated';
+        await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), { [ratedField]: true }).catch(() => undefined);
         router.replace(role === 'driver' ? '/(driver)/' as any : '/(rider)/' as any);
       } else {
         Alert.alert('Rating not submitted', error?.message || 'Please check your connection and try again.');
@@ -1613,10 +1630,34 @@ function RiderChatReferenceInner() {
 
   const send = async () => {
     if (!id || !uid || !draft.trim() || sending) return;
+    const text = draft.trim();
     setSending(true);
     try {
-      await sendChatMessage(id, uid, draft, 'rider');
+      await sendChatMessage(id, uid, text, 'rider');
       setDraft('');
+
+      // Push notification to the driver
+      if (recipientId) {
+        try {
+          const driverSnap = await getDoc(doc(firestore, 'drivers', recipientId));
+          const pushToken = driverSnap.exists() ? (driverSnap.data() as any)?.expoPushToken : null;
+          if (pushToken && String(pushToken).startsWith('ExponentPushToken')) {
+            const senderName = firebaseAuth.currentUser?.displayName || 'A rider';
+            const pushRes = await fetch('https://exp.host/--/api/v2/push/send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+              body: JSON.stringify({
+                to: pushToken,
+                title: `Message from ${senderName}`,
+                body: text.length > 100 ? `${text.slice(0, 97)}...` : text,
+                data: { type: 'chat_message', chatId: id },
+                sound: 'default',
+              }),
+            });
+            if (!pushRes.ok) throw new Error(`Push failed: ${pushRes.status}`);
+          }
+        } catch {}
+      }
     } finally {
       setSending(false);
     }

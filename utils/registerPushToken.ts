@@ -1,5 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import { doc, updateDoc } from 'firebase/firestore';
+import { firestore } from '@/constants/services';
 
 async function getExpoPushToken(): Promise<string | null> {
   const projectId = Constants.expoConfig?.extra?.eas?.projectId;
@@ -22,6 +24,11 @@ export async function registerRiderPushToken(userId: string) {
   try {
     const pushToken = await getExpoPushToken();
     if (!pushToken) return;
+
+    // Save to Firestore so the driver chat screen can read it when sending push notifications
+    try {
+      await updateDoc(doc(firestore, 'riders', userId), { expoPushToken: pushToken });
+    } catch {}
 
     const response = await fetch('https://ridealongwebapp.onrender.com/api/push/register', {
       method: 'POST',

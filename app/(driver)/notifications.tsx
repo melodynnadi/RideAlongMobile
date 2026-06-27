@@ -221,11 +221,11 @@ export default function NotificationsScreen() {
       scheduleFlush();
     };
 
-    const u1 = onSnapshot(qUserId,    handleSnap, (e) => console.warn('notif err', e));
-    const u2 = onSnapshot(qRecipient, handleSnap, (e) => console.warn('notif err', e));
-    const u3 = onSnapshot(qArr,       handleSnap, (e) => console.warn('notif err', e));
+    const u1 = onSnapshot(qUserId,    handleSnap, () => {});
+    const u2 = onSnapshot(qRecipient, handleSnap, () => {});
+    const u3 = onSnapshot(qArr,       handleSnap, () => {});
     unsubsRef.current.push(u1, u2, u3);
-    if (qEmail) unsubsRef.current.push(onSnapshot(qEmail, handleSnap, (e) => console.warn('notif err', e)));
+    if (qEmail) unsubsRef.current.push(onSnapshot(qEmail, handleSnap, () => {}));
 
     return () => {
       unsubsRef.current.forEach((u) => u());

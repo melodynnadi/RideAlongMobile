@@ -13,10 +13,13 @@ import { useAuthStore } from '@/stores/authStore';
 import { ThemeProvider } from '@/hooks/ThemeContext';
 import DismissKeyboardView from '@/components/DismissKeyboardView';
 import SplashScreen from '@/components/SplashScreen';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 const queryClient = new QueryClient();
 
 NativeSplashScreen.preventAutoHideAsync().catch(() => {});
+
+const SPLASH_MIN_MS = 2200;
 
 function AuthGate() {
   const router = useRouter();
@@ -62,29 +65,35 @@ function AuthGate() {
 function AppStack() {
   const isLoading = useAuthStore((s) => s.isLoading);
   const [nativeSplashHidden, setNativeSplashHidden] = useState(false);
-  const [initialBootComplete, setInitialBootComplete] = useState(false);
+  const [minSplashPassed, setMinSplashPassed] = useState(false);
+  const [appSplashVisible, setAppSplashVisible] = useState(true);
 
-  useEffect(() => {
-    if (!isLoading) setInitialBootComplete(true);
-  }, [isLoading]);
-
-  const handleLayout = useCallback(() => {
+  const hideNativeSplash = useCallback(() => {
     if (nativeSplashHidden) return;
     NativeSplashScreen.hideAsync()
       .catch(() => {})
       .finally(() => setNativeSplashHidden(true));
   }, [nativeSplashHidden]);
 
-  if (isLoading && !initialBootComplete) {
+  useEffect(() => {
+    const timer = setTimeout(() => setMinSplashPassed(true), SPLASH_MIN_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!isLoading && minSplashPassed) setAppSplashVisible(false);
+  }, [isLoading, minSplashPassed]);
+
+  if (appSplashVisible) {
     return (
-      <View style={{ flex: 1 }} onLayout={handleLayout}>
-        <SplashScreen />
+      <View style={{ flex: 1 }} onLayout={hideNativeSplash}>
+        <SplashScreen animated={false} />
       </View>
     );
   }
 
   return (
-    <View style={{ flex: 1 }} onLayout={handleLayout}>
+    <View style={{ flex: 1 }} onLayout={hideNativeSplash}>
       <AuthGate />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
@@ -109,9 +118,11 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <ThemeProvider>
-            <DismissKeyboardView style={{ flex: 1 }}>
-              <AppStack />
-            </DismissKeyboardView>
+            <ErrorBoundary>
+              <DismissKeyboardView style={{ flex: 1 }}>
+                <AppStack />
+              </DismissKeyboardView>
+            </ErrorBoundary>
           </ThemeProvider>
         </QueryClientProvider>
       </SafeAreaProvider>

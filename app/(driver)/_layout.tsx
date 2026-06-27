@@ -1,7 +1,9 @@
 import { Tabs } from 'expo-router';
-
+import { RouteErrorFallback } from '@/components/ErrorBoundary';
 import { usePendingRatingGate } from '@/src/hooks/usePendingRatingGate';
 import { useAuthStore } from '@/stores/authStore';
+
+export { RouteErrorFallback as ErrorBoundary };
 
 export default function DriverTabLayout() {
   const { isAuthenticated, isEmailVerified } = useAuthStore();
@@ -25,9 +27,6 @@ export default function DriverTabLayout() {
       <Tabs.Screen name="earnings" options={{ href: null }} />
       <Tabs.Screen name="invite" options={{ href: null }} />
       <Tabs.Screen name="settings" options={{ href: null }} />
-      <Tabs.Screen name="legal" options={{ href: null }} />
-      <Tabs.Screen name="legal/privacy" options={{ href: null }} />
-      <Tabs.Screen name="legal/terms" options={{ href: null }} />
       <Tabs.Screen name="messages/[chatId]" options={{ href: null }} />
       <Tabs.Screen name="request/[id]" options={{ href: null }} />
       <Tabs.Screen name="trip/[confirmedRideId]" options={{ href: null }} />

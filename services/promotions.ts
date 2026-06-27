@@ -1,15 +1,13 @@
-import { 
-  collection, 
-  query, 
-  where, 
-  orderBy, 
-  getDocs, 
-  doc, 
-  getDoc, 
-  addDoc, 
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  doc,
+  getDoc,
+  addDoc,
   updateDoc,
-  limit,
-  Timestamp 
+  Timestamp,
 } from 'firebase/firestore';
 import { firestore } from '@/constants/services';
 import { Promotion, ClaimedPromotion } from '@/types';
@@ -67,109 +65,49 @@ export class PromotionService {
    * Fetch active promotions for mobile riders
    */
   async getActivePromotions(): Promise<Promotion[]> {
-    try {
-      console.log('Fetching promotions from Firestore...');
-      
-      // Validate Firestore connection
-      if (!firestore) {
-        throw new Error('Firestore is not initialized');
+    if (!firestore) throw new Error('Firestore is not initialized');
+
+    const now = new Date();
+    const q = query(
+      collection(firestore, this.COLLECTION_NAME),
+      where('status', '==', 'active'),
+    );
+
+    const snapshot = await getDocs(q);
+    const promotions: Promotion[] = [];
+
+    snapshot.forEach((doc) => {
+      try {
+        const data = doc.data();
+        const promotion: Promotion = {
+          id: doc.id,
+          ...data,
+          startDate: this.convertToDate(data.startDate),
+          endDate: this.convertToDate(data.endDate),
+          createdAt: this.convertToDate(data.createdAt),
+          updatedAt: this.convertToDate(data.updatedAt),
+        } as Promotion;
+
+        const isTargetMatch = promotion.target === 'riders' || promotion.target === 'both';
+        const isPlatformMatch = promotion.platforms?.includes('mobile');
+        const isTimeValid =
+          promotion.type === 'informational'
+            ? true
+            : promotion.startDate && promotion.endDate && now >= promotion.startDate && now <= promotion.endDate;
+
+        if (isTargetMatch && isPlatformMatch && isTimeValid) {
+          promotions.push(promotion);
+        }
+      } catch {
+        // skip malformed document
       }
-      
-      const now = new Date();
-      const promotionsRef = collection(firestore, this.COLLECTION_NAME);
-      
-      console.log('Collection reference created:', this.COLLECTION_NAME);
-      
-      // Simplified query to avoid composite index requirements
-      // We'll do the filtering and sorting in memory
-      const q = query(
-        promotionsRef,
-        where('status', '==', 'active')
-      );
+    });
 
-      console.log('Executing Firestore query...');
-      const snapshot = await getDocs(q);
-      console.log('Query executed successfully. Document count:', snapshot.size);
-      
-      const promotions: Promotion[] = [];
-
-      snapshot.forEach((doc) => {
-        try {
-          const data = doc.data();
-          console.log('Processing document:', doc.id, 'data keys:', Object.keys(data));
-          
-          const promotion: Promotion = {
-            id: doc.id,
-            ...data,
-            startDate: this.convertToDate(data.startDate),
-            endDate: this.convertToDate(data.endDate),
-            createdAt: this.convertToDate(data.createdAt),
-            updatedAt: this.convertToDate(data.updatedAt),
-          } as Promotion;
-          
-          // Filter in memory to avoid complex composite indexes
-          const isTargetMatch = promotion.target === 'riders' || promotion.target === 'both';
-          const isPlatformMatch = promotion.platforms?.includes('mobile');
-          
-          // For informational promotions, allow null dates (always valid)
-          // For other promotions, check date validity
-          const isTimeValid = promotion.type === 'informational' 
-            ? true 
-            : (promotion.startDate && promotion.endDate && now >= promotion.startDate && now <= promotion.endDate);
-          
-          console.log('Promotion filters:', {
-            id: doc.id,
-            type: promotion.type,
-            target: promotion.target,
-            isTargetMatch,
-            platforms: promotion.platforms,
-            isPlatformMatch,
-            isTimeValid,
-            startDate: promotion.startDate,
-            endDate: promotion.endDate
-          });
-          
-          if (isTargetMatch && isPlatformMatch && isTimeValid) {
-            promotions.push(promotion);
-          }
-        } catch (docError) {
-          console.error('Error processing document:', doc.id, docError);
-        }
-      });
-
-      console.log('Filtered promotions count:', promotions.length);
-
-      // Sort in memory: priority (1 = highest), featured first, then by creation date
-      const sortedPromotions = promotions.sort((a, b) => {
-        // First by priority (lower number = higher priority)
-        if (a.priority !== b.priority) {
-          return a.priority - b.priority;
-        }
-        // Then by featured status
-        if (a.featured !== b.featured) {
-          return b.featured ? 1 : -1; // featured items first
-        }
-        // Finally by creation date (newest first)
-        return b.createdAt.getTime() - a.createdAt.getTime();
-      });
-      
-      console.log('Returning', sortedPromotions.length, 'sorted promotions');
-      return sortedPromotions;
-    } catch (error) {
-      console.error('Error fetching promotions:', error);
-      console.error('Error details:', {
-        message: error instanceof Error ? error.message : 'Unknown error',
-        code: (error as any)?.code,
-        stack: error instanceof Error ? error.stack : undefined
-      });
-      
-      // Throw the original error to preserve debugging information
-      if (error instanceof Error) {
-        throw error;
-      } else {
-        throw new Error(`Failed to fetch promotions: ${String(error)}`);
-      }
-    }
+    return promotions.sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      if (a.featured !== b.featured) return b.featured ? 1 : -1;
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
   }
 
   /**
@@ -378,25 +316,6 @@ export class PromotionService {
     return Math.ceil(timeDiff / (1000 * 3600 * 24));
   }
 
-  /**
-   * Test Firestore connection
-   */
-  async testConnection(): Promise<boolean> {
-    try {
-      console.log('Testing Firestore connection...');
-      const promotionsRef = collection(firestore, this.COLLECTION_NAME);
-      
-      // Try to get just 1 document to test connection
-      const testQuery = query(promotionsRef, limit(1));
-      const snapshot = await getDocs(testQuery);
-      
-      console.log('Firestore connection test successful. Found', snapshot.size, 'documents');
-      return true;
-    } catch (error) {
-      console.error('Firestore connection test failed:', error);
-      return false;
-    }
-  }
 }
 
 // Export singleton instance
