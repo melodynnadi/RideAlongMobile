@@ -316,7 +316,7 @@ function AuthSignInReferenceInner() {
       <View style={s.authFooter}>
         <Text style={s.footerText}>New here? </Text>
         <Text style={s.orangeLink} onPress={() => router.push('/(auth)/sign-up')}>Sign up</Text>
-        <Text style={s.footerText}>{' Â· I\'m a '}</Text>
+        <Text style={s.footerText}>{' · I\'m a '}</Text>
         <Text style={s.orangeLink} onPress={() => router.push('/(auth)/driver-signup' as any)}>driver</Text>
       </View>
     </Phone>
@@ -424,9 +424,9 @@ function AuthVerifyDocsReferenceInner() {
       <TouchableOpacity style={s.upload}>
         <View style={s.uploadIcon}><Ionicons name="cloud-upload" size={22} color={colors.primary} /></View>
         <Text style={s.uploadTitle}>Drop your proof here</Text>
-        <Text style={s.uploadSub}>PDF, PNG, or JPG Â· 10MB max</Text>
+        <Text style={s.uploadSub}>PDF, PNG, or JPG · 10MB max</Text>
       </TouchableOpacity>
-      <View style={s.infoBox}><Text style={s.infoText}><Text style={s.infoBold}>What counts?</Text> Student ID with current term Â· class schedule (this semester) Â· official enrollment letter Â· acceptance + tuition receipt</Text></View>
+      <View style={s.infoBox}><Text style={s.infoText}><Text style={s.infoBold}>What counts?</Text> Student ID with current term · class schedule (this semester) · official enrollment letter · acceptance + tuition receipt</Text></View>
     </Phone>
   );
 }
@@ -501,7 +501,7 @@ function RequestCard({ route, sub, price, live, offers }: { route: string; sub: 
   return (
     <View style={s.requestCard}>
       <View style={s.row}><RideDot /><Text style={s.routeTitle}>{route}</Text><Text style={s.mono}>{live ? 'â€¢ LIVE' : 'WAITING'}</Text></View>
-      <Text style={s.mutedLine}>{sub} Â· up to <Text style={s.bold}>{price}</Text></Text>
+      <Text style={s.mutedLine}>{sub} · up to <Text style={s.bold}>{price}</Text></Text>
       <View style={s.dash} />
       <View style={s.row}><Text style={s.offerText}>{offers || 'NO OFFERS YET'}</Text><TouchableOpacity style={s.navyBtn}><Text style={s.navyBtnText}>View offers</Text></TouchableOpacity></View>
     </View>
@@ -592,9 +592,9 @@ function RiderRequestsReferenceInner() {
   return (
     <Phone title="My requests" back activeTab="rides">
       <View style={s.pillRow}>
-        <TouchableOpacity onPress={() => setFilter('open')}><Pill label={`Open Â· ${allRequests.filter((r) => OPEN.has(r.status) && !isDateExpired(r)).length}`} active={filter === 'open'} /></TouchableOpacity>
-        <TouchableOpacity onPress={() => setFilter('matched')}><Pill label={`Matched Â· ${allRequests.filter((r) => MATCHED.has(r.status) && !isDateExpired(r)).length}`} active={filter === 'matched'} /></TouchableOpacity>
-        <TouchableOpacity onPress={() => setFilter('past')}><Pill label={`Past Â· ${allRequests.filter((r) => PAST.has(r.status) || isDateExpired(r)).length}`} active={filter === 'past'} /></TouchableOpacity>
+        <TouchableOpacity onPress={() => setFilter('open')}><Pill label={`Open · ${allRequests.filter((r) => OPEN.has(r.status) && !isDateExpired(r)).length}`} active={filter === 'open'} /></TouchableOpacity>
+        <TouchableOpacity onPress={() => setFilter('matched')}><Pill label={`Matched · ${allRequests.filter((r) => MATCHED.has(r.status) && !isDateExpired(r)).length}`} active={filter === 'matched'} /></TouchableOpacity>
+        <TouchableOpacity onPress={() => setFilter('past')}><Pill label={`Past · ${allRequests.filter((r) => PAST.has(r.status) || isDateExpired(r)).length}`} active={filter === 'past'} /></TouchableOpacity>
       </View>
       {filtered.map((request) => {
         const expired = isDateExpired(request);
@@ -1092,7 +1092,7 @@ function DriverPublicProfileReferenceInner() {
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: DNVY, fontSize: 15, fontWeight: '700' }}>{vehicle || 'Vehicle info unavailable'}</Text>
                     <Text style={{ color: MUT, fontSize: 13, marginTop: 2 }}>
-                      {[vehicleColor, seats ? `${seats} seats` : ''].filter(Boolean).join(' Â· ')}
+                      {[vehicleColor, seats ? `${seats} seats` : ''].filter(Boolean).join(' · ')}
                     </Text>
                   </View>
                 </View>
@@ -1227,7 +1227,7 @@ function TripInProgressReferenceInner() {
         <View style={s.carPin}><Ionicons name="car-sport" size={20} color={colors.primary} /></View>
       </View>
       <View style={s.tripSheet}>
-        <View style={s.row}><View style={s.bigAvatarSmall}><Text style={s.bigAvatarText}>JT</Text></View><Text style={s.routeTitle}>Jordan T.{'\n'}<Text style={s.mutedSmall}>{"'21 Civic Â· TX 8RZP-129"}</Text></Text><View style={s.rowIcons}><Ionicons name="chatbubble" size={17} color={colors.textPrimary} /><Ionicons name="call" size={17} color={colors.textPrimary} /></View></View>
+        <View style={s.row}><View style={s.bigAvatarSmall}><Text style={s.bigAvatarText}>JT</Text></View><Text style={s.routeTitle}>Jordan T.{'\n'}<Text style={s.mutedSmall}>{"'21 Civic · TX 8RZP-129"}</Text></Text><View style={s.rowIcons}><Ionicons name="chatbubble" size={17} color={colors.textPrimary} /><Ionicons name="call" size={17} color={colors.textPrimary} /></View></View>
         <View style={s.etaCard}><Text style={s.label}>ETA</Text><Text style={s.eta}>2h14m</Text><Text style={s.label}>MILES TO GO</Text><Text style={s.etaMiles}>84.2 mi</Text></View>
       </View>
     </Phone>
@@ -2086,7 +2086,7 @@ function RiderAccountReferenceInner() {
     <Phone title="Account" back backHref="/(rider)/settings" bottom={<PrimaryButton>Save changes</PrimaryButton>}>
       <View style={s.accountAvatar}><View style={s.bigAvatar}><Text style={s.bigAvatarText}>MA</Text></View><Text style={s.messagePreview}>Tap to change photo</Text></View>
       <View style={s.split}><Field label="NAME" value="Melody" onChangeText={() => {}} /><Field label=" " value="Adeyemi" onChangeText={() => {}} /></View>
-      <Field label="EMAIL Â· .EDU" value="melody@utexas.edu" onChangeText={() => {}} />
+      <Field label="EMAIL · .EDU" value="melody@utexas.edu" onChangeText={() => {}} />
       <Field label="PHONE" value="+1 (512) 555-8243" onChangeText={() => {}} />
       <Label>PASSWORD</Label>
       <GhostButton>Change password</GhostButton>
@@ -2580,7 +2580,7 @@ function RiderTermsReferenceInner() {
   const { s } = useScreenCtx();
   return (
     <Phone title="Terms of service" back bottom={<View style={s.split}><GhostButton>Decline</GhostButton><PrimaryButton>Accept</PrimaryButton></View>}>
-      <Text style={s.label}>V 4.2 Â· UPDATED OCT 14, 2025</Text>
+      <Text style={s.label}>V 4.2 · UPDATED OCT 14, 2025</Text>
       <Text style={s.termsTitle}>The short version</Text>
       <Text style={s.bodyText}>RideAlong is a marketplace for verified students to share rides. We do not drive the cars - your fellow students do. We verify everyone with a .edu and a background check, take payments, and split costs.</Text>
       <View style={s.englishBox}><Text style={s.offerText}>The deal in plain English</Text><Text style={s.bodyText}>{"â€¢ You are responsible for your own behavior in someone's car."}{'\n'}{"â€¢ We are not liable for personal stuff your fellow students bring."}{'\n'}{"â€¢ Cancel free up to 24h before. After that, partial refund."}{'\n'}{"â€¢ Violate the community guidelines, you are out."}</Text></View>

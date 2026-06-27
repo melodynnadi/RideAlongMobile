@@ -312,8 +312,12 @@ export function RiderTripInProgressReference() {
   const s = useMemo(() => makeStyles(colors), [colors]);
   const { confirmedRideId } = useLocalSearchParams<{ confirmedRideId: string }>();
   const insets = useSafeAreaInsets();
-  const [trip, setTrip]       = useState<TripData | null>(null);
-  const [rideStatus, setRideStatus] = useState<string>('');
+  const [trip, setTrip]               = useState<TripData | null>(null);
+  const [rideStatus, setRideStatus]   = useState<string>('');
+  const [paymentStatus, setPaymentStatus] = useState<string>('');
+  const [driverLocationAt, setDriverLocationAt] = useState<number | null>(null);
+  const [locationStaleSec, setLocationStaleSec] = useState<number>(0);
+  const locationStaleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [driver, setDriver]   = useState<DriverInfo | null>(null);
   const ratingNavRef = useRef(false);
@@ -341,6 +345,11 @@ export function RiderTripInProgressReference() {
         : null;
       const status = String(d.status || '').toUpperCase();
       setRideStatus(status);
+      setPaymentStatus(String(d.paymentStatus || '').toUpperCase());
+      const locAt = typeof d.driverLocationAt === 'number'
+        ? d.driverLocationAt
+        : d.driverLocationAt?.toMillis?.() ?? null;
+      setDriverLocationAt(locAt);
       setTrip({
         pickup:   d.pickup  ?? d.pickupLocation  ?? null,
         dropoff:  d.dropoff ?? d.dropoffLocation ?? null,
@@ -409,6 +418,16 @@ export function RiderTripInProgressReference() {
     }
     return () => { if (etaTimerRef.current) clearTimeout(etaTimerRef.current); };
   }, [trip?.driverLocation?.latitude, trip?.driverLocation?.longitude, dropoffCoords]);
+
+  // Track how stale the driver's last location ping is (updates every 10s)
+  useEffect(() => {
+    if (locationStaleTimerRef.current) clearInterval(locationStaleTimerRef.current);
+    locationStaleTimerRef.current = setInterval(() => {
+      setLocationStaleSec(driverLocationAt ? Math.floor((Date.now() - driverLocationAt) / 1000) : 0);
+    }, 10_000);
+    setLocationStaleSec(driverLocationAt ? Math.floor((Date.now() - driverLocationAt) / 1000) : 0);
+    return () => { if (locationStaleTimerRef.current) clearInterval(locationStaleTimerRef.current); };
+  }, [driverLocationAt]);
 
   // Fetch driver profile
   useEffect(() => {
@@ -502,12 +521,15 @@ export function RiderTripInProgressReference() {
   const openChat = async () => {
     if (!confirmedRideId) return;
     try {
-      const chatSnap = await getDocs(query(collection(firestore, 'chats'), where('rideId', '==', confirmedRideId)));
-      if (!chatSnap.empty) {
-        router.push(`/(rider)/messages/${chatSnap.docs[0].id}` as any);
-      } else {
-        Alert.alert('Chat unavailable', 'The chat thread could not be found.');
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 1500));
+        const chatSnap = await getDocs(query(collection(firestore, 'chats'), where('rideId', '==', confirmedRideId)));
+        if (!chatSnap.empty) {
+          router.push(`/(rider)/messages/${chatSnap.docs[0].id}` as any);
+          return;
+        }
       }
+      Alert.alert('Chat not ready', 'The chat is still being set up. Try again in a moment.');
     } catch {
       Alert.alert('Error', 'Could not open chat.');
     }
@@ -594,6 +616,18 @@ export function RiderTripInProgressReference() {
           <View style={s.headerBtn} />
         </View>
       </SafeAreaView>
+
+      {/* Stale location pill — shown when driver location hasn't updated in >30s */}
+      {locationStaleSec > 30 && rideStatus !== 'COMPLETED' && (
+        <View style={s.stalePill}>
+          <Ionicons name="wifi-outline" size={13} color={colors.textInverse} style={{ marginRight: 4 }} />
+          <Text style={s.stalePillText}>
+            {locationStaleSec < 120
+              ? `Driver location ${locationStaleSec}s ago`
+              : `Driver location ${Math.floor(locationStaleSec / 60)}m ago`}
+          </Text>
+        </View>
+      )}
 
       {/* Map controls */}
       <MapControls
@@ -685,11 +719,28 @@ export function RiderTripInProgressReference() {
             </View>
           )}
 
-          {rideStatus === 'COMPLETED' && (
+          {rideStatus === 'COMPLETED' && paymentStatus !== 'FAILED' && (
             <View style={[s.confirmBanner, { backgroundColor: colors.greenDim }]}>
-              <Ionicons name="checkmark-circle" size={22} color={colors.green} style={{ marginBottom: 6 }} />
-              <Text style={[s.confirmBannerTitle, { color: colors.green }]}>Ride complete!</Text>
-              <Text style={s.confirmBannerBody}>Thanks for riding with RideAlong.</Text>
+              {paymentStatus === 'PENDING' || paymentStatus === '' ? (
+                <>
+                  <ActivityIndicator size="small" color={colors.green} style={{ marginBottom: 6 }} />
+                  <Text style={[s.confirmBannerTitle, { color: colors.green }]}>Ride complete!</Text>
+                  <Text style={s.confirmBannerBody}>Processing payment…</Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons name="checkmark-circle" size={22} color={colors.green} style={{ marginBottom: 6 }} />
+                  <Text style={[s.confirmBannerTitle, { color: colors.green }]}>Ride complete!</Text>
+                  <Text style={s.confirmBannerBody}>Thanks for riding with RideAlong.</Text>
+                </>
+              )}
+            </View>
+          )}
+          {rideStatus === 'COMPLETED' && paymentStatus === 'FAILED' && (
+            <View style={[s.confirmBanner, { backgroundColor: colors.primaryDim }]}>
+              <Ionicons name="alert-circle" size={22} color={colors.primary} style={{ marginBottom: 6 }} />
+              <Text style={[s.confirmBannerTitle, { color: colors.primary }]}>Ride complete — payment issue</Text>
+              <Text style={s.confirmBannerBody}>Your payment could not be processed. Please contact support@ridealongapp.com.</Text>
             </View>
           )}
 
@@ -752,8 +803,9 @@ export function DriverTripInProgressReference() {
   const [navSteps, setNavSteps]             = useState<NavStep[]>([]);
   const [currentStepIdx, setCurrentStepIdx] = useState(0);
   const [distToNextM, setDistToNextM]       = useState<number | null>(null);
-  const announcedRef   = useRef<Set<string>>(new Set());
-  const navModeRef     = useRef(true); // heading + pitch camera
+  const announcedRef     = useRef<Set<string>>(new Set());
+  const navModeRef       = useRef(true); // heading + pitch camera
+  const lastFsWriteRef   = useRef<number>(0);   // timestamp of last Firestore location write
 
   // Sheet visibility + mute
   const [sheetVisible, setSheetVisible] = useState(true);
@@ -879,10 +931,15 @@ export function DriverTripInProgressReference() {
             );
           }
 
-          // Publish to Firestore so riders can see
-          updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), {
-            driverLocation: coords,
-          }).catch(() => {});
+          // Publish to Firestore at most once every 5 s to avoid write quota exhaustion
+          const now = Date.now();
+          if (now - lastFsWriteRef.current >= 5000) {
+            lastFsWriteRef.current = now;
+            updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), {
+              driverLocation: coords,
+              driverLocationAt: now,
+            }).catch(() => {});
+          }
 
           // Step detection
           setNavSteps((steps) => {
@@ -1004,12 +1061,15 @@ export function DriverTripInProgressReference() {
   const openChat = async () => {
     if (!confirmedRideId) return;
     try {
-      const chatSnap = await getDocs(query(collection(firestore, 'chats'), where('rideId', '==', confirmedRideId)));
-      if (!chatSnap.empty) {
-        router.push(`/(driver)/messages/${chatSnap.docs[0].id}` as any);
-      } else {
-        Alert.alert('Chat unavailable', 'The chat thread could not be found.');
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 1500));
+        const chatSnap = await getDocs(query(collection(firestore, 'chats'), where('rideId', '==', confirmedRideId)));
+        if (!chatSnap.empty) {
+          router.push(`/(driver)/messages/${chatSnap.docs[0].id}` as any);
+          return;
+        }
       }
+      Alert.alert('Chat not ready', 'The chat is still being set up. Try again in a moment.');
     } catch {
       Alert.alert('Error', 'Could not open chat.');
     }
@@ -1414,6 +1474,13 @@ function makeStyles(colors: AppColors) {
       backgroundColor: colors.green, borderRadius: 24, paddingVertical: 12, paddingHorizontal: 32, alignItems: 'center',
     },
     confirmBtnText: { color: colors.textInverse, fontSize: 14, fontWeight: '700' },
+
+    stalePill: {
+      position: 'absolute', top: 110, alignSelf: 'center', flexDirection: 'row', alignItems: 'center',
+      backgroundColor: 'rgba(0,0,0,0.65)', borderRadius: 20, paddingVertical: 5, paddingHorizontal: 12,
+      zIndex: 20,
+    },
+    stalePillText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 
     // Compact always-visible bar
     compactBar: {

@@ -1,82 +1,102 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Image, StyleSheet, View } from 'react-native';
+import { Animated, Easing, Image, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
-export default function SplashScreen() {
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.94)).current;
-  const glowAnim = useRef(new Animated.Value(0)).current;
+const LOGO_LIGHT = require('../assets/logo+text - Edited.png');
+const LOGO_DARK  = require('../assets/RideAlongSplashDarkMode - Edited.png');
+
+type SplashScreenProps = {
+  animated?: boolean;
+};
+
+export default function SplashScreen({ animated = true }: SplashScreenProps) {
+  const { isDark: dark } = useAppTheme();
+
+  const opacity  = useRef(new Animated.Value(animated ? 0 : 1)).current;
+  const scale    = useRef(new Animated.Value(animated ? 0.1 : 1)).current;
+  const breathe  = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    const intro = Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 420,
-        useNativeDriver: true,
-      }),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        tension: 70,
-        friction: 8,
-        useNativeDriver: true,
-      }),
-    ]);
+    if (!animated) return;
 
-    const pulse = Animated.loop(
+    const entrance = Animated.parallel([
+      // Snap in fast
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+      // Multi-step scale: blast in → overshoot → bounce → settle
       Animated.sequence([
-        Animated.timing(glowAnim, {
-          toValue: 1,
-          duration: 900,
+        Animated.timing(scale, {
+          toValue: 1.22,
+          duration: 380,
+          easing: Easing.out(Easing.ease),
           useNativeDriver: true,
         }),
-        Animated.timing(glowAnim, {
-          toValue: 0,
-          duration: 900,
+        Animated.timing(scale, {
+          toValue: 0.91,
+          duration: 130,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scale, {
+          toValue: 1.07,
+          duration: 100,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scale, {
+          toValue: 1.0,
+          duration: 80,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    ]);
+
+    // Noticeable breathe once settled
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(breathe, {
+          toValue: 1.08,
+          duration: 1500,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(breathe, {
+          toValue: 1,
+          duration: 1500,
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ])
     );
 
-    intro.start();
-    pulse.start();
+    entrance.start(() => pulse.start());
 
     return () => {
-      intro.stop();
+      entrance.stop();
       pulse.stop();
     };
-  }, [fadeAnim, glowAnim, scaleAnim]);
+  }, [animated, breathe, opacity, scale]);
+
+  const combinedScale = Animated.multiply(scale, breathe);
 
   return (
-    <View style={styles.container}>
-      <StatusBar style="dark" />
+    <View style={[styles.container, dark ? styles.containerDark : styles.containerLight]}>
+      <StatusBar style={dark ? 'light' : 'dark'} />
       <Animated.View
-        style={[
-          styles.glow,
-          {
-            opacity: glowAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0.16, 0.3],
-            }),
-            transform: [{
-              scale: glowAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0.92, 1.08],
-              }),
-            }],
-          },
-        ]}
-      />
-      <Animated.View
-        style={[
-          styles.content,
-          {
-            opacity: fadeAnim,
-            transform: [{ scale: scaleAnim }],
-          },
-        ]}
+        style={{
+          opacity,
+          transform: [{ scale: combinedScale }],
+          alignItems: 'center',
+        }}
       >
         <Image
-          source={require('../assets/logo+text - Edited.png')}
+          source={dark ? LOGO_DARK : LOGO_LIGHT}
           style={styles.logo}
           resizeMode="contain"
         />
@@ -88,25 +108,17 @@ export default function SplashScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FBFAF7',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  glow: {
-    position: 'absolute',
-    width: 210,
-    height: 210,
-    borderRadius: 105,
-    backgroundColor: '#E05E1A',
+  containerLight: {
+    backgroundColor: '#FBFAF7',
   },
-  content: {
-    alignItems: 'center',
-    width: '100%',
-    paddingHorizontal: 42,
+  containerDark: {
+    backgroundColor: '#0B1635',
   },
   logo: {
-    width: '100%',
-    maxWidth: 320,
-    height: 92,
+    width: 260,
+    height: 260,
   },
 });

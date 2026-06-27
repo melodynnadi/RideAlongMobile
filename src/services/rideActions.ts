@@ -34,9 +34,7 @@ export type RideCardRef = {
 
 export async function confirmPickup(card: RideCardRef): Promise<boolean> {
   try {
-  try { console.log('[pickup] incoming card', card); } catch {}
     const rideId = await resolveConfirmedDocId(card);
-  try { console.log('[pickup] resolved rideId', rideId); } catch {}
     if (!rideId) {
       Alert.alert('Error', 'Ride not found');
       return false;
@@ -47,7 +45,6 @@ export async function confirmPickup(card: RideCardRef): Promise<boolean> {
       const data = snap.exists() ? (snap.data() as any) : undefined;
       const raw = String(data?.status || '').trim();
   const normalized = raw.replace(/[-\s]/g, '_').toUpperCase();
-  try { console.log('[pickup] current status', raw, '->', normalized); } catch {}
       if (normalized === 'PENDING') {
         Alert.alert('Waiting for passengers', 'Pickup will be available once all seats are filled.');
         return false;
@@ -106,9 +103,7 @@ export async function confirmPickup(card: RideCardRef): Promise<boolean> {
 
 export async function completeRide(card: RideCardRef): Promise<boolean> {
   try {
-  try { console.log('[complete] incoming card', card); } catch {}
     const rideId = await resolveConfirmedDocId(card);
-  try { console.log('[complete] resolved rideId', rideId); } catch {}
     if (!rideId) {
       Alert.alert('Error', 'Ride not found');
       return false;
@@ -162,12 +157,22 @@ export async function riderCompleteRide(confirmedRideId: string): Promise<boolea
           rideData.paymentIntentId || rideData.stripePaymentIntentId || null;
         const driverId: string | null = rideData.driverId || null;
         if (paymentIntentId && driverId) {
+          // Mark payment as pending so UI can show a processing state
+          await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), {
+            paymentStatus: 'PENDING',
+          }).catch(() => {});
           await captureRidePayment(paymentIntentId, confirmedRideId, driverId);
+          await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), {
+            paymentStatus: 'CAPTURED',
+          }).catch(() => {});
         }
       }
     } catch (captureErr) {
-      // Don't fail the completion if capture fails — admin can reconcile via Stripe dashboard
-      try { console.warn('[riderComplete] payment capture failed', captureErr); } catch {}
+      // Mark as failed so the rider sees a clear message and support can reconcile
+      await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), {
+        paymentStatus: 'FAILED',
+      }).catch(() => {});
+      console.warn('[riderComplete] payment capture failed', captureErr);
     }
 
     return true;
@@ -374,7 +379,6 @@ export async function groupPickup(ridePostingId: string): Promise<{ ok: boolean;
         // continue other children
       }
     }
-    try { console.log('analytics', 'group_ride_pickup', { ridePostingId, riderIds }); } catch {}
     return { ok: true, updated, riderIds };
   } catch (e) {
     showRideError(e);
@@ -417,7 +421,6 @@ export async function groupComplete(ridePostingId: string): Promise<{ ok: boolea
         // continue
       }
     }
-    try { console.log('analytics', 'group_ride_complete_request', { ridePostingId, riderIds }); } catch {}
     return { ok: true, updated, riderIds };
   } catch (e) {
     showRideError(e);
@@ -429,7 +432,6 @@ export async function groupComplete(ridePostingId: string): Promise<{ ok: boolea
 async function callUpdateRideStatus(rideId: string, action: 'driver_pickup' | 'driver_complete' | 'rider_pickup' | 'rider_complete'): Promise<boolean> {
   try {
     const res: any = await updateRideStatus({ rideId, action });
-    try { console.log('[updateRideStatus] callable response', res?.data ?? res); } catch {}
     if (res && (res as any).data && (res as any).data.ok === false) {
       // fall through to REST
       throw new Error('callable_failed');

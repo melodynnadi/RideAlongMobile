@@ -22,8 +22,6 @@
       "color": "#E05E1A"
     },
     "splash": {
-      "image": "./assets/logo+text - Edited.png",
-      "resizeMode": "contain",
       "backgroundColor": "#FBFAF7"
     },
     "ios": {
@@ -93,12 +91,8 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/logo+text - Edited.png",
-          "imageWidth": 280,
-          "resizeMode": "contain",
           "backgroundColor": "#FBFAF7",
           "dark": {
-            "image": "./assets/logo+text - Edited.png",
             "backgroundColor": "#FBFAF7"
           }
         }

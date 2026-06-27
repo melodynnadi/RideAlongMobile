@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Toast from 'react-native-toast-message';
 import * as NativeSplashScreen from 'expo-splash-screen';
-
 import '../global.css';
 
 import { useAuthStore } from '@/stores/authStore';
@@ -15,11 +14,14 @@ import DismissKeyboardView from '@/components/DismissKeyboardView';
 import SplashScreen from '@/components/SplashScreen';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 
+// Keep native splash up until we explicitly hide it on first React frame.
+NativeSplashScreen.preventAutoHideAsync();
+
 const queryClient = new QueryClient();
-
-NativeSplashScreen.preventAutoHideAsync().catch(() => {});
-
 const SPLASH_MIN_MS = 2200;
+
+// Module-level flag so the splash never shows twice if Expo Router remounts root.
+let splashAlreadyShown = false;
 
 function AuthGate() {
   const router = useRouter();
@@ -63,37 +65,8 @@ function AuthGate() {
 }
 
 function AppStack() {
-  const isLoading = useAuthStore((s) => s.isLoading);
-  const [nativeSplashHidden, setNativeSplashHidden] = useState(false);
-  const [minSplashPassed, setMinSplashPassed] = useState(false);
-  const [appSplashVisible, setAppSplashVisible] = useState(true);
-
-  const hideNativeSplash = useCallback(() => {
-    if (nativeSplashHidden) return;
-    NativeSplashScreen.hideAsync()
-      .catch(() => {})
-      .finally(() => setNativeSplashHidden(true));
-  }, [nativeSplashHidden]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setMinSplashPassed(true), SPLASH_MIN_MS);
-    return () => clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    if (!isLoading && minSplashPassed) setAppSplashVisible(false);
-  }, [isLoading, minSplashPassed]);
-
-  if (appSplashVisible) {
-    return (
-      <View style={{ flex: 1 }} onLayout={hideNativeSplash}>
-        <SplashScreen animated={false} />
-      </View>
-    );
-  }
-
   return (
-    <View style={{ flex: 1 }} onLayout={hideNativeSplash}>
+    <View style={{ flex: 1 }}>
       <AuthGate />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
@@ -107,11 +80,36 @@ function AppStack() {
 
 export default function RootLayout() {
   const initializeAuth = useAuthStore((s) => s.initializeAuth);
+  const isLoading = useAuthStore((s) => s.isLoading);
+  const [minSplashPassed, setMinSplashPassed] = useState(false);
+  const [splashVisible, setSplashVisible] = useState(() => !splashAlreadyShown);
+  const nativeHiddenRef = useRef(false);
 
   useEffect(() => {
+    // Dismiss the native splash on the very first frame.
+    // Our React SplashScreen is already rendered underneath — no gap.
+    if (!nativeHiddenRef.current) {
+      nativeHiddenRef.current = true;
+      NativeSplashScreen.hideAsync();
+    }
+
+    if (!splashAlreadyShown) {
+      splashAlreadyShown = true;
+    }
+
     const unsubscribe = initializeAuth();
     return unsubscribe;
   }, [initializeAuth]);
+
+  useEffect(() => {
+    if (!splashVisible) return;
+    const t = setTimeout(() => setMinSplashPassed(true), SPLASH_MIN_MS);
+    return () => clearTimeout(t);
+  }, [splashVisible]);
+
+  useEffect(() => {
+    if (!isLoading && minSplashPassed) setSplashVisible(false);
+  }, [isLoading, minSplashPassed]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -122,6 +120,11 @@ export default function RootLayout() {
               <DismissKeyboardView style={{ flex: 1 }}>
                 <AppStack />
               </DismissKeyboardView>
+              {splashVisible && (
+                <View style={StyleSheet.absoluteFill}>
+                  <SplashScreen />
+                </View>
+              )}
             </ErrorBoundary>
           </ThemeProvider>
         </QueryClientProvider>
