@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useUnreadMessages } from '@/hooks/useUnreadMessages';
 import { hitSlop } from '@/theme/designSystem';
-
-const ORANGE = '#DE5D20';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import type { AppColors } from '@/constants/theme';
 
 export type DriverTab = 'home' | 'offer' | 'requests' | 'inbox';
 
@@ -14,6 +14,8 @@ function badgeLabel(n: number) {
 }
 
 export function DriverBottomNav({ activeTab }: { activeTab: DriverTab }) {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const totalUnread = useUnreadMessages();
 
   const tabs: { key: DriverTab; label: string; icon: keyof typeof Ionicons.glyphMap; href: string }[] = [
@@ -38,7 +40,7 @@ export function DriverBottomNav({ activeTab }: { activeTab: DriverTab }) {
             hitSlop={hitSlop}
           >
             <View style={styles.navIconWrap}>
-              <Ionicons name={tab.icon} size={23} color={selected ? ORANGE : '#6B7280'} />
+              <Ionicons name={tab.icon} size={23} color={selected ? colors.primary : colors.textSecondary} />
               {tab.key === 'inbox' && totalUnread > 0 ? (
                 <View style={styles.iconBadge}>
                   <Text style={styles.iconBadgeText}>{badgeLabel(totalUnread)}</Text>
@@ -53,7 +55,8 @@ export function DriverBottomNav({ activeTab }: { activeTab: DriverTab }) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: AppColors) {
+  return StyleSheet.create({
   bottomNav: {
     position: 'absolute',
     left: 24,
@@ -61,9 +64,9 @@ const styles = StyleSheet.create({
     bottom: 14,
     zIndex: 50,
     height: 58,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.bgCard,
     borderWidth: 1,
-    borderColor: '#E8E3DA',
+    borderColor: colors.border,
     borderRadius: 29,
     flexDirection: 'row',
     alignItems: 'center',
@@ -71,7 +74,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     ...Platform.select({
       ios: {
-        shadowColor: '#17233A',
+        shadowColor: colors.textPrimary,
         shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.14,
         shadowRadius: 16,
@@ -89,7 +92,7 @@ const styles = StyleSheet.create({
     gap: 1,
   },
   navItemActive: {
-    backgroundColor: '#F6F2EC',
+    backgroundColor: colors.bgSecondary,
   },
   navIconWrap: {
     position: 'relative',
@@ -99,10 +102,10 @@ const styles = StyleSheet.create({
   navText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   navTextActive: {
-    color: ORANGE,
+    color: colors.primary,
   },
   iconBadge: {
     position: 'absolute',
@@ -111,17 +114,18 @@ const styles = StyleSheet.create({
     minWidth: 17,
     height: 17,
     borderRadius: 9,
-    backgroundColor: ORANGE,
+    backgroundColor: colors.primary,
     borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderColor: colors.bgCard,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 3,
   },
   iconBadgeText: {
-    color: '#FFFFFF',
+    color: colors.textInverse,
     fontSize: 9,
     lineHeight: 11,
     fontWeight: '800',
   },
-});
+  });
+}

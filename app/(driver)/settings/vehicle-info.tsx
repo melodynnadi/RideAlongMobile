@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -23,12 +23,7 @@ import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { firebaseAuth, firebaseConfig, firestore, storage } from '@/constants/services';
 
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
-
-const NAVY   = '#15233A';
-const ORANGE = '#DE5D20';
-const BG     = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED  = '#8B94A6';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 interface VehicleInfo {
   make?: string;
@@ -85,6 +80,7 @@ async function uploadVehicleImageFile(sourceUri: string, uid: string, idToken: s
   return { imageUrl, imagePath };
 }
 export default function VehicleInfoScreen() {
+  const { colors } = useAppTheme();
   const { goBack } = useReturnNavigation('/(driver)/settings');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -94,6 +90,103 @@ export default function VehicleInfoScreen() {
   });
   const [driverData, setDriverData] = useState<any>(null);
   const [pendingImageUri, setPendingImageUri] = useState<string | null>(null);
+
+  const s = useMemo(() => StyleSheet.create({
+    root:        { flex: 1, backgroundColor: colors.bg },
+    safe:        { flex: 1 },
+    loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    content:     { paddingBottom: 40 },
+
+    hdr:       { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10 },
+    backBtn:   { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' },
+    hdrTitle:  { color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+
+    heroCard: {
+      marginHorizontal: 20,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgSecondary,
+      padding: 24,
+      alignItems: 'center',
+      marginBottom: 24,
+    },
+    vehicleImageButton: {
+      width: '100%', aspectRatio: 16 / 9, marginBottom: 14,
+      borderRadius: 12, overflow: 'visible',
+    },
+    vehicleImage: {
+      width: '100%', height: '100%', borderRadius: 12,
+      backgroundColor: colors.bgSecondary,
+    },
+    vehiclePlaceholder: {
+      width: '100%', height: '100%', borderRadius: 12,
+      alignItems: 'center', justifyContent: 'center',
+      backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border,
+    },
+    editImageBadge: {
+      position: 'absolute', right: 10, bottom: 10,
+      width: 34, height: 34, borderRadius: 17,
+      alignItems: 'center', justifyContent: 'center',
+      backgroundColor: colors.primary, borderWidth: 2, borderColor: colors.bgCard,
+    },
+    heroName:    { color: colors.textPrimary, fontSize: 18, fontWeight: '700', textAlign: 'center' },
+    heroSub:     { color: colors.textSecondary, fontSize: 14, marginTop: 4, textAlign: 'center' },
+    changePhotoText: { color: colors.primary, fontSize: 13, fontWeight: '700', marginTop: 10 },
+
+    sectionLabel: { marginHorizontal: 20, marginBottom: 8, marginTop: 4, color: colors.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
+    sectionCard: {
+      marginHorizontal: 20,
+      marginBottom: 20,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      padding: 16,
+      shadowColor: colors.textPrimary,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 8,
+      elevation: 1,
+    },
+    fieldRow:  { flexDirection: 'row', gap: 8 },
+    fieldWrap: { marginBottom: 12 },
+    fieldLabel:{ color: colors.textSecondary, fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 6 },
+    input: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '500',
+      backgroundColor: colors.bgSecondary,
+    },
+
+    pillRow:        { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    seatPill:       { height: 40, minWidth: 48, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
+    seatPillActive: { backgroundColor: colors.textPrimary, borderColor: colors.textPrimary },
+    seatPillText:   { color: colors.textSecondary, fontSize: 14, fontWeight: '600' },
+    seatPillTextActive: { color: colors.bgCard },
+
+    chipsWrap:    { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    chip:         { borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgSecondary, paddingHorizontal: 12, paddingVertical: 8 },
+    chipActive:   { backgroundColor: colors.textPrimary, borderColor: colors.textPrimary },
+    chipText:     { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
+    chipTextActive: { color: colors.bgCard },
+
+    saveBtn: {
+      marginHorizontal: 20,
+      marginTop: 8,
+      height: 54,
+      borderRadius: 27,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    saveBtnText: { color: colors.textInverse, fontSize: 16, fontWeight: '700' },
+  }), [colors]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
@@ -301,14 +394,14 @@ export default function VehicleInfoScreen() {
   if (loading) {
     return (
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
-        <View style={s.loadingWrap}><ActivityIndicator size="large" color={ORANGE} /></View>
+        <View style={s.loadingWrap}><ActivityIndicator size="large" color={colors.primary} /></View>
       </SafeAreaView>
     );
   }
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={colors.statusBar} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.content}>
 
@@ -318,7 +411,7 @@ export default function VehicleInfoScreen() {
               style={s.backBtn}
               onPress={goBack}
             >
-              <Ionicons name="chevron-back" size={22} color={NAVY} />
+              <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
             </TouchableOpacity>
             <Text style={s.hdrTitle}>Vehicle</Text>
             <View style={{ width: 40 }} />
@@ -337,11 +430,11 @@ export default function VehicleInfoScreen() {
                 <Image source={{ uri: vehicleImage }} style={s.vehicleImage} resizeMode="cover" />
               ) : (
                 <View style={s.vehiclePlaceholder}>
-                  <Ionicons name="car-outline" size={44} color={MUTED} />
+                  <Ionicons name="car-outline" size={44} color={colors.textSecondary} />
                 </View>
               )}
               <View style={s.editImageBadge}>
-                {uploadingImage ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="camera" size={16} color="#FFF" />}
+                {uploadingImage ? <ActivityIndicator size="small" color={colors.textInverse} /> : <Ionicons name="camera" size={16} color={colors.textInverse} />}
               </View>
             </TouchableOpacity>
             <Text style={s.heroName}>{displayName}</Text>
@@ -364,7 +457,7 @@ export default function VehicleInfoScreen() {
                   value={vehicleInfo.year}
                   onChangeText={(t) => setVehicleInfo((p) => ({ ...p, year: t }))}
                   placeholder="2021"
-                  placeholderTextColor={MUTED}
+                  placeholderTextColor={colors.textSecondary}
                   keyboardType="numeric"
                   maxLength={4}
                 />
@@ -376,7 +469,7 @@ export default function VehicleInfoScreen() {
                   value={vehicleInfo.make}
                   onChangeText={(t) => setVehicleInfo((p) => ({ ...p, make: t }))}
                   placeholder="Honda"
-                  placeholderTextColor={MUTED}
+                  placeholderTextColor={colors.textSecondary}
                 />
               </View>
               <View style={[s.fieldWrap, { flex: 0.3 }]}>
@@ -386,7 +479,7 @@ export default function VehicleInfoScreen() {
                   value={vehicleInfo.model}
                   onChangeText={(t) => setVehicleInfo((p) => ({ ...p, model: t }))}
                   placeholder="Civic"
-                  placeholderTextColor={MUTED}
+                  placeholderTextColor={colors.textSecondary}
                 />
               </View>
             </View>
@@ -397,7 +490,7 @@ export default function VehicleInfoScreen() {
                 value={vehicleInfo.licensePlate}
                 onChangeText={(t) => setVehicleInfo((p) => ({ ...p, licensePlate: t }))}
                 placeholder="TX 8RZP-129"
-                placeholderTextColor={MUTED}
+                placeholderTextColor={colors.textSecondary}
                 autoCapitalize="characters"
               />
             </View>
@@ -408,7 +501,7 @@ export default function VehicleInfoScreen() {
                 value={vehicleInfo.color}
                 onChangeText={(t) => setVehicleInfo((p) => ({ ...p, color: t }))}
                 placeholder="Silver"
-                placeholderTextColor={MUTED}
+                placeholderTextColor={colors.textSecondary}
               />
             </View>
           </View>
@@ -450,7 +543,7 @@ export default function VehicleInfoScreen() {
           {/* Save */}
           <TouchableOpacity style={s.saveBtn} onPress={saveVehicleInfo} disabled={saving || uploadingImage}>
             {saving ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color={colors.textInverse} />
             ) : (
               <Text style={s.saveBtnText}>Save</Text>
             )}
@@ -462,100 +555,3 @@ export default function VehicleInfoScreen() {
     </View>
   );
 }
-
-const s = StyleSheet.create({
-  root:        { flex: 1, backgroundColor: BG },
-  safe:        { flex: 1 },
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  content:     { paddingBottom: 40 },
-
-  hdr:       { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10 },
-  backBtn:   { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  hdrTitle:  { color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
-
-  heroCard: {
-    marginHorizontal: 20,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: '#F3EFE8',
-    padding: 24,
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  vehicleImageButton: {
-    width: '100%', aspectRatio: 16 / 9, marginBottom: 14,
-    borderRadius: 12, overflow: 'visible',
-  },
-  vehicleImage: {
-    width: '100%', height: '100%', borderRadius: 12,
-    backgroundColor: '#EDE9E2',
-  },
-  vehiclePlaceholder: {
-    width: '100%', height: '100%', borderRadius: 12,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#EDE9E2', borderWidth: 1, borderColor: BORDER,
-  },
-  editImageBadge: {
-    position: 'absolute', right: 10, bottom: 10,
-    width: 34, height: 34, borderRadius: 17,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: ORANGE, borderWidth: 2, borderColor: '#FFF',
-  },
-  heroName:    { color: NAVY, fontSize: 18, fontWeight: '700', textAlign: 'center' },
-  heroSub:     { color: MUTED, fontSize: 14, marginTop: 4, textAlign: 'center' },
-  changePhotoText: { color: ORANGE, fontSize: 13, fontWeight: '700', marginTop: 10 },
-
-  sectionLabel: { marginHorizontal: 20, marginBottom: 8, marginTop: 4, color: MUTED, fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
-  sectionCard: {
-    marginHorizontal: 20,
-    marginBottom: 20,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    shadowColor: NAVY,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 1,
-  },
-  fieldRow:  { flexDirection: 'row', gap: 8 },
-  fieldWrap: { marginBottom: 12 },
-  fieldLabel:{ color: MUTED, fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 6 },
-  input: {
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: NAVY,
-    fontSize: 14,
-    fontWeight: '500',
-    backgroundColor: '#FAFAF8',
-  },
-
-  pillRow:        { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  seatPill:       { height: 40, minWidth: 48, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FAFAF8', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
-  seatPillActive: { backgroundColor: NAVY, borderColor: NAVY },
-  seatPillText:   { color: MUTED, fontSize: 14, fontWeight: '600' },
-  seatPillTextActive: { color: '#FFFFFF' },
-
-  chipsWrap:    { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip:         { borderRadius: 16, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FAFAF8', paddingHorizontal: 12, paddingVertical: 8 },
-  chipActive:   { backgroundColor: NAVY, borderColor: NAVY },
-  chipText:     { color: MUTED, fontSize: 13, fontWeight: '600' },
-  chipTextActive: { color: '#FFFFFF' },
-
-  saveBtn: {
-    marginHorizontal: 20,
-    marginTop: 8,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: ORANGE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
-});

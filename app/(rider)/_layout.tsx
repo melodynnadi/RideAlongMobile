@@ -4,14 +4,16 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { HapticTab } from '@/components/HapticTab';
 import TabBarBackground from '@/components/ui/TabBarBackground';
-import { useTheme } from '@/hooks/useTheme';
+import { useAppTheme } from '@/hooks/ThemeContext';
 import { useAuthStore } from '@/stores/authStore';
 import { useUnreadMessages } from '@/hooks/useUnreadMessages';
+import { usePendingRatingGate } from '@/src/hooks/usePendingRatingGate';
 
 export default function RiderTabLayout() {
-  const theme = useTheme();
+  const { colors } = useAppTheme();
   const { isAuthenticated, isEmailVerified, checkEmailVerification } = useAuthStore();
   const totalUnread = useUnreadMessages();
+  usePendingRatingGate('rider', isAuthenticated && isEmailVerified);
 
   useEffect(() => {
     if (isAuthenticated && !isEmailVerified) {
@@ -30,8 +32,8 @@ export default function RiderTabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: theme.colors.primary,
-        tabBarInactiveTintColor: theme.colors.muted,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textSecondary,
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarBackground: TabBarBackground,
@@ -67,7 +69,7 @@ export default function RiderTabLayout() {
           title: 'Messages',
           tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" size={size || 24} color={color} />,
           tabBarBadge: totalUnread > 0 ? totalUnread : undefined,
-          tabBarBadgeStyle: { backgroundColor: '#EF4444', color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' },
+          tabBarBadgeStyle: { backgroundColor: colors.redDeep, color: colors.textInverse, fontSize: 12, fontWeight: 'bold' },
         }}
       />
       <Tabs.Screen name="notifications" options={{ href: null }} />

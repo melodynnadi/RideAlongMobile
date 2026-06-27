@@ -79,7 +79,7 @@ export function PaymentMethodSelector({
                 {getBrandIcon(method.brand)}
                 <View style={styles.methodDetails}>
                   <Text style={[styles.methodBrand, { color: theme.colors.text }]}>
-                    {method.brand.charAt(0).toUpperCase() + method.brand.slice(1)} •••• {method.last4}
+                    {method.brand.charAt(0).toUpperCase() + method.brand.slice(1)} **** {method.last4}
                   </Text>
                   <Text style={[styles.methodExpiry, { color: theme.colors.muted }]}>
                     Expires {formatExpiryDate(method.exp_month, method.exp_year)}

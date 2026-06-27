@@ -15,13 +15,7 @@ import {
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 import { useVerificationStore } from '@/stores/verificationStore';
 import { hitSlop, layout } from '@/theme/designSystem';
-
-const NAVY = '#15233A';
-const ORANGE = '#DE5D20';
-const BG = '#FBFAF7';
-const PAPER = '#F6F3ED';
-const BORDER = '#E5E0D8';
-const MUTED = '#7D8698';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 const DOCUMENT_TYPES: { value: StudentDocumentType; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { value: 'enrollment_letter', label: 'Enrollment letter', icon: 'document-text-outline' },
@@ -45,20 +39,66 @@ function inferMimeType(name: string, provided?: string | null) {
   return 'image/jpeg';
 }
 
-function statusDetails(status?: string | null) {
+function statusDetails(status?: string | null, colors?: any) {
   switch (status) {
     case 'approved':
     case 'auto-approved':
-      return { label: 'Verified', icon: 'checkmark-circle' as const, color: '#168454', bg: '#E9F7F0' };
+      return { label: 'Verified', icon: 'checkmark-circle' as const, color: colors?.green ?? '#168454', bg: colors?.greenDim ?? '#E9F7F0' };
     case 'manual-review':
     case 'submitted':
     case 'pending':
-      return { label: 'Under review', icon: 'time' as const, color: '#A76500', bg: '#FFF2D8' };
+      return { label: 'Under review', icon: 'time' as const, color: colors?.yellow ?? '#A76500', bg: colors?.yellowDim ?? '#FFF2D8' };
     case 'rejected':
-      return { label: 'Needs attention', icon: 'alert-circle' as const, color: '#C94747', bg: '#FDECEC' };
+      return { label: 'Needs attention', icon: 'alert-circle' as const, color: colors?.red ?? '#C94747', bg: colors?.redDim ?? '#FDECEC' };
     default:
-      return { label: 'Not submitted', icon: 'shield-outline' as const, color: NAVY, bg: PAPER };
+      return { label: 'Not submitted', icon: 'shield-outline' as const, color: colors?.textPrimary ?? '#15233A', bg: colors?.bgSecondary ?? '#F2EFE9' };
   }
+}
+
+function makeStyles(colors: any) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.bg, alignItems: 'center' },
+    safe: { flex: 1, width: '100%', maxWidth: Platform.OS === 'web' ? 430 : undefined, backgroundColor: colors.bg },
+    content: { paddingHorizontal: layout.screenPadding, paddingBottom: 36 },
+    header: { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+    backButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center'},
+    headerTitle: { color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+    loading: { minHeight: 240, alignItems: 'center', justifyContent: 'center', gap: 12 },
+    muted: { color: colors.textSecondary, fontSize: 14 },
+    flex: { flex: 1 },
+    statusCard: { borderRadius: 20, padding: 18, flexDirection: 'row', gap: 14, marginBottom: 18 },
+    statusIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+    eyebrow: { color: colors.textSecondary, fontSize: 10, fontWeight: '700', letterSpacing: 1.4, marginBottom: 5 },
+    statusTitle: { fontSize: 20, fontWeight: '700', marginBottom: 5 },
+    statusBody: { color: colors.textPrimary, fontSize: 13, lineHeight: 19 },
+    deadline: { color: colors.primary, fontSize: 12, fontWeight: '700', marginTop: 7 },
+    card: { borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 17, marginBottom: 22 },
+    sectionHeadingRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
+    sectionHeader: { marginTop: 6, marginBottom: 12 },
+    sectionTitle: { color: colors.textPrimary, fontSize: 18, fontWeight: '700' },
+    scoreBadge: { flexDirection: 'row', alignItems: 'baseline', marginLeft: 'auto' as any, backgroundColor: colors.bgSecondary, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
+    scoreText: { color: colors.primary, fontSize: 22, fontWeight: '700' },
+    scoreSmall: { color: colors.textSecondary, fontSize: 11 },
+    scoreGrid: { flexDirection: 'row', gap: 8 },
+    scoreItem: { flex: 1, borderRadius: 12, backgroundColor: colors.bgSecondary, paddingVertical: 11, alignItems: 'center' },
+    scoreLabel: { color: colors.textSecondary, fontSize: 10, textTransform: 'capitalize' as any },
+    scoreValue: { color: colors.textPrimary, fontSize: 15, fontWeight: '700', marginTop: 3 },
+    typeGrid: { flexDirection: 'row', flexWrap: 'wrap' as any, gap: 8, marginBottom: 16 },
+    typeChip: { minHeight: 44, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7 },
+    typeChipSelected: { borderColor: colors.primary, backgroundColor: colors.primaryDim },
+    typeText: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+    typeTextSelected: { color: colors.primary },
+    uploadCard: { minHeight: 84, borderRadius: 18, borderWidth: 1, borderStyle: 'dashed' as any, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 12 },
+    uploadCardSelected: { borderStyle: 'solid' as any, borderColor: colors.primary },
+    uploadIcon: { width: 46, height: 46, borderRadius: 14, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
+    uploadTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
+    uploadBody: { color: colors.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 3 },
+    tipCard: { flexDirection: 'row', gap: 9, backgroundColor: colors.bgSecondary, borderRadius: 14, padding: 13, marginTop: 10 },
+    tipText: { flex: 1, color: colors.textSecondary, fontSize: 11, lineHeight: 17 },
+    submitButton: { height: 54, borderRadius: 27, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginTop: 16, marginBottom: 28 },
+    submitDisabled: { opacity: 0.45 },
+    submitText: { color: colors.textInverse, fontSize: 15, fontWeight: '700' },
+  });
 }
 
 type StudentVerificationScreenProps = {
@@ -68,6 +108,9 @@ type StudentVerificationScreenProps = {
 export default function StudentVerificationScreen({
   fallbackRoute = '/(rider)/settings',
 }: StudentVerificationScreenProps) {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+
   const { goBack } = useReturnNavigation(fallbackRoute);
   const [docType, setDocType] = useState<StudentDocumentType>('enrollment_letter');
   const [file, setFile] = useState<VerificationUploadFile | null>(null);
@@ -156,7 +199,7 @@ export default function StudentVerificationScreen({
       const result = await submitStudentVerification(docType, file);
       setFile(null);
       await load(true);
-      Alert.alert(statusDetails(result.status).label, result.decisionReason || 'Your document was submitted successfully.');
+      Alert.alert(statusDetails(result.status, colors).label, result.decisionReason || 'Your document was submitted successfully.');
     } catch (error: any) {
       Alert.alert('Upload failed', error?.message || 'Please check your connection and try again.');
     } finally {
@@ -166,7 +209,7 @@ export default function StudentVerificationScreen({
 
   const rawStatus = status?.user.verificationStatus;
   const isAlreadyVerified = !!status?.user.isVerified || rawStatus === 'approved' || rawStatus === 'auto-approved';
-  const current = statusDetails(isAlreadyVerified ? 'approved' : rawStatus);
+  const current = statusDetails(isAlreadyVerified ? 'approved' : rawStatus, colors);
   const latest = status?.latestSubmission;
   const score = latest?.matchScores?.aggregate;
   const scorePercent = typeof score === 'number' ? Math.round(score * 100) : null;
@@ -180,20 +223,20 @@ export default function StudentVerificationScreen({
   return (
     <View style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={ORANGE} />}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.primary} />}>
           <View style={styles.header}>
             <TouchableOpacity style={styles.backButton} onPress={goBack} accessibilityRole="button" accessibilityLabel="Back to settings" hitSlop={hitSlop}>
-              <Ionicons name="arrow-back" size={19} color={NAVY} />
+              <Ionicons name="arrow-back" size={19} color={colors.textPrimary} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Student verification</Text>
           </View>
 
           {loading ? (
-            <View style={styles.loading}><ActivityIndicator color={ORANGE} /><Text style={styles.muted}>Loading verification status...</Text></View>
+            <View style={styles.loading}><ActivityIndicator color={colors.primary} /><Text style={styles.muted}>Loading verification status...</Text></View>
           ) : (
             <>
               <View style={[styles.statusCard, { backgroundColor: current.bg }]}>
-                <View style={[styles.statusIcon, { backgroundColor: current.color }]}><Ionicons name={current.icon} size={22} color="#FFFFFF" /></View>
+                <View style={[styles.statusIcon, { backgroundColor: current.color }]}><Ionicons name={current.icon} size={22} color={colors.textInverse} /></View>
                 <View style={styles.flex}>
                   <Text style={styles.eyebrow}>CURRENT STATUS</Text>
                   <Text style={[styles.statusTitle, { color: current.color }]}>{current.label}</Text>
@@ -229,7 +272,7 @@ export default function StudentVerificationScreen({
                   const selected = docType === item.value;
                   return (
                     <TouchableOpacity key={item.value} style={[styles.typeChip, selected && styles.typeChipSelected]} onPress={() => setDocType(item.value)} accessibilityRole="radio" accessibilityState={{ checked: selected }}>
-                      <Ionicons name={item.icon} size={18} color={selected ? ORANGE : MUTED} />
+                      <Ionicons name={item.icon} size={18} color={selected ? colors.primary : colors.textSecondary} />
                       <Text style={[styles.typeText, selected && styles.typeTextSelected]}>{item.label}</Text>
                     </TouchableOpacity>
                   );
@@ -237,18 +280,18 @@ export default function StudentVerificationScreen({
               </View>
 
               <TouchableOpacity style={[styles.uploadCard, file && styles.uploadCardSelected]} onPress={showPicker} accessibilityRole="button">
-                <View style={styles.uploadIcon}><Ionicons name={file ? 'document-attach' : 'cloud-upload-outline'} size={25} color={ORANGE} /></View>
+                <View style={styles.uploadIcon}><Ionicons name={file ? 'document-attach' : 'cloud-upload-outline'} size={25} color={colors.primary} /></View>
                 <View style={styles.flex}>
                   <Text style={styles.uploadTitle}>{file ? file.name : 'Add your document'}</Text>
                   <Text style={styles.uploadBody}>{file ? `${file.mimeType}${file.size ? ` · ${formatBytes(file.size)}` : ''}` : 'Take a photo or choose a PDF, JPG, or PNG up to 15 MB.'}</Text>
                 </View>
-                <Ionicons name={file ? 'swap-horizontal' : 'chevron-forward'} size={19} color={MUTED} />
+                <Ionicons name={file ? 'swap-horizontal' : 'chevron-forward'} size={19} color={colors.textSecondary} />
               </TouchableOpacity>
 
-              <View style={styles.tipCard}><Ionicons name="sparkles-outline" size={18} color={ORANGE} /><Text style={styles.tipText}>For the best OCR score, include your full name, school name, and a current semester or enrollment status.</Text></View>
+              <View style={styles.tipCard}><Ionicons name="sparkles-outline" size={18} color={colors.primary} /><Text style={styles.tipText}>For the best OCR score, include your full name, school name, and a current semester or enrollment status.</Text></View>
 
               <TouchableOpacity style={[styles.submitButton, (!file || submitting) && styles.submitDisabled]} onPress={() => void submit()} disabled={!file || submitting} accessibilityRole="button">
-                {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.submitText}>Submit for verification</Text>}
+                {submitting ? <ActivityIndicator color={colors.textInverse} /> : <Text style={styles.submitText}>Submit for verification</Text>}
               </TouchableOpacity>
                 </>
               ) : null}
@@ -260,47 +303,3 @@ export default function StudentVerificationScreen({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: BG, alignItems: 'center' },
-  safe: { flex: 1, width: '100%', maxWidth: Platform.OS === 'web' ? 430 : undefined, backgroundColor: BG },
-  content: { paddingHorizontal: layout.screenPadding, paddingBottom: 36 },
-  header: { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  backButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center'},
-  headerTitle: { color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
-  loading: { minHeight: 240, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  muted: { color: MUTED, fontSize: 14 },
-  flex: { flex: 1 },
-  statusCard: { borderRadius: 20, padding: 18, flexDirection: 'row', gap: 14, marginBottom: 18 },
-  statusIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  eyebrow: { color: '#929BAB', fontSize: 10, fontWeight: '700', letterSpacing: 1.4, marginBottom: 5 },
-  statusTitle: { fontSize: 20, fontWeight: '700', marginBottom: 5 },
-  statusBody: { color: NAVY, fontSize: 13, lineHeight: 19 },
-  deadline: { color: ORANGE, fontSize: 12, fontWeight: '700', marginTop: 7 },
-  card: { borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 17, marginBottom: 22 },
-  sectionHeadingRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
-  sectionHeader: { marginTop: 6, marginBottom: 12 },
-  sectionTitle: { color: NAVY, fontSize: 18, fontWeight: '700' },
-  scoreBadge: { flexDirection: 'row', alignItems: 'baseline', marginLeft: 'auto', backgroundColor: PAPER, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
-  scoreText: { color: ORANGE, fontSize: 22, fontWeight: '700' },
-  scoreSmall: { color: MUTED, fontSize: 11 },
-  scoreGrid: { flexDirection: 'row', gap: 8 },
-  scoreItem: { flex: 1, borderRadius: 12, backgroundColor: PAPER, paddingVertical: 11, alignItems: 'center' },
-  scoreLabel: { color: MUTED, fontSize: 10, textTransform: 'capitalize' },
-  scoreValue: { color: NAVY, fontSize: 15, fontWeight: '700', marginTop: 3 },
-  typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  typeChip: { minHeight: 44, borderRadius: 14, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7 },
-  typeChipSelected: { borderColor: ORANGE, backgroundColor: '#FFF3EA' },
-  typeText: { color: MUTED, fontSize: 12, fontWeight: '600' },
-  typeTextSelected: { color: ORANGE },
-  uploadCard: { minHeight: 84, borderRadius: 18, borderWidth: 1, borderStyle: 'dashed', borderColor: '#C8CED8', backgroundColor: '#FFFFFF', padding: 15, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  uploadCardSelected: { borderStyle: 'solid', borderColor: ORANGE },
-  uploadIcon: { width: 46, height: 46, borderRadius: 14, backgroundColor: '#F9E8DB', alignItems: 'center', justifyContent: 'center' },
-  uploadTitle: { color: NAVY, fontSize: 15, fontWeight: '700' },
-  uploadBody: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 3 },
-  tipCard: { flexDirection: 'row', gap: 9, backgroundColor: PAPER, borderRadius: 14, padding: 13, marginTop: 10 },
-  tipText: { flex: 1, color: '#5F6878', fontSize: 11, lineHeight: 17 },
-  submitButton: { height: 54, borderRadius: 27, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', marginTop: 16, marginBottom: 28 },
-  submitDisabled: { opacity: 0.45 },
-  submitText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-});

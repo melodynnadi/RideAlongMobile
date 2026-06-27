@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, Image, StyleSheet, ActivityIndicator,
   TouchableOpacity, ScrollView, Linking, StatusBar,
@@ -11,6 +11,7 @@ import { doc, getDoc, query, collection, where, onSnapshot, getDocs } from 'fire
 import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 async function resolveAvatarUrl(raw: string | null | undefined): Promise<string | null> {
   if (!raw || !raw.trim()) return null;
@@ -24,12 +25,6 @@ async function resolveAvatarUrl(raw: string | null | undefined): Promise<string 
   }
 }
 
-const NAVY   = '#15233A';
-const ORANGE = '#DE5D20';
-const BG     = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED  = '#8B94A6';
-const CARD   = '#FFFFFF';
 
 type Review = { id: string; reviewerName?: string; rating?: number; comment?: string; createdAt?: any };
 type CommentItem = Review & { raterId?: string; commenterName?: string; commenterAvatarUrl?: string };
@@ -57,6 +52,7 @@ const PREF_LABELS: Record<string, string> = {
 };
 
 function StarRow({ rating, size = 14 }: { rating: number; size?: number }) {
+  const { colors } = useAppTheme();
   return (
     <View style={{ flexDirection: 'row', gap: 2 }}>
       {[1, 2, 3, 4, 5].map((s) => (
@@ -64,7 +60,7 @@ function StarRow({ rating, size = 14 }: { rating: number; size?: number }) {
           key={s}
           name={rating >= s ? 'star' : rating >= s - 0.5 ? 'star-half' : 'star-outline'}
           size={size}
-          color="#F59E0B"
+          color={colors.amber}
         />
       ))}
     </View>
@@ -72,6 +68,7 @@ function StarRow({ rating, size = 14 }: { rating: number; size?: number }) {
 }
 
 function InitialsAvatar({ name, size = 72 }: { name: string; size?: number }) {
+  const { colors } = useAppTheme();
   const initials = name
     .split(' ')
     .map((w) => w[0])
@@ -79,13 +76,106 @@ function InitialsAvatar({ name, size = 72 }: { name: string; size?: number }) {
     .join('')
     .toUpperCase();
   return (
-    <View style={[s.avatarFallback, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Text style={[s.avatarInitials, { fontSize: size * 0.36 }]}>{initials || '?'}</Text>
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: colors.border }}>
+      <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: size * 0.36 }}>{initials || '?'}</Text>
     </View>
   );
 }
 
 export default function RiderProfilePage() {
+  const { colors } = useAppTheme();
+  const s = useMemo(() => StyleSheet.create({
+    root:        { flex: 1, backgroundColor: colors.bg },
+    safe:        { flex: 1 },
+    scroll:      { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 40 },
+    loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+    pageHeader: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
+    backBtn: {
+      width: 40, height: 40, borderRadius: 20,
+      borderWidth: 1, borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    pageTitle: { color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+
+    heroWrap:       { alignItems: 'center', paddingVertical: 8, marginBottom: 16 },
+    heroAvatarWrap: { position: 'relative', marginBottom: 14 },
+    heroAvatar:     { width: 88, height: 88, borderRadius: 44, borderWidth: 3, borderColor: colors.border },
+    avatarFallback: { backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: colors.border },
+    avatarInitials: { color: colors.textPrimary, fontWeight: '700' },
+    ratingBadge: {
+      position: 'absolute', bottom: -4, right: -4,
+      flexDirection: 'row', alignItems: 'center', gap: 2,
+      backgroundColor: colors.textPrimary, borderRadius: 12,
+      paddingHorizontal: 7, paddingVertical: 3,
+      borderWidth: 2, borderColor: colors.bg,
+    },
+    ratingBadgeText: { color: colors.textInverse, fontSize: 11, fontWeight: '700' },
+    heroName:  { color: colors.textPrimary, fontSize: 22, fontWeight: '800', letterSpacing: -0.3, textAlign: 'center', marginBottom: 4 },
+    heroEmail: { color: colors.textSecondary, fontSize: 13, marginBottom: 18, textAlign: 'center' },
+    statsRow:  { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
+    statPill:  { alignItems: 'center', paddingHorizontal: 20 },
+    statValue: { color: colors.textPrimary, fontSize: 20, fontWeight: '800', lineHeight: 24 },
+    statLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: '600', marginTop: 2 },
+    statDivider: { width: 1, height: 32, backgroundColor: colors.border },
+    callRow: {
+      flexDirection: 'row', alignItems: 'center', gap: 6,
+      backgroundColor: colors.primaryDim, borderRadius: 20,
+      paddingHorizontal: 16, paddingVertical: 8,
+    },
+    callText: { color: colors.primary, fontSize: 14, fontWeight: '600' },
+
+    sectionLabel: { color: colors.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginBottom: 8 },
+
+    card: {
+      backgroundColor: colors.bgCard,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 16,
+      marginBottom: 20,
+      shadowColor: colors.textPrimary,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 8,
+      elevation: 1,
+    },
+
+    ratingsLayout:  { flexDirection: 'row', alignItems: 'center', gap: 20 },
+    bigRatingBlock: { alignItems: 'center', minWidth: 64 },
+    bigRatingNum:   { color: colors.textPrimary, fontSize: 40, fontWeight: '800', lineHeight: 44 },
+    bigRatingSub:   { color: colors.textSecondary, fontSize: 11, fontWeight: '600', marginTop: 4 },
+    histogramBlock: { flex: 1 },
+    barRow:    { flexDirection: 'row', alignItems: 'center', marginVertical: 3 },
+    barLabel:  { width: 12, fontSize: 11, color: colors.textPrimary, fontWeight: '700', textAlign: 'right', marginRight: 2 },
+    barTrack:  { flex: 1, height: 6, backgroundColor: colors.border, borderRadius: 3, marginHorizontal: 6 },
+    barFill:   { height: 6, backgroundColor: colors.primary, borderRadius: 3 },
+    barCount:  { width: 20, textAlign: 'right', fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
+
+    prefRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, gap: 12 },
+    prefBorder:  { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+    prefIconWrap: {
+      width: 32, height: 32, borderRadius: 10,
+      backgroundColor: colors.primaryDim,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    prefLabel: { flex: 1, color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
+    prefValue: { color: colors.textSecondary, fontSize: 13, fontWeight: '500' },
+
+    commentRow:            { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 12 },
+    commentBorder:         { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+    commentAvatar:         { width: 38, height: 38, borderRadius: 19, flexShrink: 0 },
+    commentAvatarFallback: { backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center' },
+    commentInitials:       { color: colors.textPrimary, fontSize: 14, fontWeight: '700' },
+    commentName:           { color: colors.textPrimary, fontSize: 14, fontWeight: '700', marginBottom: 4 },
+    commentText:           { color: colors.textSecondary, fontSize: 13, lineHeight: 19, fontStyle: 'italic' },
+
+    emptyState: { alignItems: 'center', paddingVertical: 48, gap: 10 },
+    emptyTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: '700' },
+    emptyText:  { color: colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 20, maxWidth: 260 },
+  }), [colors]);
+
   const { id, returnTo } = useLocalSearchParams<{ id?: string; returnTo?: string }>();
   const riderId = Array.isArray(id) ? id[0] : id;
   const goBack = () => {
@@ -199,10 +289,10 @@ export default function RiderProfilePage() {
   if (loading) {
     return (
       <View style={s.root}>
-        <StatusBar barStyle="dark-content" />
+        <StatusBar barStyle={colors.statusBar} />
         <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
           <View style={s.loadingWrap}>
-            <ActivityIndicator color={ORANGE} size="large" />
+            <ActivityIndicator color={colors.primary} size="large" />
           </View>
         </SafeAreaView>
       </View>
@@ -227,14 +317,14 @@ export default function RiderProfilePage() {
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={colors.statusBar} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}>
 
           {/* ── Header ── */}
           <View style={s.pageHeader}>
             <TouchableOpacity style={s.backBtn} onPress={goBack} activeOpacity={0.75}>
-              <Ionicons name="chevron-back" size={22} color={NAVY} />
+              <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
             </TouchableOpacity>
             <Text style={s.pageTitle}>Rider Profile</Text>
           </View>
@@ -249,7 +339,7 @@ export default function RiderProfilePage() {
               )}
               {totalReviews > 0 && (
                 <View style={s.ratingBadge}>
-                  <Ionicons name="star" size={11} color="#F59E0B" />
+                  <Ionicons name="star" size={11} color={colors.amber} />
                   <Text style={s.ratingBadgeText}>{averageRating.toFixed(1)}</Text>
                 </View>
               )}
@@ -285,7 +375,7 @@ export default function RiderProfilePage() {
                 onPress={() => Linking.openURL(`tel:${rider.phone}`)}
                 activeOpacity={0.8}
               >
-                <Ionicons name="call-outline" size={16} color={ORANGE} />
+                <Ionicons name="call-outline" size={16} color={colors.primary} />
                 <Text style={s.callText}>{rider.phone}</Text>
               </TouchableOpacity>
             ) : null}
@@ -309,7 +399,7 @@ export default function RiderProfilePage() {
                       return (
                         <View key={star} style={s.barRow}>
                           <Text style={s.barLabel}>{star}</Text>
-                          <Ionicons name="star" size={10} color="#F59E0B" style={{ marginRight: 4 }} />
+                          <Ionicons name="star" size={10} color={colors.amber} style={{ marginRight: 4 }} />
                           <View style={s.barTrack}>
                             <View style={[s.barFill, { width: `${pct}%` }]} />
                           </View>
@@ -335,7 +425,7 @@ export default function RiderProfilePage() {
                   return (
                     <View key={key} style={[s.prefRow, idx < prefEntries.length - 1 && s.prefBorder]}>
                       <View style={s.prefIconWrap}>
-                        <Ionicons name={icon as any} size={15} color={ORANGE} />
+                        <Ionicons name={icon as any} size={15} color={colors.primary} />
                       </View>
                       <Text style={s.prefLabel}>{label}</Text>
                       <Text style={s.prefValue}>{valStr}</Text>
@@ -376,7 +466,7 @@ export default function RiderProfilePage() {
 
           {totalReviews === 0 && prefEntries.length === 0 && comments.length === 0 && (
             <View style={s.emptyState}>
-              <Ionicons name="person-circle-outline" size={48} color={BORDER} />
+              <Ionicons name="person-circle-outline" size={48} color={colors.border} />
               <Text style={s.emptyTitle}>No activity yet</Text>
               <Text style={s.emptyText}>This rider hasn't completed any rides or received reviews.</Text>
             </View>
@@ -389,102 +479,3 @@ export default function RiderProfilePage() {
   );
 }
 
-const s = StyleSheet.create({
-  root:        { flex: 1, backgroundColor: BG },
-  safe:        { flex: 1 },
-  scroll:      { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 40 },
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-
-  // Header — matches settings/profile pages
-  pageHeader: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
-  backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    borderWidth: 1, borderColor: BORDER,
-    backgroundColor: CARD,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  pageTitle: { color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
-
-  // Hero
-  heroWrap:       { alignItems: 'center', paddingVertical: 8, marginBottom: 16 },
-  heroAvatarWrap: { position: 'relative', marginBottom: 14 },
-  heroAvatar:     { width: 88, height: 88, borderRadius: 44, borderWidth: 3, borderColor: BORDER },
-  avatarFallback: { backgroundColor: '#EEE8DF', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: BORDER },
-  avatarInitials: { color: NAVY, fontWeight: '700' },
-  ratingBadge: {
-    position: 'absolute', bottom: -4, right: -4,
-    flexDirection: 'row', alignItems: 'center', gap: 2,
-    backgroundColor: NAVY, borderRadius: 12,
-    paddingHorizontal: 7, paddingVertical: 3,
-    borderWidth: 2, borderColor: BG,
-  },
-  ratingBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
-  heroName:  { color: NAVY, fontSize: 22, fontWeight: '800', letterSpacing: -0.3, textAlign: 'center', marginBottom: 4 },
-  heroEmail: { color: MUTED, fontSize: 13, marginBottom: 18, textAlign: 'center' },
-  statsRow:  { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  statPill:  { alignItems: 'center', paddingHorizontal: 20 },
-  statValue: { color: NAVY, fontSize: 20, fontWeight: '800', lineHeight: 24 },
-  statLabel: { color: MUTED, fontSize: 11, fontWeight: '600', marginTop: 2 },
-  statDivider: { width: 1, height: 32, backgroundColor: BORDER },
-  callRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: '#FEF0E8', borderRadius: 20,
-    paddingHorizontal: 16, paddingVertical: 8,
-  },
-  callText: { color: ORANGE, fontSize: 14, fontWeight: '600' },
-
-  // Section label
-  sectionLabel: { color: MUTED, fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginBottom: 8 },
-
-  // Card wrapper
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: BORDER,
-    padding: 16,
-    marginBottom: 20,
-    shadowColor: NAVY,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 1,
-  },
-
-  // Ratings
-  ratingsLayout:  { flexDirection: 'row', alignItems: 'center', gap: 20 },
-  bigRatingBlock: { alignItems: 'center', minWidth: 64 },
-  bigRatingNum:   { color: NAVY, fontSize: 40, fontWeight: '800', lineHeight: 44 },
-  bigRatingSub:   { color: MUTED, fontSize: 11, fontWeight: '600', marginTop: 4 },
-  histogramBlock: { flex: 1 },
-  barRow:    { flexDirection: 'row', alignItems: 'center', marginVertical: 3 },
-  barLabel:  { width: 12, fontSize: 11, color: NAVY, fontWeight: '700', textAlign: 'right', marginRight: 2 },
-  barTrack:  { flex: 1, height: 6, backgroundColor: '#ECDFD0', borderRadius: 3, marginHorizontal: 6 },
-  barFill:   { height: 6, backgroundColor: ORANGE, borderRadius: 3 },
-  barCount:  { width: 20, textAlign: 'right', fontSize: 11, color: MUTED, fontWeight: '600' },
-
-  // Preferences (plain rows, no card)
-  prefRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, gap: 12 },
-  prefBorder:  { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  prefIconWrap: {
-    width: 32, height: 32, borderRadius: 10,
-    backgroundColor: '#FEF0E8',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  prefLabel: { flex: 1, color: NAVY, fontSize: 14, fontWeight: '600' },
-  prefValue: { color: MUTED, fontSize: 13, fontWeight: '500' },
-
-  // Comments (plain rows, no card)
-  commentRow:            { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 12 },
-  commentBorder:         { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  commentAvatar:         { width: 38, height: 38, borderRadius: 19, flexShrink: 0 },
-  commentAvatarFallback: { backgroundColor: '#EEE8DF', alignItems: 'center', justifyContent: 'center' },
-  commentInitials:       { color: NAVY, fontSize: 14, fontWeight: '700' },
-  commentName:           { color: NAVY, fontSize: 14, fontWeight: '700', marginBottom: 4 },
-  commentText:           { color: MUTED, fontSize: 13, lineHeight: 19, fontStyle: 'italic' },
-
-  // Empty state
-  emptyState: { alignItems: 'center', paddingVertical: 48, gap: 10 },
-  emptyTitle: { color: NAVY, fontSize: 16, fontWeight: '700' },
-  emptyText:  { color: MUTED, fontSize: 13, textAlign: 'center', lineHeight: 20, maxWidth: 260 },
-});

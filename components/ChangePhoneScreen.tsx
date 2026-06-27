@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -11,14 +11,36 @@ import { firebaseAuth, firestore } from '@/constants/services';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
-const NAVY = '#15233A';
-const ORANGE = '#DE5D20';
-const BG = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED = '#7D8698';
+function makeStyles(colors: any) {
+  return StyleSheet.create({
+    root: { flex: 1, alignItems: 'center', backgroundColor: colors.bg },
+    safe: { flex: 1, width: '100%', maxWidth: Platform.OS === 'web' ? 430 : undefined, backgroundColor: colors.bg },
+    content: { width: '100%', maxWidth: layout.contentMaxWidth, alignSelf: 'center', paddingHorizontal: layout.screenPadding, paddingBottom: 36 },
+    header: { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+    backButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center'},
+    headerTitle: { color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+    intro: { color: colors.textSecondary, fontSize: 14, lineHeight: 21, marginBottom: 20 },
+    card: { borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 17, marginBottom: 18 },
+    label: { color: colors.textSecondary, fontSize: 10, lineHeight: 15, letterSpacing: 1.3, fontWeight: '700', marginBottom: 7 },
+    inputWrap: { minHeight: 56, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 15 },
+    input: { flex: 1, color: colors.textPrimary, fontSize: 16, paddingVertical: 14 },
+    notice: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, borderRadius: 13, backgroundColor: colors.primaryDim, padding: 12, marginTop: 16 },
+    noticeText: { flex: 1, color: colors.textSecondary, fontSize: 11, lineHeight: 17 },
+    codeInput: { height: 62, borderRadius: 15, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg, color: colors.textPrimary, fontSize: 25, fontWeight: '700', letterSpacing: 10, textAlign: 'center' },
+    resendButton: { alignSelf: 'center', paddingHorizontal: 12, paddingTop: 18, paddingBottom: 2 },
+    resendText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
+    primaryButton: { minHeight: 54, borderRadius: 27, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+    disabled: { opacity: 0.5 },
+    primaryText: { color: colors.textInverse, fontSize: 15, fontWeight: '700' },
+  });
+}
 
 export default function ChangePhoneScreen({ role = 'rider' }: { role?: 'rider' | 'driver' }) {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+
   const fallbackRoute = role === 'driver' ? '/(driver)/settings/account-settings' : '/(rider)/settings/account-settings';
   const { goBack: returnToOrigin } = useReturnNavigation(fallbackRoute);
   const refreshProfiles = useAuthStore((state) => state.refreshProfiles);
@@ -54,6 +76,7 @@ export default function ChangePhoneScreen({ role = 'rider' }: { role?: 'rider' |
       setDoc(doc(firestore, 'users', user.uid), values, { merge: true }),
     ]);
   };
+
   const goBack = () => {
     if (step === 'code') {
       void cancelPhoneVerification();
@@ -115,7 +138,7 @@ export default function ChangePhoneScreen({ role = 'rider' }: { role?: 'rider' |
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
             <TouchableOpacity style={styles.backButton} onPress={goBack} hitSlop={hitSlop} accessibilityRole="button" accessibilityLabel="Go back">
-              <Ionicons name="arrow-back" size={19} color={NAVY} />
+              <Ionicons name="arrow-back" size={19} color={colors.textPrimary} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Change phone number</Text>
           </View>
@@ -127,47 +150,25 @@ export default function ChangePhoneScreen({ role = 'rider' }: { role?: 'rider' |
               <>
                 <Text style={styles.label}>NEW PHONE NUMBER</Text>
                 <View style={styles.inputWrap}>
-                  <Ionicons name="call-outline" size={20} color={MUTED} />
-                  <TextInput value={phone} onChangeText={setPhone} placeholder="(512) 555-0123" placeholderTextColor="#9AA3B2" keyboardType="phone-pad" textContentType="telephoneNumber" style={styles.input} autoFocus />
+                  <Ionicons name="call-outline" size={20} color={colors.textSecondary} />
+                  <TextInput value={phone} onChangeText={setPhone} placeholder="(512) 555-0123" placeholderTextColor={colors.textSecondary} keyboardType="phone-pad" textContentType="telephoneNumber" style={styles.input} autoFocus />
                 </View>
-                <View style={styles.notice}><Ionicons name="shield-checkmark-outline" size={18} color={ORANGE} /><Text style={styles.noticeText}>Your number is only updated after the verification code is confirmed.</Text></View>
+                <View style={styles.notice}><Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} /><Text style={styles.noticeText}>Your number is only updated after the verification code is confirmed.</Text></View>
               </>
             ) : (
               <>
                 <Text style={styles.label}>VERIFICATION CODE</Text>
-                <TextInput value={code} onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" placeholderTextColor="#A0A8B5" keyboardType="number-pad" textContentType="oneTimeCode" maxLength={6} style={styles.codeInput} autoFocus />
+                <TextInput value={code} onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" placeholderTextColor={colors.textSecondary} keyboardType="number-pad" textContentType="oneTimeCode" maxLength={6} style={styles.codeInput} autoFocus />
                 <TouchableOpacity style={styles.resendButton} onPress={() => void sendCode()} disabled={submitting} accessibilityRole="button"><Text style={styles.resendText}>Resend code</Text></TouchableOpacity>
               </>
             )}
           </View>
 
           <TouchableOpacity style={[styles.primaryButton, (submitting || (step === 'phone' ? !phone.trim() : code.length !== 6)) && styles.disabled]} onPress={() => void (step === 'phone' ? sendCode() : verify())} disabled={submitting || (step === 'phone' ? !phone.trim() : code.length !== 6)} accessibilityRole="button">
-            {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryText}>{step === 'phone' ? 'Send verification code' : 'Verify and update'}</Text>}
+            {submitting ? <ActivityIndicator color={colors.textInverse} /> : <Text style={styles.primaryText}>{step === 'phone' ? 'Send verification code' : 'Verify and update'}</Text>}
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center', backgroundColor: BG },
-  safe: { flex: 1, width: '100%', maxWidth: Platform.OS === 'web' ? 430 : undefined, backgroundColor: BG },
-  content: { width: '100%', maxWidth: layout.contentMaxWidth, alignSelf: 'center', paddingHorizontal: layout.screenPadding, paddingBottom: 36 },
-  header: { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  backButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center'},
-  headerTitle: { color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
-  intro: { color: MUTED, fontSize: 14, lineHeight: 21, marginBottom: 20 },
-  card: { borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 17, marginBottom: 18 },
-  label: { color: '#8B94A6', fontSize: 10, lineHeight: 15, letterSpacing: 1.3, fontWeight: '700', marginBottom: 7 },
-  inputWrap: { minHeight: 56, borderRadius: 14, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: BG, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 15 },
-  input: { flex: 1, color: NAVY, fontSize: 16, paddingVertical: 14 },
-  notice: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, borderRadius: 13, backgroundColor: '#FFF2E9', padding: 12, marginTop: 16 },
-  noticeText: { flex: 1, color: '#6D5547', fontSize: 11, lineHeight: 17 },
-  codeInput: { height: 62, borderRadius: 15, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: BG, color: NAVY, fontSize: 25, fontWeight: '700', letterSpacing: 10, textAlign: 'center' },
-  resendButton: { alignSelf: 'center', paddingHorizontal: 12, paddingTop: 18, paddingBottom: 2 },
-  resendText: { color: ORANGE, fontSize: 13, fontWeight: '700' },
-  primaryButton: { minHeight: 54, borderRadius: 27, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center' },
-  disabled: { opacity: 0.5 },
-  primaryText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-});

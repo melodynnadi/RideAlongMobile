@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Platform, ScrollView, StyleSheet, Text as RNText, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import React, { createContext, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Platform, ScrollView, Share, StyleSheet, Text as RNText, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Location from 'expo-location';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -31,15 +32,18 @@ import { CityAutocomplete } from '@/components/CityAutocomplete';
 import { DatePickerModal, TimePickerModal, formatDateLabel } from '@/components/DateTimePickerModals';
 import { computeRiderSuggestedPrice, formatPricingBreakdown, getRideType } from '@/src/utils/pricing';
 import { chatBelongsToRole, roleKey } from '@/src/utils/roleIdentity';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import { lightColors, type AppColors } from '@/constants/theme';
 
-const NAVY = '#15233A';
-const SECONDARY = '#0D1B48';
-const ORANGE = '#DE5D20';
-const BG = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED = '#8B94A6';
 const FONT_SANS = Platform.OS === 'web' ? '"Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, sans-serif' : undefined;
 const FONT_MONO = Platform.OS === 'web' ? '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace' : undefined;
+
+const StylesCtx = createContext<ReturnType<typeof makeStyles>>(makeStyles(lightColors));
+
+function useRiderStyles() {
+  const { colors } = useAppTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 function formatCurrentLocationAddress(result?: Location.LocationGeocodedAddress | null): string {
   if (!result) return 'Current location';
@@ -104,6 +108,7 @@ async function fetchRiderRouteMetrics(origin: Coords, destination: Coords) {
 }
 
 function Text({ style, ...props }: RNTextProps) {
+  const styles = useRiderStyles();
   return <RNText {...props} style={[styles.defaultText, style]} />;
 }
 
@@ -113,6 +118,7 @@ function PhoneScreen({
   children,
   showBack = false,
   rightIcon,
+  rightAction,
   bottomAction,
   onBack,
 }: {
@@ -121,25 +127,29 @@ function PhoneScreen({
   children: React.ReactNode;
   showBack?: boolean;
   rightIcon?: keyof typeof Ionicons.glyphMap;
+  rightAction?: React.ReactNode;
   bottomAction?: React.ReactNode;
   onBack?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const { goBack } = useReturnNavigation('/(rider)');
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const bottomNavHeight = 78;
 
   return (
+    <StylesCtx.Provider value={styles}>
     <View style={styles.root}>
-      <StatusBar style="dark" />
+      <StatusBar style={colors.statusBar === 'light-content' ? 'light' : 'dark'} />
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         {Platform.OS === 'web' ? (
           <View style={styles.status}>
             <Text style={styles.statusTime}>9:41</Text>
             <View style={styles.notch} />
             <View style={styles.statusIcons}>
-              <Ionicons name="cellular" size={16} color="#0F172A" />
-              <Ionicons name="wifi" size={14} color="#0F172A" />
-              <Ionicons name="battery-full" size={18} color="#0F172A" />
+              <Ionicons name="cellular" size={16} color={colors.textPrimary} />
+              <Ionicons name="wifi" size={14} color={colors.textPrimary} />
+              <Ionicons name="battery-full" size={18} color={colors.textPrimary} />
             </View>
           </View>
         ) : null}
@@ -160,14 +170,14 @@ function PhoneScreen({
           <View style={styles.header}>
             {showBack ? (
               <TouchableOpacity style={styles.circleBtn} onPress={onBack || goBack} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={hitSlop}>
-                <Ionicons name="arrow-back" size={18} color={NAVY} />
+                <Ionicons name="arrow-back" size={18} color={colors.textPrimary} />
               </TouchableOpacity>
             ) : (
               <Text style={styles.mark}>R</Text>
             )}
             <Text style={[styles.headerTitle, showBack && styles.headerTitleAfterBack]}>{title}</Text>
             <View style={{ flex: 1 }} />
-            {rightIcon ? (
+            {rightAction ?? (rightIcon ? (
               <TouchableOpacity
                 style={styles.circleBtn}
                 onPress={() => rightIcon === 'person-circle' ? router.push('/(rider)/profile' as any) : undefined}
@@ -177,9 +187,9 @@ function PhoneScreen({
                 accessibilityState={{ disabled: rightIcon !== 'person-circle' }}
                 hitSlop={hitSlop}
               >
-                <Ionicons name={rightIcon} size={18} color={NAVY} />
+                <Ionicons name={rightIcon} size={18} color={colors.textPrimary} />
               </TouchableOpacity>
-            ) : null}
+            ) : null)}
           </View>
         ) : null}
 
@@ -190,10 +200,13 @@ function PhoneScreen({
         {activeTab ? <BottomNav active={activeTab} /> : null}
       </SafeAreaView>
     </View>
+    </StylesCtx.Provider>
   );
 }
 
 function BottomNav({ active }: { active: TabKey }) {
+  const styles = useRiderStyles();
+  const { colors } = useAppTheme();
   const { messageCount } = useRiderUnreadCounts();
   const tabs: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap; href?: string }[] = [
     { key: 'home', label: 'Home', icon: 'home', href: '/(rider)' },
@@ -217,10 +230,10 @@ function BottomNav({ active }: { active: TabKey }) {
             hitSlop={hitSlop}
           >
             <View style={styles.navIconWrap}>
-              <Ionicons name={tab.icon} size={23} color={selected ? ORANGE : '#6B7280'} />
+              <Ionicons name={tab.icon} size={23} color={selected ? colors.primary : colors.textSecondary} />
               {tab.key === 'inbox' && messageCount > 0 ? <View style={styles.iconBadge}><Text style={styles.iconBadgeText}>{badgeLabel(messageCount)}</Text></View> : null}
             </View>
-            <Text style={[styles.navText, selected && { color: ORANGE }]}>{tab.label}</Text>
+            <Text style={[styles.navText, selected && { color: colors.primary }]}>{tab.label}</Text>
           </TouchableOpacity>
         );
       })}
@@ -229,6 +242,7 @@ function BottomNav({ active }: { active: TabKey }) {
 }
 
 function RouteDots({ compact = false, connected = false }: { compact?: boolean; connected?: boolean }) {
+  const styles = useRiderStyles();
   return (
     <View style={[styles.routeRail, compact && { paddingVertical: 4 }, connected && styles.connectedRouteRail]}>
       <View style={styles.navyDot} />
@@ -239,6 +253,8 @@ function RouteDots({ compact = false, connected = false }: { compact?: boolean; 
 }
 
 function HomeUtilityBar({ university, initial, avatarUrl }: { university?: string; initial: string; avatarUrl?: string }) {
+  const styles = useRiderStyles();
+  const { colors } = useAppTheme();
   const { notificationCount } = useRiderUnreadCounts();
   return (
     <View style={styles.homeUtilityBar}>
@@ -246,7 +262,7 @@ function HomeUtilityBar({ university, initial, avatarUrl }: { university?: strin
         <Image source={require('../../assets/ridealonglogo.png')} style={styles.homeBrandLogo} resizeMode="contain" />
       </View>
       <View style={styles.campusChip}>
-        <Ionicons name="school-outline" size={15} color={NAVY} />
+        <Ionicons name="school-outline" size={15} color={colors.textPrimary} />
         <Text style={styles.campusText} numberOfLines={1}>{university || 'Your campus'}</Text>
       </View>
       <TouchableOpacity
@@ -256,7 +272,7 @@ function HomeUtilityBar({ university, initial, avatarUrl }: { university?: strin
         accessibilityLabel="Open notifications"
         hitSlop={hitSlop}
       >
-        <Ionicons name="notifications-outline" size={21} color={NAVY} />
+        <Ionicons name="notifications-outline" size={21} color={colors.textPrimary} />
         {notificationCount > 0 ? <View style={styles.utilityBadge}><Text style={styles.iconBadgeText}>{badgeLabel(notificationCount)}</Text></View> : null}
       </TouchableOpacity>
       <TouchableOpacity
@@ -281,6 +297,7 @@ function RouteCard({ footer = true, cta = false, from = '', to = '', onChangeFro
   onChangeTo?: (value: string) => void;
   onSearch?: () => void;
 }) {
+  const styles = useRiderStyles();
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [dateModalOpen, setDateModalOpen] = useState(false);
@@ -335,6 +352,7 @@ function RouteCard({ footer = true, cta = false, from = '', to = '', onChangeFro
 }
 
 function SectionHeader({ title, action }: { title: string; action?: string }) {
+  const styles = useRiderStyles();
   return (
     <View style={styles.sectionHeader}>
       <Text style={styles.sectionTitle}>{title}</Text>
@@ -344,6 +362,8 @@ function SectionHeader({ title, action }: { title: string; action?: string }) {
 }
 
 function UberStylePromotionCard({ promotion, claimed, onPress, width, secondary = false }: { promotion: Promotion; claimed: boolean; onPress: () => void; width: number; secondary?: boolean }) {
+  const styles = useRiderStyles();
+  const { colors } = useAppTheme();
   const icon: keyof typeof Ionicons.glyphMap = promotion.type === 'referral'
     ? 'people-outline'
     : promotion.type === 'informational'
@@ -365,7 +385,7 @@ function UberStylePromotionCard({ promotion, claimed, onPress, width, secondary 
         <Text style={styles.uberPromoTitle} numberOfLines={3}>{promotion.title}</Text>
         <Text style={styles.uberPromoDescription} numberOfLines={2}>{promotion.description}</Text>
         <View style={[styles.uberPromoCta, claimed && styles.uberPromoCtaClaimed]}>
-          {claimed ? <Ionicons name="checkmark" size={15} color={NAVY} /> : null}
+          {claimed ? <Ionicons name="checkmark" size={15} color={colors.textPrimary} /> : null}
           <Text style={styles.uberPromoCtaText}>{action}</Text>
         </View>
       </View>
@@ -376,7 +396,7 @@ function UberStylePromotionCard({ promotion, claimed, onPress, width, secondary 
           <Ionicons name={icon} size={40} color="#FFFFFF" />
         </View>
         <View style={styles.promoIconSmall}>
-          <Ionicons name="car-outline" size={22} color={secondary ? SECONDARY : ORANGE} />
+          <Ionicons name="car-outline" size={22} color={secondary ? colors.textPrimary : colors.primary} />
         </View>
       </View>
     </TouchableOpacity>
@@ -384,6 +404,7 @@ function UberStylePromotionCard({ promotion, claimed, onPress, width, secondary 
 }
 
 function MiniRideCard({ price = '$28' }: { price?: string }) {
+  const styles = useRiderStyles();
   return (
     <TouchableOpacity style={styles.rideCard} onPress={() => router.push('/(rider)/available-rides' as any)}>
       <View style={styles.rideMain}>
@@ -413,6 +434,8 @@ function MiniRideCard({ price = '$28' }: { price?: string }) {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function RiderHomeReferencePlaceholder() {
+  const styles = useRiderStyles();
+  const { colors } = useAppTheme();
   return (
     <PhoneScreen activeTab="home">
       <HomeUtilityBar university="UT Austin" initial="M" />
@@ -426,7 +449,7 @@ function RiderHomeReferencePlaceholder() {
       <RouteCard cta />
 
       <View style={styles.promotionEmptyCard}>
-        <Ionicons name="gift-outline" size={24} color={ORANGE} />
+        <Ionicons name="gift-outline" size={24} color={colors.primary} />
         <View style={{ flex: 1 }}>
           <Text style={styles.promotionEmptyTitle}>Loading your offers</Text>
           <Text style={styles.promotionEmptyText}>Student deals will appear here.</Text>
@@ -438,6 +461,8 @@ function RiderHomeReferencePlaceholder() {
 }
 
 export function RiderHomeReference() {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { width: windowWidth } = useWindowDimensions();
   const uid = firebaseAuth.currentUser?.uid;
   const [profile, setProfile] = useState<RiderProfile | null>(null);
@@ -450,6 +475,7 @@ export function RiderHomeReference() {
   const ratingNavRef = useRef<Set<string>>(new Set());
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const triedHomeLocationRef = useRef(false);
   const [promotionIndex, setPromotionIndex] = useState(0);
   const promotionScrollRef = useRef<ScrollView>(null);
   const { promotions, loading: promotionsLoading, isPromotionClaimed } = usePromotions();
@@ -457,6 +483,16 @@ export function RiderHomeReference() {
   const promotionSnapInterval = promotionCardWidth + 12;
 
   const [initialized, setInitialized] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (triedHomeLocationRef.current || from.trim()) return;
+    triedHomeLocationRef.current = true;
+    getCurrentLocationAddressAsync().then((address) => {
+      if (!cancelled && address && !from.trim()) setFrom(address);
+    });
+    return () => { cancelled = true; };
+  }, [from]);
+
   useEffect(() => {
     if (!uid) { setInitialized(true); return; }
     return subscribeRiderProfile(uid, (p) => {
@@ -485,6 +521,9 @@ export function RiderHomeReference() {
         if (data.ridePostingId) keys.add(`ridePosting:${String(data.ridePostingId)}`);
       });
       setCompletedRideSourceKeys(keys);
+    }, (error) => {
+      setCompletedRideSourceKeys(new Set());
+      console.warn('[RiderHomeReference] completed ride source listener error:', error);
     });
   }, [uid]);
   useEffect(() => {
@@ -517,6 +556,10 @@ export function RiderHomeReference() {
     const unsubA = onSnapshot(qA, (snap) => {
       snapA = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       merge();
+    }, (error) => {
+      snapA = [];
+      merge();
+      console.warn('[RiderHomeReference] rideRequests listener error:', error);
     });
 
     // Rider booking from a driver's posting (ridePostingRequests)
@@ -524,6 +567,10 @@ export function RiderHomeReference() {
     const unsubB = onSnapshot(qB, (snap) => {
       snapB = snap.docs.map((d) => ({ id: d.id, _isPostingRequest: true, ...d.data() }));
       merge();
+    }, (error) => {
+      snapB = [];
+      merge();
+      console.warn('[RiderHomeReference] ridePostingRequests listener error:', error);
     });
 
     return () => { unsubA(); unsubB(); };
@@ -546,6 +593,9 @@ export function RiderHomeReference() {
         }
       });
       setRequestsWithOffers(map);
+    }, (error) => {
+      setRequestsWithOffers(new Map());
+      console.warn('[RiderHomeReference] rideOffers listener error:', error);
     });
   }, [uid]);
   useEffect(() => {
@@ -633,6 +683,8 @@ export function RiderHomeReference() {
         } else {
           // Only clear if the collection query also finds nothing (handled by unsub2)
         }
+      }, (error) => {
+        console.warn('[RiderHomeReference] confirmed direct listener error:', error);
       });
 
       // Strategy 2: collection query by postingId — handles accepted-with-different-requestId
@@ -645,6 +697,10 @@ export function RiderHomeReference() {
           setConfirmedRideId(null);
           setConfirmedRideStatus(null);
         }
+      }, (error) => {
+        setConfirmedRideId(null);
+        setConfirmedRideStatus(null);
+        console.warn('[RiderHomeReference] confirmed posting listener error:', error);
       });
 
       return () => { unsub1(); unsub2(); };
@@ -660,15 +716,20 @@ export function RiderHomeReference() {
         setConfirmedRideId(null);
         setConfirmedRideStatus(null);
       }
+    }, (error) => {
+      setConfirmedRideId(null);
+      setConfirmedRideStatus(null);
+      console.warn('[RiderHomeReference] confirmed request listener error:', error);
     });
   }, [_requestId, nextRequestIsConfirmed, _isPostingReq, _postingId]);
 
-  const isRideInProgress = ['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED'].includes(confirmedRideStatus ?? '');
-  const isDriverCompleted = confirmedRideStatus === 'DRIVER_COMPLETED';
+  const activeRideStatus = String(confirmedRideStatus || nextRide?.status || '').replace(/[-\s]/g, '_').toUpperCase();
+  const isRideInProgress = ['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED'].includes(activeRideStatus);
+  const isDriverCompleted = activeRideStatus === 'DRIVER_COMPLETED';
 
   const heroPrompt = useMemo(() => {
-    if (confirmedRideStatus === 'COMPLETED') return 'where to?';
-    if (isDriverCompleted) return 'your driver has completed the ride!';
+    if (activeRideStatus === 'COMPLETED') return 'where to?';
+    if (isDriverCompleted) return 'confirm your arrival!';
     if (isRideInProgress) return 'your ride is in progress!';
     if (nextRide || nextRequestIsConfirmed) return 'your ride is confirmed!';
     if (nextRequest) {
@@ -680,13 +741,13 @@ export function RiderHomeReference() {
       return nextRequestHasOffer ? 'you have a ride offer!' : 'your ride is visible to drivers.';
     }
     return 'where to?';
-  }, [nextRequest, nextRide, nextRequestHasOffer, nextRequestIsConfirmed, isRideInProgress, isDriverCompleted, confirmedRideStatus]);
+  }, [nextRequest, nextRide, nextRequestHasOffer, nextRequestIsConfirmed, isRideInProgress, isDriverCompleted, activeRideStatus]);
   const search = () => router.push({ pathname: '/(rider)/available-rides', params: { from: from.trim(), to: to.trim() } } as any);
 
   if (!initialized) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#FBFAF7', alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator size="large" color={ORANGE} />
+      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -707,7 +768,7 @@ export function RiderHomeReference() {
           </View>
         )}
         {promotionsLoading && promotions.length === 0 ? (
-          <View style={styles.promotionLoading}><ActivityIndicator color={ORANGE} /></View>
+          <View style={styles.promotionLoading}><ActivityIndicator color={colors.primary} /></View>
         ) : promotions.length > 0 ? (
           <>
           <ScrollView
@@ -745,7 +806,7 @@ export function RiderHomeReference() {
           </>
         ) : (
           <View style={styles.promotionEmptyCard}>
-            <Ionicons name="gift-outline" size={24} color={ORANGE} />
+            <Ionicons name="gift-outline" size={24} color={colors.primary} />
             <View style={{ flex: 1 }}>
               <Text style={styles.promotionEmptyTitle}>No active promotions</Text>
               <Text style={styles.promotionEmptyText}>Check back soon for new student offers.</Text>
@@ -758,12 +819,14 @@ export function RiderHomeReference() {
 }
 
 function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
+  const styles = useRiderStyles();
+  const { colors } = useAppTheme();
   const rawStatus = String(ride.status || '').replace(/[-\s]/g, '_').toUpperCase();
   const isDriverCompleted = rawStatus === 'DRIVER_COMPLETED';
   const isInProgress = ['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED'].includes(rawStatus);
   const statusLabel = isDriverCompleted ? 'CONFIRM ARRIVAL' : isInProgress ? 'IN PROGRESS' : 'CONFIRMED';
-  const statusColor = isInProgress ? ORANGE : '#16A34A';
-  const statusBg    = isInProgress ? 'rgba(222,93,32,0.08)' : '#EDFAF3';
+  const statusColor = isInProgress ? colors.primary : colors.green;
+  const statusBg    = isInProgress ? colors.primaryDim : colors.greenDim;
   const dateText = ride.date
     ? ride.date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) +
       ' · ' + ride.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
@@ -809,9 +872,9 @@ function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
           <Text style={{ color: statusColor, fontSize: 11, fontWeight: '800', letterSpacing: 0.5 }}>{statusLabel}</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          {ride.price > 0 && <Text style={{ color: NAVY, fontSize: 15, fontWeight: '800' }}>${ride.price.toFixed(2)}</Text>}
+          {ride.price > 0 && <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '800' }}>${ride.price.toFixed(2)}</Text>}
           <TouchableOpacity onPress={() => setFlagVisible(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="flag-outline" size={18} color="#DC2626" />
+            <Ionicons name="flag-outline" size={18} color={colors.red} />
           </TouchableOpacity>
         </View>
       </View>
@@ -820,20 +883,20 @@ function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
       <TouchableOpacity activeOpacity={0.7} onPress={isInProgress ? openTrip : openDetails}>
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <View style={{ alignItems: 'center', paddingTop: 4, gap: 4 }}>
-            <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: NAVY }} />
-            <View style={{ width: 1, flex: 1, minHeight: 16, backgroundColor: BORDER }} />
-            <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: ORANGE }} />
+            <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: colors.textPrimary }} />
+            <View style={{ width: 1, flex: 1, minHeight: 16, backgroundColor: colors.border }} />
+            <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: colors.primary }} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: NAVY, fontSize: 15, fontWeight: '600', marginBottom: 4 }} numberOfLines={1}>{ride.from || 'Pickup pending'}</Text>
-            <Text style={{ color: MUTED, fontSize: 12, marginBottom: 4 }}>{dateText}</Text>
-            <Text style={{ color: NAVY, fontSize: 15, fontWeight: '600' }} numberOfLines={1}>{ride.to || 'Destination pending'}</Text>
+            <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600', marginBottom: 4 }} numberOfLines={1}>{ride.from || 'Pickup pending'}</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>{dateText}</Text>
+            <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' }} numberOfLines={1}>{ride.to || 'Destination pending'}</Text>
           </View>
         </View>
       </TouchableOpacity>
 
       {/* Driver info */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: BORDER }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
         <View style={[styles.avatar, { overflow: 'hidden' }]}>
           {driverPhotoURL
             ? <Image source={{ uri: driverPhotoURL }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
@@ -849,17 +912,18 @@ function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
         {isDriverCompleted ? (
           <>
             <TouchableOpacity
-              style={[styles.actionBtnPrimary, { flex: 2, backgroundColor: NAVY }, confirming && { opacity: 0.6 }]}
+              style={[styles.actionBtnPrimary, { flex: 2, backgroundColor: colors.textPrimary }, confirming && { opacity: 0.6 }]}
               disabled={confirming}
               activeOpacity={0.8}
               onPress={async () => {
                 setConfirming(true);
-                await riderCompleteRide(ride.id);
+                const completed = await riderCompleteRide(ride.id);
                 setConfirming(false);
+                if (completed) await openRiderRatingIfNeeded(ride.id);
               }}
             >
               {confirming
-                ? <ActivityIndicator size="small" color="#FFF" />
+                ? <ActivityIndicator size="small" color={colors.textInverse} />
                 : <Text style={styles.actionBtnPrimaryText}>Confirm Arrival</Text>}
             </TouchableOpacity>
             <TouchableOpacity style={[styles.actionBtnSecondary, { flex: 1 }]} onPress={openTrip} activeOpacity={0.75}>
@@ -916,7 +980,18 @@ async function openChatForConfirmedRide(rideRequestId: string, navigate: (chatId
   }
 }
 
+async function openRiderRatingIfNeeded(confirmedRideId: string) {
+  const uid = firebaseAuth.currentUser?.uid;
+  if (!uid) return;
+  const alreadyRated = await hasUserRatedRide(confirmedRideId, uid).catch(() => false);
+  if (!alreadyRated) {
+    router.push({ pathname: '/(rider)/rate-trip', params: { confirmedRideId } } as any);
+  }
+}
+
 function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedRideId }: { request: any; offerInfo?: { offerId: string; driverId?: string } | null; confirmedRideStatus?: string | null; confirmedRideId?: string | null }) {
+  const styles = useRiderStyles();
+  const { colors } = useAppTheme();
   const pickup = request.pickupAddress || request.pickup || request.from || 'Pickup pending';
   const dropoff = request.dropoffAddress || request.dropoff || request.to || 'Destination pending';
   const price = Number(request.maxPrice || request.estimatedFare || request.price || 0);
@@ -1025,8 +1100,8 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
     ]);
   };
 
-  const statusColor = isDriverCompleted ? ORANGE : isInProgress ? ORANGE : isConfirmed ? '#16A34A' : hasOffer ? ORANGE : MUTED;
-  const statusBg    = isDriverCompleted ? 'rgba(222,93,32,0.08)' : isInProgress ? 'rgba(222,93,32,0.08)' : isConfirmed ? '#EDFAF3' : hasOffer ? 'rgba(222,93,32,0.08)' : '#F1F3F6';
+  const statusColor = isDriverCompleted ? colors.primary : isInProgress ? colors.primary : isConfirmed ? colors.green : hasOffer ? colors.primary : colors.textSecondary;
+  const statusBg    = isDriverCompleted ? colors.primaryDim : isInProgress ? colors.primaryDim : isConfirmed ? colors.greenDim : hasOffer ? colors.primaryDim : colors.bgSecondary;
   const statusLabel = isDriverCompleted ? 'CONFIRM ARRIVAL' : isInProgress ? 'IN PROGRESS' : isConfirmed ? 'CONFIRMED' : hasOffer ? 'OFFER RECEIVED' : 'PENDING';
   const showDriverInfo = (isConfirmed || isInProgress || isDriverCompleted) && !!driverName;
 
@@ -1039,9 +1114,9 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
           <Text style={{ color: statusColor, fontSize: 11, fontWeight: '800', letterSpacing: 0.5 }}>{statusLabel}</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          {price > 0 && <Text style={{ color: NAVY, fontSize: 15, fontWeight: '800' }}>${price.toFixed(0)}</Text>}
+          {price > 0 && <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '800' }}>${price.toFixed(0)}</Text>}
           <TouchableOpacity onPress={() => setFlagVisible(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="flag-outline" size={18} color="#DC2626" />
+            <Ionicons name="flag-outline" size={18} color={colors.red} />
           </TouchableOpacity>
         </View>
       </View>
@@ -1050,23 +1125,23 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
       <TouchableOpacity activeOpacity={0.7} onPress={() => router.push('/(rider)/requests' as any)}>
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <View style={{ alignItems: 'center', paddingTop: 4, gap: 4 }}>
-            <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: NAVY }} />
-            <View style={{ width: 1, flex: 1, minHeight: 16, backgroundColor: BORDER }} />
-            <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: ORANGE }} />
+            <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: colors.textPrimary }} />
+            <View style={{ width: 1, flex: 1, minHeight: 16, backgroundColor: colors.border }} />
+            <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: colors.primary }} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: NAVY, fontSize: 15, fontWeight: '600', marginBottom: 4 }} numberOfLines={1}>{pickup}</Text>
-            <Text style={{ color: MUTED, fontSize: 12, marginBottom: 4 }}>
+            <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600', marginBottom: 4 }} numberOfLines={1}>{pickup}</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
               {request.date || 'Date pending'}{request.time ? ` · ${request.time}` : ''}
             </Text>
-            <Text style={{ color: NAVY, fontSize: 15, fontWeight: '600' }} numberOfLines={1}>{dropoff}</Text>
+            <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' }} numberOfLines={1}>{dropoff}</Text>
           </View>
         </View>
       </TouchableOpacity>
 
       {/* Driver info (when confirmed/in-progress) */}
       {showDriverInfo && (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: BORDER }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
           <View style={[styles.avatar, { overflow: 'hidden' }]}>
             {driverPhotoURL
               ? <Image source={{ uri: driverPhotoURL }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
@@ -1083,18 +1158,19 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
         {isDriverCompleted ? (
           <>
             <TouchableOpacity
-              style={[styles.actionBtnPrimary, { flex: 2, backgroundColor: NAVY }, confirming && { opacity: 0.6 }]}
+              style={[styles.actionBtnPrimary, { flex: 2, backgroundColor: colors.textPrimary }, confirming && { opacity: 0.6 }]}
               disabled={confirming}
               activeOpacity={0.8}
               onPress={async () => {
                 if (!confirmedRideId) return;
                 setConfirming(true);
-                await riderCompleteRide(confirmedRideId);
+                const completed = await riderCompleteRide(confirmedRideId);
                 setConfirming(false);
+                if (completed) await openRiderRatingIfNeeded(confirmedRideId);
               }}
             >
               {confirming
-                ? <ActivityIndicator size="small" color="#FFF" />
+                ? <ActivityIndicator size="small" color={colors.textInverse} />
                 : <Text style={styles.actionBtnPrimaryText}>Confirm Arrival</Text>}
             </TouchableOpacity>
             <TouchableOpacity
@@ -1225,6 +1301,8 @@ function makeRideAgainRoute(id: string, data: any, source: string): RideAgainRou
 }
 
 function RideAgainSection() {
+  const styles = useRiderStyles();
+  const { colors } = useAppTheme();
   const uid = firebaseAuth.currentUser?.uid;
   const [routes, setRoutes] = useState<RideAgainRoute[]>([]);
 
@@ -1251,18 +1329,34 @@ function RideAgainSection() {
       onSnapshot(query(collection(firestore, 'rideRequests'), where('riderId', '==', uid)), (snap) => {
         snapshots.requests = snap.docs.map((d) => makeRideAgainRoute(d.id, d.data(), 'requested')).filter((route): route is RideAgainRoute => !!route);
         emit();
+      }, (error) => {
+        snapshots.requests = [];
+        emit();
+        console.warn('[RideAgainSection] rideRequests riderId listener error:', error);
       }),
       onSnapshot(query(collection(firestore, 'rideRequests'), where('userId', '==', uid)), (snap) => {
         snapshots.requestsByUser = snap.docs.map((d) => makeRideAgainRoute(d.id, d.data(), 'requested')).filter((route): route is RideAgainRoute => !!route);
         emit();
+      }, (error) => {
+        snapshots.requestsByUser = [];
+        emit();
+        console.warn('[RideAgainSection] rideRequests userId listener error:', error);
       }),
       onSnapshot(query(collection(firestore, 'ridePostingRequests'), where('riderId', '==', uid)), (snap) => {
         snapshots.postingRequests = snap.docs.map((d) => makeRideAgainRoute(d.id, d.data(), 'requested')).filter((route): route is RideAgainRoute => !!route);
         emit();
+      }, (error) => {
+        snapshots.postingRequests = [];
+        emit();
+        console.warn('[RideAgainSection] ridePostingRequests riderId listener error:', error);
       }),
       onSnapshot(query(collection(firestore, 'ridePostingRequests'), where('userId', '==', uid)), (snap) => {
         snapshots.postingRequestsByUser = snap.docs.map((d) => makeRideAgainRoute(d.id, d.data(), 'requested')).filter((route): route is RideAgainRoute => !!route);
         emit();
+      }, (error) => {
+        snapshots.postingRequestsByUser = [];
+        emit();
+        console.warn('[RideAgainSection] ridePostingRequests userId listener error:', error);
       }),
       onSnapshot(query(collection(firestore, 'confirmedRides'), where('riderId', '==', uid)), (snap) => {
         snapshots.completed = snap.docs
@@ -1270,6 +1364,10 @@ function RideAgainSection() {
           .map((d) => makeRideAgainRoute(d.id, d.data(), 'completed'))
           .filter((route): route is RideAgainRoute => !!route);
         emit();
+      }, (error) => {
+        snapshots.completed = [];
+        emit();
+        console.warn('[RideAgainSection] confirmedRides listener error:', error);
       }),
     ];
 
@@ -1287,13 +1385,13 @@ function RideAgainSection() {
             accessibilityRole="button"
           >
             <View style={styles.popularRouteIcon}>
-              <Ionicons name="add-circle-outline" size={18} color={ORANGE} />
+              <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
             </View>
             <View style={styles.popularRouteCopy}>
               <Text style={styles.popularRouteTitle}>Request a ride</Text>
               <Text style={styles.popularRouteMeta}>Post your first route</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={MUTED} />
+            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.popularRouteCard}
@@ -1301,13 +1399,13 @@ function RideAgainSection() {
             accessibilityRole="button"
           >
             <View style={styles.popularRouteIcon}>
-              <Ionicons name="ticket-outline" size={18} color={ORANGE} />
+              <Ionicons name="ticket-outline" size={18} color={colors.primary} />
             </View>
             <View style={styles.popularRouteCopy}>
               <Text style={styles.popularRouteTitle}>Browse available rides</Text>
               <Text style={styles.popularRouteMeta}>See what drivers have posted</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={MUTED} />
+            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
           </TouchableOpacity>
         </View>
       </View>
@@ -1326,13 +1424,13 @@ function RideAgainSection() {
             accessibilityRole="button"
           >
             <View style={styles.popularRouteIcon}>
-              <Ionicons name="refresh-outline" size={18} color={ORANGE} />
+              <Ionicons name="refresh-outline" size={18} color={colors.primary} />
             </View>
             <View style={styles.popularRouteCopy}>
               <Text style={styles.popularRouteTitle}>{route.from} {'->'} {route.to}</Text>
               <Text style={styles.popularRouteMeta}>{route.meta}</Text>
             </View>
-            {route.price ? <Text style={styles.popularRoutePrice}>${Math.round(route.price)}</Text> : <Ionicons name="chevron-forward" size={18} color={MUTED} />}
+            {route.price ? <Text style={styles.popularRoutePrice}>${Math.round(route.price)}</Text> : <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />}
           </TouchableOpacity>
         ))}
       </View>
@@ -1342,10 +1440,13 @@ function RideAgainSection() {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function RiderRequestReferencePlaceholder() {
+  const styles = useRiderStyles();
+  const { colors } = useAppTheme();
+  const riderPageTitleColor = colors.statusBar === 'light-content' ? '#FFFFFF' : colors.textPrimary;
   return (
     <PhoneScreen activeTab="find">
       <View style={styles.pageIntro}>
-        <Text style={styles.pageTitle}>Request a ride</Text>
+        <Text style={[styles.pageTitle, { color: riderPageTitleColor }]}>Request a ride</Text>
       </View>
       <Text style={styles.eyebrow}>WHERE & WHEN</Text>
       <View style={styles.searchCard}>
@@ -1391,6 +1492,9 @@ function RiderRequestReferencePlaceholder() {
 }
 
 export function RiderRequestReference() {
+  const styles = useRiderStyles();
+  const { colors } = useAppTheme();
+  const riderPageTitleColor = colors.statusBar === 'light-content' ? '#FFFFFF' : colors.textPrimary;
   const params = useLocalSearchParams<{ pickup?: string; dropoff?: string }>();
   const initialPickup = String(params.pickup || '');
   const [pickup, setPickup] = useState(initialPickup);
@@ -1409,8 +1513,19 @@ export function RiderRequestReference() {
   const [dropoffCoords, setDropoffCoords] = useState<Coords | null>(null);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const triedRequestLocationRef = useRef(false);
   const suggestedPrice = distanceMiles && distanceMiles > 0 ? computeRiderSuggestedPrice(distanceMiles, 1) : 0;
   const suggestedText = distanceMiles && distanceMiles > 0 ? formatPricingBreakdown(distanceMiles, 1, 'rider') : 'Select route to calculate';
+
+  useEffect(() => {
+    let cancelled = false;
+    if (triedRequestLocationRef.current || pickup.trim()) return;
+    triedRequestLocationRef.current = true;
+    getCurrentLocationAddressAsync().then((address) => {
+      if (!cancelled && address && !pickup.trim()) setPickup(address);
+    });
+    return () => { cancelled = true; };
+  }, [pickup]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1538,7 +1653,7 @@ export function RiderRequestReference() {
   return (
     <PhoneScreen activeTab="find">
       <View style={styles.pageIntro}>
-        <Text style={styles.pageTitle}>Request a ride</Text>
+        <Text style={[styles.pageTitle, { color: riderPageTitleColor }]}>Request a ride</Text>
       </View>
       <Text style={styles.eyebrow}>WHERE & WHEN</Text>
       <View style={[styles.searchCard, styles.autocompleteSearchCard]}>
@@ -1591,7 +1706,7 @@ export function RiderRequestReference() {
             }}
             keyboardType="decimal-pad"
             placeholder={suggestedPrice > 0 ? suggestedPrice.toFixed(2) : '0.00'}
-            placeholderTextColor={MUTED}
+            placeholderTextColor={colors.textSecondary}
           />
         </View>
         <View style={styles.requestSuggestedWrap}>
@@ -1600,7 +1715,7 @@ export function RiderRequestReference() {
         </View>
       </View>
       <Text style={styles.eyebrow}>NOTE</Text>
-      <TextInput style={styles.noteBox} multiline value={notes} onChangeText={setNotes} placeholder="Luggage, pickup flexibility, or anything drivers should know" placeholderTextColor={MUTED} />
+      <TextInput style={styles.noteBox} multiline value={notes} onChangeText={setNotes} placeholder="Luggage, pickup flexibility, or anything drivers should know" placeholderTextColor={colors.textSecondary} />
       <TouchableOpacity disabled={submitting} style={[styles.primaryBtnFull, styles.requestSubmitButton]} onPress={submit}><Text style={styles.primaryText}>{submitting ? 'Posting...' : 'Post request ->'}</Text></TouchableOpacity>
     </PhoneScreen>
   );
@@ -1615,15 +1730,18 @@ const rides = [
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function RiderAvailableReferencePlaceholder() {
+  const styles = useRiderStyles();
+  const { colors } = useAppTheme();
+  const riderPageTitleColor = colors.statusBar === 'light-content' ? '#FFFFFF' : colors.textPrimary;
   return (
     <PhoneScreen activeTab="rides">
       <View style={styles.pageIntro}>
-        <Text style={styles.pageTitle}>Available rides</Text>
+        <Text style={[styles.pageTitle, { color: riderPageTitleColor }]}>Available rides</Text>
       </View>
       <View style={styles.findSearch}>
-        <Ionicons name="search" size={18} color={NAVY} />
+        <Ionicons name="search" size={18} color={colors.textPrimary} />
         <View style={{ flex: 1 }}><Text style={styles.findSearchLabel}>YOUR ROUTE</Text><Text style={styles.findSearchText}>{'Austin -> Houston · Fri, Nov 20'}</Text></View>
-        <Ionicons name="options-outline" size={19} color={NAVY} />
+        <Ionicons name="options-outline" size={19} color={colors.textPrimary} />
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
         {['ALL\n12', 'Morning', 'Afternoon', 'Evening', '★\n4.8+'].map((filter, index) => (
@@ -1658,6 +1776,9 @@ function RiderAvailableReferencePlaceholder() {
 type TimeFilter = RiderRideFilter;
 
 export function RiderAvailableReference() {
+  const styles = useRiderStyles();
+  const { colors } = useAppTheme();
+  const riderPageTitleColor = colors.statusBar === 'light-content' ? '#FFFFFF' : colors.textPrimary;
   const { from, to } = useLocalSearchParams<{ from?: string; to?: string }>();
   const [liveRides, setLiveRides] = useState<MobileRidePosting[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1696,13 +1817,27 @@ export function RiderAvailableReference() {
         if (postingId) ids.add(postingId);
       });
       setMyRequestedPostingIds(ids);
+    }, (error) => {
+      setMyRequestedPostingIds(new Set());
+      console.warn('[RiderAvailableReference] requested postings listener error:', error);
     });
   }, []);
+
+  const shareRide = async (ride: MobileRidePosting) => {
+    const parts = [
+      `Available ride on RideAlong!`,
+      ride.driverName ? `Driver: ${ride.driverName}` : null,
+      `From: ${ride.from}`,
+      `To: ${ride.to}`,
+      ride.date ? `Date: ${ride.date.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : null,
+      `Price: $${Math.round(ride.price)} per seat`,
+    ].filter(Boolean).join('\n');
+    await Share.share({ message: parts }).catch(() => {});
+  };
 
   const filteredRides = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     let result = liveRides.filter((ride) => {
-      if (myRequestedPostingIds.has(ride.id)) return false;
       if (q) {
         const searchable = [ride.driverName, ride.from, ride.to, ride.vehicle].join(' ').toLowerCase();
         if (!searchable.includes(q)) return false;
@@ -1736,26 +1871,26 @@ export function RiderAvailableReference() {
   return (
     <PhoneScreen activeTab="rides">
       <View style={styles.pageIntro}>
-        <Text style={styles.pageTitle}>Available rides</Text>
+        <Text style={[styles.pageTitle, { color: riderPageTitleColor }]}>Available rides</Text>
       </View>
 
       <View style={styles.findSearch}>
-        <Ionicons name="search" size={18} color={NAVY} />
+        <Ionicons name="search" size={18} color={colors.textPrimary} />
         <TextInput
           value={searchQuery}
           onChangeText={setSearchQuery}
           placeholder="Search by driver, city..."
-          placeholderTextColor={MUTED}
+          placeholderTextColor={colors.textSecondary}
           style={styles.availableSearchInput}
           returnKeyType="search"
         />
         {searchQuery ? (
           <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={hitSlop}>
-            <Ionicons name="close" size={18} color={MUTED} />
+            <Ionicons name="close" size={18} color={colors.textSecondary} />
           </TouchableOpacity>
         ) : null}
         <TouchableOpacity style={styles.availableFilterBtn} onPress={() => setShowFilterModal(true)} activeOpacity={0.7}>
-          <Ionicons name="options-outline" size={19} color={hasActiveFilters(filterOptions) ? ORANGE : NAVY} />
+          <Ionicons name="options-outline" size={19} color={hasActiveFilters(filterOptions) ? colors.primary : colors.textPrimary} />
           {hasActiveFilters(filterOptions) && <View style={styles.availableFilterDot} />}
         </TouchableOpacity>
       </View>
@@ -1773,9 +1908,10 @@ export function RiderAvailableReference() {
         ))}
       </ScrollView>
 
-      {loading ? <ActivityIndicator color={ORANGE} size="large" /> : null}
+      {loading ? <ActivityIndicator color={colors.primary} size="large" /> : null}
 
       {filteredRides.map((ride) => {
+        const isBooked = myRequestedPostingIds.has(ride.id);
         const initials = ride.driverName.split(/\s+/).map((p) => p[0]).join('').slice(0, 2);
         const meta = [
           ride.driverRating ? `★ ${ride.driverRating.toFixed(2)}` : null,
@@ -1791,7 +1927,13 @@ export function RiderAvailableReference() {
             <View style={styles.availableTop}>
               <View style={styles.navyDot} />
               <Text style={[styles.availableRoute, { flex: 1 }]} numberOfLines={1}>{ride.from} → {ride.to}</Text>
-              <Text style={styles.availableTime}>{formatRideTime(ride.date)}</Text>
+              {isBooked ? (
+                <View style={{ backgroundColor: 'rgba(34,197,94,0.12)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(34,197,94,0.35)', paddingHorizontal: 8, paddingVertical: 3 }}>
+                  <Text style={{ color: '#16a34a', fontSize: 10, fontWeight: '800' }}>Booked</Text>
+                </View>
+              ) : (
+                <Text style={styles.availableTime}>{formatRideTime(ride.date)}</Text>
+              )}
             </View>
             <View style={styles.availableLocationsBlock}>
               {formatRideTime(ride.date) ? (
@@ -1821,6 +1963,13 @@ export function RiderAvailableReference() {
                 <Text style={styles.driverMeta}>{meta}</Text>
               </View>
               <Text style={styles.availablePrice}>${Math.round(ride.price)}</Text>
+              <TouchableOpacity
+                onPress={(e) => { e.stopPropagation?.(); shareRide(ride); }}
+                style={{ padding: 6, marginLeft: 4 }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="share-outline" size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
             </View>
           </TouchableOpacity>
         );
@@ -1828,7 +1977,7 @@ export function RiderAvailableReference() {
 
       {!loading && !filteredRides.length ? (
         <View style={styles.availableEmptyState}>
-          <View style={styles.availableEmptyIcon}><Ionicons name="car-outline" size={27} color={ORANGE} /></View>
+          <View style={styles.availableEmptyIcon}><Ionicons name="car-outline" size={27} color={colors.primary} /></View>
           <Text style={styles.availableEmptyTitle}>{liveRides.length ? 'No rides match' : 'No rides posted yet'}</Text>
           <Text style={styles.availableEmptyText}>
             {liveRides.length
@@ -1859,6 +2008,8 @@ export function RiderAvailableReference() {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function RiderDetailReferencePlaceholder() {
+  const styles = useRiderStyles();
+  const { colors } = useAppTheme();
   return (
     <PhoneScreen
       title="Ride Details"
@@ -1884,7 +2035,7 @@ function RiderDetailReferencePlaceholder() {
       </View>
 
       <View style={styles.detailCard}>
-        <View style={styles.vehicleIcon}><Ionicons name="car-sport" size={24} color="#6B7280" /></View>
+        <View style={styles.vehicleIcon}><Ionicons name="car-sport" size={24} color={colors.textSecondary} /></View>
         <View>
           <Text style={styles.vehicleTitle}>2021 Honda Civic</Text>
           <Text style={styles.driverMeta}>Silver · TX 8RZP-129</Text>
@@ -1910,6 +2061,8 @@ function RiderDetailReferencePlaceholder() {
 }
 
 export function RiderDetailReference() {
+  const styles = useRiderStyles();
+  const { colors } = useAppTheme();
   const { id, returnTo } = useLocalSearchParams<{ id?: string; returnTo?: string | string[] }>();
   const rideId = Array.isArray(id) ? id[0] : id;
   const returnTarget = Array.isArray(returnTo) ? returnTo[0] : returnTo;
@@ -2014,7 +2167,7 @@ export function RiderDetailReference() {
   }, [rideId]);
 
   if (loading) {
-    return <PhoneScreen title="Ride Details" showBack onBack={goBackFromDetails}><ActivityIndicator color={ORANGE} size="large" /></PhoneScreen>;
+    return <PhoneScreen title="Ride Details" showBack onBack={goBackFromDetails}><ActivityIndicator color={colors.primary} size="large" /></PhoneScreen>;
   }
 
   // Confirmed request view
@@ -2022,7 +2175,7 @@ export function RiderDetailReference() {
     const { req, driver, driverId } = confirmedRequest;
     const confirmedRideDocId = confirmedRequest.confirmedRideId || null;
     const linkedRideRequestId = req.id || confirmedRequest.confirmed?.rideRequestId || rideId;
-    const driverName = driver?.fullName || driver?.name || driver?.displayName || 'Driver';
+    const driverName = driver?.fullName || driver?.name || driver?.displayName || '';
     const driverInitials = driverName.split(/\s+/).map((p: string) => p[0]).join('').slice(0, 2).toUpperCase();
     const driverProfile = driver?.personalInfo || driver?.profile || {};
     const driverAvatarUrl = rawText(driver?.avatarUrl1)
@@ -2040,17 +2193,19 @@ export function RiderDetailReference() {
     const pickup = req.pickupAddress || req.pickup || req.from || 'Pickup';
     const dropoff = req.dropoffAddress || req.dropoff || req.to || 'Destination';
     const fare = req.estimatedFare ? `$${Number(req.estimatedFare).toFixed(2)}` : req.maxPrice ? `$${Number(req.maxPrice).toFixed(0)}` : null;
-    const BG2 = '#FBFAF7', BDR = '#E5E0D8', MUT = '#8B94A6';
-    const rideStatus = String(confirmedRequest.confirmed?.status || req.status || 'CONFIRMED').replace(/[-\s]/g, '_').toUpperCase();
+    const rideStatus = String(confirmedRequest.confirmed?.status || req.status || (confirmedRequest.confirmed ? 'CONFIRMED' : 'PENDING')).replace(/[-\s]/g, '_').toUpperCase();
+    const hasAssignedDriver = !!confirmedRequest.confirmed || ['CONFIRMED', 'IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED', 'COMPLETED'].includes(rideStatus);
+    const hasDriverInfo = hasAssignedDriver && (!!driverId || !!driverName || !!driverAvatarUrl);
     const statusMeta: Record<string, { label: string; color: string; bg: string }> = {
-      CONFIRMED: { label: 'CONFIRMED', color: '#16A34A', bg: '#EDFAF3' },
-      IN_PROGRESS: { label: 'IN PROGRESS', color: ORANGE, bg: 'rgba(222,93,32,0.08)' },
-      DRIVER_COMPLETED: { label: 'CONFIRM ARRIVAL', color: ORANGE, bg: 'rgba(222,93,32,0.08)' },
-      RIDER_COMPLETED: { label: 'ARRIVAL CONFIRMED', color: '#16A34A', bg: '#EDFAF3' },
-      COMPLETED: { label: 'COMPLETED', color: '#16A34A', bg: '#EDFAF3' },
-      FLAGGED: { label: 'FLAGGED', color: '#DC2626', bg: '#FEF2F2' },
+      PENDING: { label: 'PENDING OFFER', color: colors.primary, bg: colors.primaryDim },
+      CONFIRMED: { label: 'CONFIRMED', color: colors.green, bg: colors.greenDim },
+      IN_PROGRESS: { label: 'IN PROGRESS', color: colors.primary, bg: colors.primaryDim },
+      DRIVER_COMPLETED: { label: 'CONFIRM ARRIVAL', color: colors.primary, bg: colors.primaryDim },
+      RIDER_COMPLETED: { label: 'ARRIVAL CONFIRMED', color: colors.green, bg: colors.greenDim },
+      COMPLETED: { label: 'COMPLETED', color: colors.green, bg: colors.greenDim },
+      FLAGGED: { label: 'FLAGGED', color: colors.red, bg: colors.redDim },
     };
-    const currentStatus = statusMeta[rideStatus] || { label: rideStatus.replace(/_/g, ' '), color: NAVY, bg: '#F3EFE8' };
+    const currentStatus = statusMeta[rideStatus] || { label: rideStatus.replace(/_/g, ' '), color: colors.textPrimary, bg: colors.bgSecondary };
 
     const openDriverChat = async () => {
       try {
@@ -2065,6 +2220,17 @@ export function RiderDetailReference() {
       } catch {
         Alert.alert('Error', 'Could not open chat. Please try again.');
       }
+    };
+
+    const shareConfirmedRide = async () => {
+      const parts = [
+        'My ride on RideAlong!',
+        `From: ${pickup}`,
+        `To: ${dropoff}`,
+        req.date ? `Date: ${req.date}` : null,
+        fare ? `Fare: ${fare}` : null,
+      ].filter(Boolean).join('\n');
+      await Share.share({ message: parts }).catch(() => {});
     };
 
     const cancelRide = () => {
@@ -2088,7 +2254,7 @@ export function RiderDetailReference() {
     };
 
     return (
-      <View style={{ flex: 1, backgroundColor: BG2 }}>
+      <View style={{ flex: 1, backgroundColor: colors.bg }}>
         <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -2098,12 +2264,19 @@ export function RiderDetailReference() {
             <View style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', paddingTop: 4, marginBottom: 16 }}>
               <TouchableOpacity
                 onPress={goBackFromDetails}
-                style={{ width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BDR, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center' }}
+                style={{ width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' }}
                 activeOpacity={0.75}
               >
-                <Ionicons name="chevron-back" size={22} color={NAVY} />
+                <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
               </TouchableOpacity>
-              <Text style={{ color: NAVY, fontSize: 24, fontWeight: '700', letterSpacing: -0.25, marginLeft: 12, flex: 1 }}>Ride Details</Text>
+              <Text style={{ color: colors.textPrimary, fontSize: 24, fontWeight: '700', letterSpacing: -0.25, marginLeft: 12, flex: 1 }}>Ride Details</Text>
+              <TouchableOpacity
+                onPress={shareConfirmedRide}
+                style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}
+                activeOpacity={0.75}
+              >
+                <Ionicons name="share-outline" size={20} color={colors.primary} />
+              </TouchableOpacity>
             </View>
 
             {/* Status badge */}
@@ -2112,66 +2285,73 @@ export function RiderDetailReference() {
               <Text style={{ color: currentStatus.color, fontSize: 12, fontWeight: '800', letterSpacing: 0.5 }}>{currentStatus.label}</Text>
             </View>
 
-            {/* Driver card */}
-            <View style={{ backgroundColor: '#FFF', borderRadius: 18, borderWidth: 1, borderColor: BDR, padding: 16, marginBottom: 16 }}>
+            {/* Driver / request card */}
+            <View style={{ backgroundColor: colors.bgCard, borderRadius: 18, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 16 }}>
+              {hasDriverInfo ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: '#EEE8DF', alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center' }}>
                   {driverAvatarUrl ? (
                     <Image source={{ uri: driverAvatarUrl }} style={{ width: 48, height: 48, borderRadius: 24 }} resizeMode="cover" />
                   ) : (
-                    <Text style={{ color: NAVY, fontSize: 18, fontWeight: '700' }}>{driverInitials || '?'}</Text>
+                    <Text style={{ color: colors.textPrimary, fontSize: 18, fontWeight: '700' }}>{driverInitials || '?'}</Text>
                   )}
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: NAVY, fontSize: 16, fontWeight: '700' }}>{driverName}</Text>
-                  <Text style={{ color: MUT, fontSize: 13, marginTop: 2 }}>{driverRating ? `★ ${driverRating}` : 'Driver confirmed'}</Text>
+                  <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: '700' }}>{driverName}</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 2 }}>{driverRating ? `★ ${driverRating}` : 'Driver confirmed'}</Text>
                 </View>
                 {driverId && (
                   <TouchableOpacity
                     onPress={() => router.push({ pathname: '/(rider)/driver/[driverId]', params: { driverId, returnTo: `/(rider)/ride/${rideId}` } } as any)}
-                    style={{ backgroundColor: '#F3EFE8', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 }}
+                    style={{ backgroundColor: colors.bgSecondary, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 }}
                   >
-                    <Text style={{ color: NAVY, fontSize: 12, fontWeight: '700' }}>View profile</Text>
+                    <Text style={{ color: colors.textPrimary, fontSize: 12, fontWeight: '700' }}>View profile</Text>
                   </TouchableOpacity>
                 )}
               </View>
+              ) : (
+                <View style={{ marginBottom: 16 }}>
+                  <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: '700' }}>Ride request</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 3 }}>Waiting for a driver offer.</Text>
+                </View>
+              )}
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 <View style={{ alignItems: 'center', paddingTop: 4, gap: 6 }}>
-                  <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: NAVY }} />
-                  <View style={{ width: 1, flex: 1, backgroundColor: BDR }} />
-                  <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: ORANGE }} />
+                  <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: colors.textPrimary }} />
+                  <View style={{ width: 1, flex: 1, backgroundColor: colors.border }} />
+                  <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: colors.primary }} />
                 </View>
                 <View style={{ flex: 1, gap: 10 }}>
-                  <Text style={{ color: NAVY, fontSize: 15, fontWeight: '600' }}>{pickup}</Text>
-                  <Text style={{ color: MUT, fontSize: 12 }}>{req.date || ''}{req.time ? ` · ${req.time}` : ''}</Text>
-                  <Text style={{ color: NAVY, fontSize: 15, fontWeight: '600' }}>{dropoff}</Text>
+                  <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' }}>{pickup}</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{req.date || ''}{req.time ? ` · ${req.time}` : ''}</Text>
+                  <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' }}>{dropoff}</Text>
                 </View>
               </View>
             </View>
 
             {/* Vehicle */}
             {vehicle ? (
-              <View style={{ backgroundColor: '#FFF', borderRadius: 18, borderWidth: 1, borderColor: BDR, padding: 16, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-                <View style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: '#FEF0E8', alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name="car-sport-outline" size={20} color={ORANGE} />
+              <View style={{ backgroundColor: colors.bgCard, borderRadius: 18, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                <View style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="car-sport-outline" size={20} color={colors.primary} />
                 </View>
                 <View>
-                  <Text style={{ color: NAVY, fontSize: 15, fontWeight: '600' }}>{vehicle}</Text>
-                  <Text style={{ color: MUT, fontSize: 12, marginTop: 2 }}>Verified vehicle</Text>
+                  <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' }}>{vehicle}</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>Verified vehicle</Text>
                 </View>
               </View>
             ) : null}
 
             {/* Fare */}
             {fare ? (
-              <View style={{ backgroundColor: '#FFF', borderRadius: 18, borderWidth: 1, borderColor: BDR, padding: 16, marginBottom: 16 }}>
+              <View style={{ backgroundColor: colors.bgCard, borderRadius: 18, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 16 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <Text style={{ color: MUT, fontSize: 13 }}>Fare</Text>
-                  <Text style={{ color: NAVY, fontSize: 13, fontWeight: '700' }}>{fare}</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Fare</Text>
+                  <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: '700' }}>{fare}</Text>
                 </View>
-                <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: BDR, marginBottom: 10 }} />
+                <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginBottom: 10 }} />
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                  <Text style={{ color: MUT, fontSize: 13 }}>Status</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Status</Text>
                   <Text style={{ color: currentStatus.color, fontSize: 13, fontWeight: '700' }}>{currentStatus.label}</Text>
                 </View>
               </View>
@@ -2179,22 +2359,22 @@ export function RiderDetailReference() {
           </ScrollView>
 
           {/* Bottom actions */}
-          <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: BG2, borderTopWidth: 1, borderTopColor: BDR, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 32, gap: 10 }}>
+          <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 32, gap: 10 }}>
             {driverId && (
               <TouchableOpacity
-                style={{ backgroundColor: NAVY, borderRadius: 28, paddingVertical: 14, alignItems: 'center' }}
+                style={{ backgroundColor: colors.textPrimary, borderRadius: 28, paddingVertical: 14, alignItems: 'center' }}
                 onPress={openDriverChat}
                 activeOpacity={0.85}
               >
-                <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '700' }}>Message Driver</Text>
+                <Text style={{ color: colors.textInverse, fontSize: 15, fontWeight: '700' }}>Message Driver</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity
-              style={{ backgroundColor: '#FEF2F2', borderRadius: 28, paddingVertical: 14, alignItems: 'center' }}
+              style={{ backgroundColor: colors.redDim, borderRadius: 28, paddingVertical: 14, alignItems: 'center' }}
               onPress={cancelRide}
               activeOpacity={0.85}
             >
-              <Text style={{ color: '#B91C1C', fontSize: 15, fontWeight: '700' }}>Cancel Ride</Text>
+              <Text style={{ color: colors.red, fontSize: 15, fontWeight: '700' }}>Cancel Ride</Text>
             </TouchableOpacity>
           </View>
         </SafeAreaView>
@@ -2210,12 +2390,32 @@ export function RiderDetailReference() {
   const note = String(ride.raw.notes || ride.raw.driverNotes || 'No additional notes from the driver.');
   const detailPickup = detailAddress('pickup');
   const detailDropoff = detailAddress('dropoff');
+  const sharePosting = async () => {
+    const parts = [
+      `Available ride on RideAlong!`,
+      ride.driverName ? `Driver: ${ride.driverName}` : null,
+      `From: ${detailPickup}`,
+      `To: ${detailDropoff}`,
+      ride.date ? `Date: ${ride.date.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : null,
+      `Price: $${ride.price.toFixed(2)} per seat`,
+    ].filter(Boolean).join('\n');
+    await Share.share({ message: parts }).catch(() => {});
+  };
   return (
     <>
       <PhoneScreen
         title="Ride Details"
         showBack
         onBack={goBackFromDetails}
+        rightAction={
+          <TouchableOpacity
+            onPress={sharePosting}
+            style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="share-outline" size={18} color={colors.primary} />
+          </TouchableOpacity>
+        }
         bottomAction={<TouchableOpacity style={styles.primaryBtnFull} onPress={() => setPaymentVisible(true)}><Text style={styles.primaryText}>Request seat - ${ride.price.toFixed(2)}</Text></TouchableOpacity>}
       >
         <View style={styles.detailCard}>
@@ -2237,7 +2437,7 @@ export function RiderDetailReference() {
               <Text style={styles.detailName} numberOfLines={1}>{ride.driverName}</Text>
               <Text style={styles.detailMeta}>{ride.driverRating ? `★ ${ride.driverRating.toFixed(2)} · ` : ''}{ride.seats} seats available</Text>
             </View>
-            {ride.driverId ? <Ionicons name="chevron-forward" size={18} color={MUTED} /> : null}
+            {ride.driverId ? <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} /> : null}
           </TouchableOpacity>
           <View style={styles.detailRoute}>
             <RouteDots compact connected />
@@ -2255,7 +2455,7 @@ export function RiderDetailReference() {
         </View>
 
         <View style={[styles.detailCard, styles.detailInfoRow]}>
-          <View style={styles.detailInfoIcon}><Ionicons name="car-sport" size={23} color="#6B7280" /></View>
+          <View style={styles.detailInfoIcon}><Ionicons name="car-sport" size={23} color={colors.textSecondary} /></View>
           <View style={styles.detailInfoCopy}>
             <Text style={styles.detailInfoTitle}>{ride.vehicle}</Text>
             <Text style={styles.detailInfoText}>Driver and vehicle details are verified through RideAlong.</Text>
@@ -2403,6 +2603,8 @@ export function RiderDetailReference() {
 }
 
 export function RiderConfirmedReference() {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { rideId, driverId: driverIdParam, driverName: driverNameParam } = useLocalSearchParams<{ rideId?: string; driverId?: string; driverName?: string }>();
   const insets = useSafeAreaInsets();
 
@@ -2472,16 +2674,16 @@ export function RiderConfirmedReference() {
 
   if (loading) {
     return (
-      <LinearGradient colors={['#F2D9C5', '#FAF4EE', '#FBFAF7']} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color={ORANGE} size="large" />
+      <LinearGradient colors={[colors.primaryDim, colors.bgSecondary, colors.bg]} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color={colors.primary} size="large" />
       </LinearGradient>
     );
   }
 
   return (
     <View style={{ flex: 1 }}>
-      <StatusBar style="dark" />
-      <LinearGradient colors={['#F2D9C5', '#FAF4EE', '#FBFAF7']} locations={[0, 0.45, 1]} style={{ flex: 1 }}>
+      <StatusBar style={colors.statusBar === 'light-content' ? 'light' : 'dark'} />
+      <LinearGradient colors={[colors.primaryDim, colors.bgSecondary, colors.bg]} locations={[0, 0.45, 1]} style={{ flex: 1 }}>
         <SafeAreaView edges={['top']} />
         <ScrollView
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: insets.bottom + 110 }}
@@ -2491,43 +2693,43 @@ export function RiderConfirmedReference() {
           <View style={{ alignItems: 'center', paddingTop: 44, paddingBottom: 32 }}>
             <View style={{
               width: 72, height: 72, borderRadius: 36,
-              backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center',
+              backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
               marginBottom: 24,
-              shadowColor: ORANGE, shadowOpacity: 0.3, shadowRadius: 16, shadowOffset: { width: 0, height: 6 },
+              shadowColor: colors.primary, shadowOpacity: 0.3, shadowRadius: 16, shadowOffset: { width: 0, height: 6 },
             }}>
-              <Ionicons name="checkmark" size={36} color="#FFF" />
+              <Ionicons name="checkmark" size={36} color={colors.textInverse} />
             </View>
 
-            <RNText style={{ fontFamily: FONT_SANS, fontSize: 30, fontWeight: '600', color: NAVY, textAlign: 'center', lineHeight: 36 }}>
+            <RNText style={{ fontFamily: FONT_SANS, fontSize: 30, fontWeight: '600', color: colors.textPrimary, textAlign: 'center', lineHeight: 36 }}>
               {'Request '}
-              <RNText style={{ fontFamily: FONT_SANS, color: ORANGE, fontStyle: 'italic', fontWeight: '600' }}>
+              <RNText style={{ fontFamily: FONT_SANS, color: colors.primary, fontStyle: 'italic', fontWeight: '600' }}>
                 successful!
               </RNText>
             </RNText>
-            <RNText style={{ fontSize: 15, color: MUTED, fontWeight: '500', marginTop: 10, textAlign: 'center', lineHeight: 22 }}>
+            <RNText style={{ fontSize: 15, color: colors.textSecondary, fontWeight: '500', marginTop: 10, textAlign: 'center', lineHeight: 22 }}>
               {firstName} has been notified and will{'\n'}respond soon.
             </RNText>
           </View>
 
           {/* Details card */}
           <View style={{
-            backgroundColor: '#FFFFFFCC', borderRadius: 20,
-            padding: 20, borderWidth: 1, borderColor: BORDER,
+            backgroundColor: colors.bgCard, borderRadius: 20,
+            padding: 20, borderWidth: 1, borderColor: colors.border,
           }}>
             {from && to && (
               <>
                 <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
                   <View style={{ alignItems: 'center', paddingTop: 3, gap: 0 }}>
-                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: NAVY }} />
-                    <View style={{ width: 1.5, height: 24, backgroundColor: BORDER, marginVertical: 2 }} />
-                    <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: NAVY }} />
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.textPrimary }} />
+                    <View style={{ width: 1.5, height: 24, backgroundColor: colors.border, marginVertical: 2 }} />
+                    <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: colors.textPrimary }} />
                   </View>
                   <View style={{ flex: 1, gap: 12 }}>
-                    <RNText style={{ fontSize: 14, fontWeight: '600', color: NAVY }} numberOfLines={1}>{from}</RNText>
-                    <RNText style={{ fontSize: 14, fontWeight: '600', color: NAVY }} numberOfLines={1}>{to}</RNText>
+                    <RNText style={{ fontSize: 14, fontWeight: '600', color: colors.textPrimary }} numberOfLines={1}>{from}</RNText>
+                    <RNText style={{ fontSize: 14, fontWeight: '600', color: colors.textPrimary }} numberOfLines={1}>{to}</RNText>
                   </View>
                 </View>
-                <View style={{ height: 1, backgroundColor: BORDER, marginBottom: 14 }} />
+                <View style={{ height: 1, backgroundColor: colors.border, marginBottom: 14 }} />
               </>
             )}
 
@@ -2538,13 +2740,13 @@ export function RiderConfirmedReference() {
               price != null ? ['Charged', `$${price.toFixed(2)}`] : null,
             ].filter(Boolean).map(([label, value]) => (
               <View key={label as string} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <RNText style={{ fontSize: 13, color: MUTED, fontWeight: '500' }}>{label}</RNText>
-                <RNText style={{ fontSize: 13, color: NAVY, fontWeight: '700', flexShrink: 1, textAlign: 'right', marginLeft: 12 }}>{value}</RNText>
+                <RNText style={{ fontSize: 13, color: colors.textSecondary, fontWeight: '500' }}>{label}</RNText>
+                <RNText style={{ fontSize: 13, color: colors.textPrimary, fontWeight: '700', flexShrink: 1, textAlign: 'right', marginLeft: 12 }}>{value}</RNText>
               </View>
             ))}
           </View>
 
-          <RNText style={{ fontSize: 12, color: MUTED, textAlign: 'center', marginTop: 14, lineHeight: 18 }}>
+          <RNText style={{ fontSize: 12, color: colors.textSecondary, textAlign: 'center', marginTop: 14, lineHeight: 18 }}>
             Payment is authorized now and only captured after your ride is completed.
           </RNText>
         </ScrollView>
@@ -2556,7 +2758,7 @@ export function RiderConfirmedReference() {
           gap: 10,
         }}>
           <TouchableOpacity
-            style={{ backgroundColor: NAVY, borderRadius: 28, paddingVertical: 16, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}
+            style={{ backgroundColor: colors.textPrimary, borderRadius: 28, paddingVertical: 16, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}
             onPress={async () => {
               const riderId = firebaseAuth.currentUser?.uid;
               if (!riderId || !driverId) { router.replace('/(rider)/messages' as any); return; }
@@ -2592,15 +2794,15 @@ export function RiderConfirmedReference() {
             }}
             activeOpacity={0.85}
           >
-            <Ionicons name="chatbubble-outline" size={18} color="#FFF" />
-            <RNText style={{ color: '#FFF', fontSize: 16, fontWeight: '800' }}>Message {firstName}</RNText>
+            <Ionicons name="chatbubble-outline" size={18} color={colors.textInverse} />
+            <RNText style={{ color: colors.textInverse, fontSize: 16, fontWeight: '800' }}>Message {firstName}</RNText>
           </TouchableOpacity>
           <TouchableOpacity
             style={{ paddingVertical: 12, alignItems: 'center' }}
             onPress={() => router.replace('/(rider)/' as any)}
             activeOpacity={0.75}
           >
-            <RNText style={{ color: NAVY, fontSize: 15, fontWeight: '700' }}>Back to home</RNText>
+            <RNText style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '700' }}>Back to home</RNText>
           </TouchableOpacity>
         </View>
       </LinearGradient>
@@ -2608,249 +2810,253 @@ export function RiderConfirmedReference() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: AppColors) {
+  const pageTitleColor = colors.statusBar === 'light-content' ? '#FFFFFF' : colors.textPrimary;
+
+  return StyleSheet.create({
   defaultText: { fontFamily: FONT_SANS },
-  root: { flex: 1, backgroundColor: BG, alignItems: 'center' },
-  safe: { flex: 1, width: '100%', maxWidth: Platform.OS === 'web' ? 430 : undefined, backgroundColor: BG },
+  root: { flex: 1, backgroundColor: colors.bg, alignItems: 'center' },
+  safe: { flex: 1, width: '100%', maxWidth: Platform.OS === 'web' ? 430 : undefined, backgroundColor: colors.bg },
   status: { height: 38, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24 },
-  statusTime: { fontFamily: FONT_SANS, fontSize: 14, fontWeight: '700', color: '#111827' },
+  statusTime: { fontFamily: FONT_SANS, fontSize: 14, fontWeight: '700', color: colors.textPrimary },
   notch: { position: 'absolute', top: 9, left: '37%', right: '37%', height: 32, borderRadius: 16, backgroundColor: '#000' },
   statusIcons: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 6 },
   header: { ...appHeader.row, height: 64, paddingHorizontal: layout.screenPadding, marginHorizontal: -layout.screenPadding },
-  mark: { color: ORANGE, fontSize: 14, fontWeight: '700', marginRight: 9 },
-  headerTitle: { ...appHeader.title, fontFamily: FONT_SANS, color: NAVY },
+  mark: { color: colors.primary, fontSize: 14, fontWeight: '700', marginRight: 9 },
+  headerTitle: { ...appHeader.title, fontFamily: FONT_SANS, color: colors.textPrimary },
   headerTitleAfterBack: { flexShrink: 1, marginLeft: 12 },
-  circleBtn: { ...appHeader.iconButton, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: BORDER},
+  circleBtn: { ...appHeader.iconButton, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border },
   content: { width: '100%', maxWidth: layout.contentMaxWidth, alignSelf: 'center', paddingHorizontal: layout.screenPadding, paddingTop: 24 },
   contentWithScrollableHeader: { paddingTop: 0 },
   homeUtilityBar: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: -6, marginBottom: 24 },
   homeBrandMark: { width: 36, height: 36, borderRadius: 12, overflow: 'hidden' },
   homeBrandLogo: { width: '100%', height: '100%' },
-  campusChip: { flex: 1, minWidth: 0, height: 38, flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 12, borderRadius: 19, backgroundColor: '#F3EFE8' },
-  campusText: { flex: 1, color: NAVY, fontSize: 13, fontWeight: '700' },
-  utilityButton: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: BORDER },
-  homeAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F9E8DB', borderWidth: 1, borderColor: '#F3D7C6', overflow: 'hidden' },
+  campusChip: { flex: 1, minWidth: 0, height: 38, flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 12, borderRadius: 19, backgroundColor: colors.bgSecondary },
+  campusText: { flex: 1, color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
+  utilityButton: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border },
+  homeAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primaryDim, borderWidth: 2, borderColor: '#FFFFFF', overflow: 'hidden' },
   homeAvatarImage: { width: '100%', height: '100%', borderRadius: 20 },
-  homeAvatarText: { color: ORANGE, fontSize: 15, fontWeight: '800' },
+  homeAvatarText: { color: colors.primary, fontSize: 15, fontWeight: '800' },
   pageIntro: { marginBottom: 12 },
-  pageTitle: { ...appHeader.title, fontFamily: FONT_SANS, color: NAVY },
+  pageTitle: { ...appHeader.title, fontFamily: FONT_SANS, color: pageTitleColor },
   heroCopy: { marginBottom: 22 },
-  heroTitle: { fontFamily: FONT_SANS, color: NAVY, fontSize: 30, lineHeight: 36, fontWeight: '600' },
-  heroAccent: { fontFamily: FONT_SANS, color: ORANGE, fontStyle: 'italic', fontWeight: '600' },
-  heroSub: { color: MUTED, fontSize: 15, lineHeight: 21, marginTop: 5 },
+  heroTitle: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 30, lineHeight: 36, fontWeight: '600' },
+  heroAccent: { fontFamily: FONT_SANS, color: colors.primary, fontStyle: 'italic', fontWeight: '600' },
+  heroSub: { color: colors.textSecondary, fontSize: 15, lineHeight: 21, marginTop: 5 },
   homePrimaryBlock: { marginBottom: 30 },
   homePrimarySearchBlock: { marginBottom: 4 },
-  searchCard: { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1, borderColor: BORDER, padding: 14, marginBottom: 28, shadowColor: NAVY, shadowOpacity: 0.06, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 2 },
+  searchCard: { backgroundColor: colors.bgCard, borderRadius: 20, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 28, shadowColor: colors.textPrimary, shadowOpacity: 0.06, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 2 },
   autocompleteSearchCard: { zIndex: 30, elevation: 30 },
   routeRow: { flexDirection: 'row' },
   routeRail: { width: 28, alignItems: 'center', paddingTop: 16, paddingBottom: 16 },
-  navyDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: NAVY },
-  orangeDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: ORANGE },
-  dashedLine: { flex: 1, width: 1, borderLeftWidth: 1, borderStyle: 'dashed', borderColor: '#CBD5E1', marginVertical: 7 },
-  connectedRouteLine: { width: 2, borderLeftWidth: 0, borderStyle: 'solid', backgroundColor: '#CBD5E1', marginVertical: 0 },
+  navyDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.textPrimary },
+  orangeDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary },
+  dashedLine: { flex: 1, width: 1, borderLeftWidth: 1, borderStyle: 'dashed', borderColor: colors.border, marginVertical: 7 },
+  connectedRouteLine: { width: 2, borderLeftWidth: 0, borderStyle: 'solid', backgroundColor: colors.border, marginVertical: 0 },
   connectedRouteRail: { height: 92, minHeight: 0, alignSelf: 'stretch', paddingTop: 2, paddingBottom: 2 },
   routeInputs: { flex: 1, gap: 9, zIndex: 30 },
   autocompleteField: { flex: 0 },
-  inputPill: { fontFamily: FONT_SANS, height: 48, borderRadius: 13, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', paddingHorizontal: 14, justifyContent: 'center', color: NAVY, fontSize: 15, fontWeight: '500' },
-  inputText: { color: NAVY, fontSize: 17, fontWeight: '600' },
-  stopText: { fontFamily: FONT_MONO, color: MUTED, fontSize: 10, fontWeight: '500', marginLeft: 12 },
+  inputPill: { fontFamily: FONT_SANS, height: 48, borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, paddingHorizontal: 14, justifyContent: 'center', color: colors.textPrimary, fontSize: 15, fontWeight: '500' },
+  inputText: { color: colors.textPrimary, fontSize: 17, fontWeight: '600' },
+  stopText: { fontFamily: FONT_MONO, color: colors.textSecondary, fontSize: 10, fontWeight: '500', marginLeft: 12 },
   metaRow: { flexDirection: 'row', gap: 9, paddingLeft: 28, marginTop: 9 },
   homeMetaRowFullWidth: { paddingLeft: 0 },
-  metaPill: { flex: 1, height: 44, borderRadius: 13, borderWidth: 1, borderColor: '#D7DCE3', justifyContent: 'center', paddingHorizontal: 13 },
-  metaText: { color: NAVY, fontSize: 14, fontWeight: '600' },
-  metaPlaceholderText: { color: MUTED },
-  primaryBtn: { height: 54, borderRadius: 27, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', marginBottom: 34 },
-  searchPrimaryBtn: { height: 48, borderRadius: 24, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
-  primaryBtnFull: { height: 56, borderRadius: 28, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center' },
+  metaPill: { flex: 1, height: 44, borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, justifyContent: 'center', paddingHorizontal: 13 },
+  metaText: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
+  metaPlaceholderText: { color: colors.textSecondary },
+  primaryBtn: { height: 54, borderRadius: 27, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 34 },
+  searchPrimaryBtn: { height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
+  primaryBtnFull: { height: 56, borderRadius: 28, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   requestSubmitButton: { marginTop: 22, marginBottom: 12 },
-  primaryText: { fontFamily: FONT_SANS, color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
+  primaryText: { fontFamily: FONT_SANS, color: colors.textInverse, fontSize: 17, fontWeight: '700' },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  sectionTitle: { fontFamily: FONT_SANS, flex: 1, color: NAVY, fontSize: 17, fontWeight: '700' },
-  sectionAction: { fontFamily: FONT_MONO, color: ORANGE, fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
+  sectionTitle: { fontFamily: FONT_SANS, flex: 1, color: colors.textPrimary, fontSize: 17, fontWeight: '700' },
+  sectionAction: { fontFamily: FONT_MONO, color: colors.primary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
   promotionList: { paddingBottom: 12, paddingRight: 8 },
   promotionDots: { height: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, marginBottom: 18 },
-  promotionDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#D6D0C7' },
-  promotionDotActive: { width: 20, backgroundColor: SECONDARY },
-  uberPromoCard: { height: 174, marginRight: 12, flexDirection: 'row', overflow: 'hidden', borderRadius: 20, borderWidth: 1, borderColor: '#E3DED6', backgroundColor: '#FFFFFF', shadowColor: NAVY, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 12, elevation: 2 },
+  promotionDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.border },
+  promotionDotActive: { width: 20, backgroundColor: colors.textPrimary },
+  uberPromoCard: { height: 174, marginRight: 12, flexDirection: 'row', overflow: 'hidden', borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 12, elevation: 2 },
   uberPromoCopy: { width: '62%', paddingHorizontal: 18, paddingVertical: 17, justifyContent: 'space-between' },
-  uberPromoTitle: { color: NAVY, fontSize: 21, lineHeight: 25, fontWeight: '800', letterSpacing: -0.35 },
-  uberPromoDescription: { color: '#667085', fontSize: 12, lineHeight: 17, marginTop: 5 },
-  uberPromoCta: { minHeight: 38, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 19, backgroundColor: '#F2F0EC', paddingHorizontal: 15, justifyContent: 'center' },
-  uberPromoCtaClaimed: { backgroundColor: '#F9E8DB' },
-  uberPromoCtaText: { color: NAVY, fontSize: 13, fontWeight: '700' },
-  uberPromoVisual: { flex: 1, backgroundColor: '#F6D8C6', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  uberPromoVisualSecondary: { backgroundColor: '#DDE5F2' },
-  promoBubble: { position: 'absolute', borderRadius: 999, backgroundColor: '#F2B994' },
-  promoBubbleSecondary: { backgroundColor: '#B8C6DE' },
+  uberPromoTitle: { color: colors.textPrimary, fontSize: 21, lineHeight: 25, fontWeight: '800', letterSpacing: -0.35 },
+  uberPromoDescription: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 5 },
+  uberPromoCta: { minHeight: 38, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 19, backgroundColor: colors.bgSecondary, paddingHorizontal: 15, justifyContent: 'center' },
+  uberPromoCtaClaimed: { backgroundColor: colors.primaryDim },
+  uberPromoCtaText: { color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
+  uberPromoVisual: { flex: 1, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  uberPromoVisualSecondary: { backgroundColor: colors.bgSecondary },
+  promoBubble: { position: 'absolute', borderRadius: 999, backgroundColor: colors.primaryDim },
+  promoBubbleSecondary: { backgroundColor: colors.bgSecondary },
   promoBubbleTop: { width: 108, height: 108, top: -45, right: -32 },
   promoBubbleBottom: { width: 92, height: 92, bottom: -32, left: -26 },
-  promoIconLarge: { width: 76, height: 76, borderRadius: 24, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-6deg' }], shadowColor: ORANGE, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.22, shadowRadius: 12, elevation: 4 },
-  promoIconLargeSecondary: { backgroundColor: SECONDARY, shadowColor: SECONDARY },
-  promoIconSmall: { position: 'absolute', right: 13, bottom: 14, width: 42, height: 42, borderRadius: 21, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '8deg' }] },
+  promoIconLarge: { width: 76, height: 76, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-6deg' }], shadowColor: colors.primary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.22, shadowRadius: 12, elevation: 4 },
+  promoIconLargeSecondary: { backgroundColor: colors.textPrimary, shadowColor: colors.textPrimary },
+  promoIconSmall: { position: 'absolute', right: 13, bottom: 14, width: 42, height: 42, borderRadius: 21, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '8deg' }] },
   promotionLoading: { minHeight: 120, alignItems: 'center', justifyContent: 'center', marginBottom: 28 },
-  promotionEmptyCard: { minHeight: 92, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 18, marginBottom: 28 },
-  promotionEmptyTitle: { color: NAVY, fontSize: 15, fontWeight: '700' },
-  promotionEmptyText: { color: MUTED, fontSize: 13, lineHeight: 18, marginTop: 3 },
+  promotionEmptyCard: { minHeight: 92, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 18, marginBottom: 28 },
+  promotionEmptyTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  promotionEmptyText: { color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginTop: 3 },
   homeSection: { marginBottom: 28 },
   popularRouteList: { gap: 10 },
-  popularRouteCard: { minHeight: 66, borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, shadowColor: NAVY, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
-  popularRouteIcon: { width: 38, height: 38, borderRadius: 14, backgroundColor: '#F9E8DB', alignItems: 'center', justifyContent: 'center' },
+  popularRouteCard: { minHeight: 66, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
+  popularRouteIcon: { width: 38, height: 38, borderRadius: 14, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
   popularRouteCopy: { flex: 1, minWidth: 0 },
-  popularRouteTitle: { color: NAVY, fontSize: 15, fontWeight: '700' },
-  popularRouteMeta: { color: MUTED, fontSize: 12, fontWeight: '600', marginTop: 3 },
-  popularRoutePrice: { color: ORANGE, fontSize: 20, fontWeight: '500' },
+  popularRouteTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  popularRouteMeta: { color: colors.textSecondary, fontSize: 12, fontWeight: '600', marginTop: 3 },
+  popularRoutePrice: { color: colors.primary, fontSize: 20, fontWeight: '500' },
   quickList: { gap: 12, paddingBottom: 16 },
-  quickCard: { width: 132, height: 94, borderRadius: 14, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 14 },
-  quickKicker: { fontFamily: FONT_MONO, color: '#A1A8B3', fontSize: 10, fontWeight: '700', letterSpacing: 1.2 },
-  quickCity: { fontFamily: FONT_SANS, color: NAVY, fontSize: 16, fontWeight: '600', marginTop: 8 },
-  quickPrice: { color: ORANGE, fontSize: 23, fontWeight: '300', marginTop: 4 },
-  rideCard: { borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 18 },
+  quickCard: { width: 132, height: 94, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 14 },
+  quickKicker: { fontFamily: FONT_MONO, color: colors.textTertiary, fontSize: 10, fontWeight: '700', letterSpacing: 1.2 },
+  quickCity: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 16, fontWeight: '600', marginTop: 8 },
+  quickPrice: { color: colors.primary, fontSize: 23, fontWeight: '300', marginTop: 4 },
+  rideCard: { borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 18 },
   confirmedCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 },
   confirmedFareBlock: { alignItems: 'flex-end', flexShrink: 0 },
-  confirmedFareLabel: { color: MUTED, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, marginBottom: 1 },
-  confirmedSchedule: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 18, marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#ECE8E1' },
+  confirmedFareLabel: { color: colors.textSecondary, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, marginBottom: 1 },
+  confirmedSchedule: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 18, marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
   confirmedScheduleItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  emptyCard: { borderRadius: 18, borderWidth: 1, borderStyle: 'dashed', borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 24, alignItems: 'center', justifyContent: 'center', minHeight: 120 },
+  emptyCard: { borderRadius: 18, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border, backgroundColor: colors.bgCard, padding: 24, alignItems: 'center', justifyContent: 'center', minHeight: 120 },
   rideMain: { flexDirection: 'row' },
   rideLine: { flexDirection: 'row', alignItems: 'center', minHeight: 28 },
-  ridePlace: { fontFamily: FONT_SANS, flex: 1, color: NAVY, fontSize: 17, fontWeight: '600' },
-  rideTime: { fontFamily: FONT_SANS, color: MUTED, fontSize: 12, fontWeight: '700' },
-  rideMeta: { color: MUTED, fontSize: 12, fontWeight: '600', marginVertical: 5 },
-  driverFooter: { flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, borderStyle: 'dashed', borderTopColor: '#D7DCE3', paddingTop: 14, marginTop: 12 },
-  activityCardActions: { flexDirection: 'row', gap: 8, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#E5E0D8' },
-  actionBtnPrimary: { flex: 1, backgroundColor: ORANGE, borderRadius: 20, paddingVertical: 10, alignItems: 'center' },
-  actionBtnPrimaryText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
-  actionBtnSecondary: { flex: 1, backgroundColor: '#F3EFE8', borderRadius: 20, paddingVertical: 10, alignItems: 'center' },
-  actionBtnSecondaryText: { color: '#15233A', fontSize: 13, fontWeight: '700' },
-  actionBtnCancel: { flex: 1, backgroundColor: '#FEF2F2', borderRadius: 20, paddingVertical: 10, alignItems: 'center' },
-  actionBtnCancelText: { color: '#B91C1C', fontSize: 13, fontWeight: '700' },
-  avatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F9E8DB' },
+  ridePlace: { fontFamily: FONT_SANS, flex: 1, color: colors.textPrimary, fontSize: 17, fontWeight: '600' },
+  rideTime: { fontFamily: FONT_SANS, color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
+  rideMeta: { color: colors.textSecondary, fontSize: 12, fontWeight: '600', marginVertical: 5 },
+  driverFooter: { flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, borderStyle: 'dashed', borderTopColor: colors.border, paddingTop: 14, marginTop: 12 },
+  activityCardActions: { flexDirection: 'row', gap: 8, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border },
+  actionBtnPrimary: { flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center' },
+  actionBtnPrimaryText: { color: colors.textInverse, fontSize: 13, fontWeight: '700' },
+  actionBtnSecondary: { flex: 1, backgroundColor: colors.bgSecondary, borderRadius: 20, paddingVertical: 10, alignItems: 'center' },
+  actionBtnSecondaryText: { color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
+  actionBtnCancel: { flex: 1, backgroundColor: colors.redDim, borderRadius: 20, paddingVertical: 10, alignItems: 'center' },
+  actionBtnCancelText: { color: colors.red, fontSize: 13, fontWeight: '700' },
+  avatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primaryDim },
   availableAvatarImage: { width: '100%', height: '100%', borderRadius: 21 },
-  avatarText: { fontFamily: FONT_SANS, color: ORANGE, fontSize: 14, fontWeight: '600' },
-  driverSmall: { flex: 1, color: '#6B7280', fontSize: 12, fontWeight: '700', lineHeight: 18 },
-  cardPrice: { color: ORANGE, fontSize: 24, fontWeight: '700' },
-  eyebrow: { fontFamily: FONT_SANS, color: '#7A8FA8', fontSize: 11, fontWeight: '800', letterSpacing: 1.3, textTransform: 'uppercase', marginBottom: 8, marginTop: 16 },
+  avatarText: { fontFamily: FONT_SANS, color: colors.primary, fontSize: 14, fontWeight: '600' },
+  driverSmall: { flex: 1, color: colors.textSecondary, fontSize: 12, fontWeight: '700', lineHeight: 18 },
+  cardPrice: { color: colors.primary, fontSize: 24, fontWeight: '700' },
+  eyebrow: { fontFamily: FONT_SANS, color: colors.textTertiary, fontSize: 11, fontWeight: '800', letterSpacing: 1.3, textTransform: 'uppercase', marginBottom: 8, marginTop: 16 },
   seatRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
-  seatPill: { flex: 1, minHeight: 48, borderRadius: 24, borderWidth: 1, borderColor: '#D7DCE3', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
-  seatActive: { backgroundColor: NAVY, borderColor: NAVY },
-  seatText: { fontFamily: FONT_SANS, color: MUTED, fontSize: 12, fontWeight: '600' },
-  seatTextActive: { color: '#FFFFFF' },
-  priceBox: { borderRadius: 14, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', paddingHorizontal: 14, paddingVertical: 13, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  seatPill: { flex: 1, minHeight: 48, borderRadius: 24, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgCard },
+  seatActive: { backgroundColor: colors.textPrimary, borderColor: colors.textPrimary },
+  seatText: { fontFamily: FONT_SANS, color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  seatTextActive: { color: colors.textInverse },
+  priceBox: { borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, paddingHorizontal: 14, paddingVertical: 13, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
   priceInputGroup: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center' },
-  bigPrice: { color: ORANGE, fontSize: 32, lineHeight: 38, fontWeight: '400', marginRight: 2 },
-  priceInput: { flex: 1, minWidth: 72, color: NAVY, fontSize: 32, lineHeight: 38, fontWeight: '400', paddingVertical: 0, paddingHorizontal: 0 },
+  bigPrice: { color: colors.primary, fontSize: 32, lineHeight: 38, fontWeight: '400', marginRight: 2 },
+  priceInput: { flex: 1, minWidth: 72, color: colors.textPrimary, fontSize: 32, lineHeight: 38, fontWeight: '400', paddingVertical: 0, paddingHorizontal: 0 },
   requestSuggestedWrap: { width: 142, alignItems: 'flex-end', flexShrink: 0 },
-  requestSuggestedLabel: { fontFamily: FONT_MONO, color: '#A1A8B3', fontSize: 9, fontWeight: '700', letterSpacing: 1 },
-  requestSuggestedText: { color: MUTED, fontSize: 11, lineHeight: 15, fontWeight: '600', textAlign: 'right', marginTop: 2 },
-  suggested: { fontFamily: FONT_MONO, position: 'absolute', right: 14, top: 34, color: '#A1A8B3', fontSize: 9, fontWeight: '500', letterSpacing: 1 },
-  slider: { height: 3, borderRadius: 2, backgroundColor: '#D7DCE3', marginTop: 12 },
-  sliderFill: { width: '62%', height: 3, backgroundColor: ORANGE },
-  sliderThumb: { position: 'absolute', left: '62%', top: -5, width: 13, height: 13, borderRadius: 7, borderWidth: 1.5, borderColor: ORANGE, backgroundColor: '#FFFFFF' },
+  requestSuggestedLabel: { fontFamily: FONT_MONO, color: colors.textTertiary, fontSize: 9, fontWeight: '700', letterSpacing: 1 },
+  requestSuggestedText: { color: colors.textSecondary, fontSize: 11, lineHeight: 15, fontWeight: '600', textAlign: 'right', marginTop: 2 },
+  suggested: { fontFamily: FONT_MONO, position: 'absolute', right: 14, top: 34, color: colors.textTertiary, fontSize: 9, fontWeight: '500', letterSpacing: 1 },
+  slider: { height: 3, borderRadius: 2, backgroundColor: colors.border, marginTop: 12 },
+  sliderFill: { width: '62%', height: 3, backgroundColor: colors.primary },
+  sliderThumb: { position: 'absolute', left: '62%', top: -5, width: 13, height: 13, borderRadius: 7, borderWidth: 1.5, borderColor: colors.primary, backgroundColor: colors.bgCard },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
-  chip: { minHeight: 44, borderRadius: 22, borderWidth: 1, borderColor: '#D7DCE3', paddingHorizontal: 14, justifyContent: 'center', backgroundColor: '#FFFFFF' },
-  chipActive: { backgroundColor: NAVY, borderColor: NAVY },
-  chipText: { fontFamily: FONT_MONO, color: '#5F6876', fontSize: 12, fontWeight: '600' },
-  chipTextActive: { color: '#FFFFFF' },
-  noteBox: { fontFamily: FONT_SANS, minHeight: 74, borderRadius: 12, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', padding: 12, color: NAVY, fontSize: 13, lineHeight: 18 },
-  findSearch: { minHeight: 56, borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 16, paddingRight: 7, marginBottom: 16, shadowColor: NAVY, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 1 },
-  availableSearchInput: { flex: 1, height: 54, paddingVertical: 0, color: NAVY, fontSize: 14, fontWeight: '500' },
-  filterButton: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F3EFE8' },
-  filterButtonActive: { backgroundColor: NAVY },
+  chip: { minHeight: 44, borderRadius: 22, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, justifyContent: 'center', backgroundColor: colors.bgCard },
+  chipActive: { backgroundColor: colors.textPrimary, borderColor: colors.textPrimary },
+  chipText: { fontFamily: FONT_MONO, color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  chipTextActive: { color: colors.textInverse },
+  noteBox: { fontFamily: FONT_SANS, minHeight: 74, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 12, color: colors.textPrimary, fontSize: 13, lineHeight: 18 },
+  findSearch: { minHeight: 56, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 16, paddingRight: 7, marginBottom: 16, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 1 },
+  availableSearchInput: { flex: 1, height: 54, paddingVertical: 0, color: colors.textPrimary, fontSize: 14, fontWeight: '500' },
+  filterButton: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgSecondary },
+  filterButtonActive: { backgroundColor: colors.textPrimary },
   resultsHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
-  resultsCount: { flex: 1, color: NAVY, fontSize: 14, fontWeight: '700' },
-  clearFiltersText: { color: ORANGE, fontSize: 13, fontWeight: '700' },
-  findSearchLabel: { fontFamily: FONT_MONO, color: MUTED, fontSize: 9, fontWeight: '700', letterSpacing: 1.2, marginBottom: 3 },
-  findSearchText: { color: NAVY, fontSize: 15, fontWeight: '700' },
+  resultsCount: { flex: 1, color: colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  clearFiltersText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
+  findSearchLabel: { fontFamily: FONT_MONO, color: colors.textSecondary, fontSize: 9, fontWeight: '700', letterSpacing: 1.2, marginBottom: 3 },
+  findSearchText: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
   filterRow: { gap: 8, paddingBottom: 20 },
-  filterPill: { minWidth: 72, height: 42, borderRadius: 21, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 15 },
-  filterActive: { backgroundColor: NAVY, borderColor: NAVY },
-  filterText: { fontFamily: FONT_SANS, color: '#6B7280', fontSize: 14, fontWeight: '500', textAlign: 'center' },
-  filterTextActive: { color: '#FFFFFF' },
-  availableCard: { borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 16, marginBottom: 14, shadowColor: NAVY, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.05, shadowRadius: 12, elevation: 1 },
+  filterPill: { minWidth: 72, height: 42, borderRadius: 21, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 15 },
+  filterActive: { backgroundColor: colors.textPrimary, borderColor: colors.textPrimary },
+  filterText: { fontFamily: FONT_SANS, color: colors.textSecondary, fontSize: 14, fontWeight: '500', textAlign: 'center' },
+  filterTextActive: { color: colors.textInverse },
+  availableCard: { borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 16, marginBottom: 14, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.05, shadowRadius: 12, elevation: 1 },
   availableCardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
-  availableDeparture: { flex: 1, color: NAVY, fontSize: 13, fontWeight: '700' },
-  seatBadge: { minWidth: 42, height: 28, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: '#F3EFE8', paddingHorizontal: 9 },
-  seatBadgeText: { color: NAVY, fontSize: 12, fontWeight: '700' },
-  availableRouteBlock: { flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#EEEAE3', paddingVertical: 12 },
+  availableDeparture: { flex: 1, color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
+  seatBadge: { minWidth: 42, height: 28, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: colors.bgSecondary, paddingHorizontal: 9 },
+  seatBadgeText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
+  availableRouteBlock: { flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.border, paddingVertical: 12 },
   availableTop: { display: 'none' },
   availableLocationsBlock: { position: 'relative', flexDirection: 'row', alignItems: 'stretch', gap: 10 },
-  availableLocationsTime: { position: 'absolute', top: 0, right: 0, maxWidth: 92, fontFamily: FONT_MONO, color: NAVY, fontSize: 10, lineHeight: 14, fontWeight: '700', textAlign: 'right' },
+  availableLocationsTime: { position: 'absolute', top: 0, right: 0, maxWidth: 92, fontFamily: FONT_MONO, color: colors.textPrimary, fontSize: 10, lineHeight: 14, fontWeight: '700', textAlign: 'right' },
   availableRouteRail: { width: 12, alignItems: 'center', paddingTop: 18, paddingBottom: 7 },
-  availableRouteLine: { width: 2, flex: 1, minHeight: 28, backgroundColor: '#CBD5E1', marginVertical: 4 },
+  availableRouteLine: { width: 2, flex: 1, minHeight: 28, backgroundColor: colors.border, marginVertical: 4 },
   availableLocationCopy: { flex: 1, minWidth: 0, gap: 10, paddingRight: 100 },
   availableLocationTextWrap: { flex: 1, minWidth: 0 },
-  availableRouteLabel: { color: MUTED, fontSize: 9, lineHeight: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
-  availableDropoffLabel: { color: ORANGE },
-  availablePickupDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: NAVY },
-  availableDropoffDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: ORANGE },
-  availableLocationText: { color: NAVY, fontSize: 14, lineHeight: 18, fontWeight: '700' },
-  availableRouteIcon: { width: 36, height: 36, borderRadius: 12, backgroundColor: '#F9E8DB', alignItems: 'center', justifyContent: 'center' },
-  availableRoute: { fontFamily: FONT_SANS, color: NAVY, fontSize: 16, fontWeight: '700' },
-  availableRouteMeta: { color: MUTED, fontSize: 10, fontWeight: '600', marginTop: 1, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.7 },
-  availableDestination: { color: MUTED, fontSize: 13, fontWeight: '600', marginTop: 2 },
-  availableTimeBadge: { maxWidth: 92, borderRadius: 12, backgroundColor: '#F3EFE8', paddingHorizontal: 10, paddingVertical: 7 },
-  availableTime: { fontFamily: FONT_MONO, color: NAVY, fontSize: 10, lineHeight: 14, fontWeight: '700', textAlign: 'center' },
-  availableDash: { borderTopWidth: 1, borderColor: '#ECE8E1', marginVertical: 15 },
+  availableRouteLabel: { color: colors.textSecondary, fontSize: 9, lineHeight: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
+  availableDropoffLabel: { color: colors.primary },
+  availablePickupDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.textPrimary },
+  availableDropoffDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.primary },
+  availableLocationText: { color: colors.textPrimary, fontSize: 14, lineHeight: 18, fontWeight: '700' },
+  availableRouteIcon: { width: 36, height: 36, borderRadius: 12, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
+  availableRoute: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 16, fontWeight: '700' },
+  availableRouteMeta: { color: colors.textSecondary, fontSize: 10, fontWeight: '600', marginTop: 1, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.7 },
+  availableDestination: { color: colors.textSecondary, fontSize: 13, fontWeight: '600', marginTop: 2 },
+  availableTimeBadge: { maxWidth: 92, borderRadius: 12, backgroundColor: colors.bgSecondary, paddingHorizontal: 10, paddingVertical: 7 },
+  availableTime: { fontFamily: FONT_MONO, color: colors.textPrimary, fontSize: 10, lineHeight: 14, fontWeight: '700', textAlign: 'center' },
+  availableDash: { borderTopWidth: 1, borderColor: colors.border, marginVertical: 15 },
   availableBottom: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 14 },
-  driverName: { fontFamily: FONT_SANS, color: NAVY, fontSize: 16, fontWeight: '600' },
-  driverMeta: { color: MUTED, fontSize: 13, fontWeight: '600', marginTop: 3 },
+  driverName: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 16, fontWeight: '600' },
+  driverMeta: { color: colors.textSecondary, fontSize: 13, fontWeight: '600', marginTop: 3 },
   availablePriceBlock: { alignItems: 'flex-end' },
-  availablePrice: { color: ORANGE, fontSize: 28, fontWeight: '500' },
-  availablePerSeat: { color: MUTED, fontSize: 10, fontWeight: '600', marginTop: -2 },
+  availablePrice: { color: colors.primary, fontSize: 28, fontWeight: '500' },
+  availablePerSeat: { color: colors.textSecondary, fontSize: 10, fontWeight: '600', marginTop: -2 },
   availableEmptyState: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 48, minHeight: 340 },
-  availableEmptyIcon: { width: 54, height: 54, borderRadius: 27, backgroundColor: '#F9E8DB', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  availableEmptyTitle: { color: NAVY, fontSize: 19, lineHeight: 25, fontWeight: '700', textAlign: 'center', letterSpacing: -0.2 },
-  availableEmptyText: { maxWidth: 280, color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 6 },
-  availableFilterBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  availableFilterDot: { position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: 4, backgroundColor: ORANGE, borderWidth: 1.5, borderColor: '#FFFFFF' },
-  availableEmptyPrimary: { minHeight: 46, borderRadius: 23, backgroundColor: ORANGE, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 22, marginTop: 18 },
-  availableEmptyPrimaryText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
-  bottomNav: { position: 'absolute', left: 24, right: 24, bottom: 14, height: 58, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E8E3DA', borderRadius: 29, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 5, paddingVertical: 5, shadowColor: '#17233A', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.14, shadowRadius: 16, elevation: 10 },
+  availableEmptyIcon: { width: 54, height: 54, borderRadius: 27, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  availableEmptyTitle: { color: colors.textPrimary, fontSize: 19, lineHeight: 25, fontWeight: '700', textAlign: 'center', letterSpacing: -0.2 },
+  availableEmptyText: { maxWidth: 280, color: colors.textSecondary, fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 6 },
+  availableFilterBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  availableFilterDot: { position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: 4, backgroundColor: colors.primary, borderWidth: 1.5, borderColor: colors.bgCard },
+  availableEmptyPrimary: { minHeight: 46, borderRadius: 23, backgroundColor: colors.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 22, marginTop: 18 },
+  availableEmptyPrimaryText: { color: colors.textInverse, fontSize: 14, fontWeight: '700' },
+  bottomNav: { position: 'absolute', left: 24, right: 24, bottom: 14, height: 58, backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border, borderRadius: 29, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 5, paddingVertical: 5, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.14, shadowRadius: 16, elevation: 10 },
   navItem: { flex: 1, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 24, gap: 1 },
-  navItemActive: { backgroundColor: '#F6F2EC' },
+  navItemActive: { backgroundColor: colors.bgSecondary },
   navIconWrap: { position: 'relative', alignItems: 'center', justifyContent: 'center' },
-  iconBadge: { position: 'absolute', top: -7, right: -11, minWidth: 17, height: 17, borderRadius: 9, backgroundColor: ORANGE, borderWidth: 2, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
-  iconBadgeText: { color: '#FFFFFF', fontSize: 9, lineHeight: 11, fontWeight: '800' },
-  utilityBadge: { position: 'absolute', top: -4, right: -5, minWidth: 17, height: 17, borderRadius: 9, backgroundColor: ORANGE, borderWidth: 2, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
-  navText: { color: '#6B7280', fontSize: 11, fontWeight: '700' },
+  iconBadge: { position: 'absolute', top: -7, right: -11, minWidth: 17, height: 17, borderRadius: 9, backgroundColor: colors.primary, borderWidth: 2, borderColor: colors.bgCard, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  iconBadgeText: { color: colors.textInverse, fontSize: 9, lineHeight: 11, fontWeight: '800' },
+  utilityBadge: { position: 'absolute', top: -4, right: -5, minWidth: 17, height: 17, borderRadius: 9, backgroundColor: colors.primary, borderWidth: 2, borderColor: colors.bgCard, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  navText: { color: colors.textSecondary, fontSize: 11, fontWeight: '700' },
   bottomAction: { position: 'absolute', left: 18, right: 18, bottom: 20 },
-  detailCard: { borderRadius: 14, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 14, marginBottom: 12 },
+  detailCard: { borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 14, marginBottom: 12 },
   detailDriver: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   detailDriverCopy: { flex: 1, minWidth: 0 },
   detailAvatarImage: { width: '100%', height: '100%', borderRadius: 24 },
   avatarLarge: { width: 48, height: 48, borderRadius: 24 },
-  avatarTextLarge: { fontFamily: FONT_SANS, color: ORANGE, fontSize: 14, fontWeight: '600' },
-  detailName: { fontFamily: FONT_SANS, color: NAVY, fontSize: 15, fontWeight: '600' },
-  detailMeta: { color: MUTED, fontSize: 13, lineHeight: 18, fontWeight: '600', marginTop: 3 },
-  detailRoute: { flexDirection: 'row', gap: 10, marginTop: 14, borderTopWidth: 1, borderStyle: 'dashed', borderTopColor: '#D7DCE3', paddingTop: 12 },
+  avatarTextLarge: { fontFamily: FONT_SANS, color: colors.primary, fontSize: 14, fontWeight: '600' },
+  detailName: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  detailMeta: { color: colors.textSecondary, fontSize: 13, lineHeight: 18, fontWeight: '600', marginTop: 3 },
+  detailRoute: { flexDirection: 'row', gap: 10, marginTop: 14, borderTopWidth: 1, borderStyle: 'dashed', borderTopColor: colors.border, paddingTop: 12 },
   detailRouteCopy: { flex: 1, minWidth: 0, minHeight: 92, justifyContent: 'space-between', gap: 12, paddingVertical: 2 },
   detailLocationRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  detailLocation: { flex: 1, minWidth: 0, color: NAVY, fontSize: 14, lineHeight: 20, fontWeight: '700' },
-  detailTime: { maxWidth: 96, flexShrink: 0, fontFamily: FONT_MONO, color: MUTED, fontSize: 10, lineHeight: 15, fontWeight: '600', textAlign: 'right' },
-  vehicleIcon: { width: 50, height: 50, borderRadius: 12, backgroundColor: '#F5F2EC', alignItems: 'center', justifyContent: 'center', position: 'absolute', left: 14, top: 14 },
-  vehicleTitle: { fontFamily: FONT_SANS, color: NAVY, fontSize: 13, fontWeight: '600', marginLeft: 62 },
+  detailLocation: { flex: 1, minWidth: 0, color: colors.textPrimary, fontSize: 14, lineHeight: 20, fontWeight: '700' },
+  detailTime: { maxWidth: 96, flexShrink: 0, fontFamily: FONT_MONO, color: colors.textSecondary, fontSize: 10, lineHeight: 15, fontWeight: '600', textAlign: 'right' },
+  vehicleIcon: { width: 50, height: 50, borderRadius: 12, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center', position: 'absolute', left: 14, top: 14 },
+  vehicleTitle: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 13, fontWeight: '600', marginLeft: 62 },
   detailInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 13 },
-  detailInfoIcon: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#F5F2EC', alignItems: 'center', justifyContent: 'center' },
+  detailInfoIcon: { width: 48, height: 48, borderRadius: 12, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center' },
   detailInfoCopy: { flex: 1, minWidth: 0 },
-  detailInfoTitle: { color: NAVY, fontSize: 14, lineHeight: 20, fontWeight: '700' },
-  detailInfoText: { color: MUTED, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  detailInfoTitle: { color: colors.textPrimary, fontSize: 14, lineHeight: 20, fontWeight: '700' },
+  detailInfoText: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 3 },
   chipRowSmall: { flexDirection: 'row', gap: 6, marginLeft: 62, marginTop: 8 },
-  miniChip: { fontFamily: FONT_MONO, borderRadius: 14, borderWidth: 1, borderColor: '#D7DCE3', color: '#5F6876', fontSize: 11, fontWeight: '600', paddingHorizontal: 10, paddingVertical: 7 },
-  noteText: { color: '#4A5568', fontSize: 13, lineHeight: 19 },
+  miniChip: { fontFamily: FONT_MONO, borderRadius: 14, borderWidth: 1, borderColor: colors.border, color: colors.textSecondary, fontSize: 11, fontWeight: '600', paddingHorizontal: 10, paddingVertical: 7 },
+  noteText: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
   fareRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 8 },
-  fareLabel: { flex: 1, color: MUTED, fontSize: 12, fontWeight: '600' },
-  fareValue: { maxWidth: '68%', flexShrink: 1, fontFamily: FONT_SANS, color: NAVY, fontSize: 12, lineHeight: 17, fontWeight: '600', textAlign: 'right' },
-  fareDash: { borderTopWidth: 1, borderStyle: 'dashed', borderColor: '#D7DCE3', marginVertical: 4 },
-  fareTotal: { color: ORANGE, fontSize: 22, fontWeight: '300' },
+  fareLabel: { flex: 1, color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  fareValue: { maxWidth: '68%', flexShrink: 1, fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 12, lineHeight: 17, fontWeight: '600', textAlign: 'right' },
+  fareDash: { borderTopWidth: 1, borderStyle: 'dashed', borderColor: colors.border, marginVertical: 4 },
+  fareTotal: { color: colors.primary, fontSize: 22, fontWeight: '300' },
   confirmHero: { alignItems: 'center', paddingTop: 34, paddingBottom: 34 },
-  checkCircle: { width: 60, height: 60, borderRadius: 30, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', marginBottom: 28 },
-  confirmTitle: { color: NAVY, fontSize: 30, fontWeight: '300', marginBottom: 14 },
-  confirmCard: { borderRadius: 14, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 16, shadowColor: NAVY, shadowOpacity: 0.08, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 3 },
-  confirmCode: { fontFamily: FONT_MONO, color: '#A1A8B3', fontSize: 9, fontWeight: '500', letterSpacing: 2, textAlign: 'center', marginBottom: 16 },
+  checkCircle: { width: 60, height: 60, borderRadius: 30, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 28 },
+  confirmTitle: { color: colors.textPrimary, fontSize: 30, fontWeight: '300', marginBottom: 14 },
+  confirmCard: { borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 16, shadowColor: colors.textPrimary, shadowOpacity: 0.08, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 3 },
+  confirmCode: { fontFamily: FONT_MONO, color: colors.textTertiary, fontSize: 9, fontWeight: '500', letterSpacing: 2, textAlign: 'center', marginBottom: 16 },
   confirmRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 11 },
-  confirmValue: { fontFamily: FONT_SANS, color: NAVY, fontSize: 12, fontWeight: '600' },
-  confirmPrice: { color: ORANGE, fontSize: 22, fontWeight: '300' },
+  confirmValue: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 12, fontWeight: '600' },
+  confirmPrice: { color: colors.primary, fontSize: 22, fontWeight: '300' },
   confirmActions: { gap: 16 },
-  secondaryBtn: { minHeight: 52, borderRadius: 26, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  secondaryText: { color: NAVY, fontSize: 13, fontWeight: '700' },
-});
+  secondaryBtn: { minHeight: 52, borderRadius: 26, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' },
+  secondaryText: { color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
+  });
+}

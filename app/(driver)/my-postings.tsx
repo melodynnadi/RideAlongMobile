@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useCallback } from 'react';
+﻿import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Alert,
   ActivityIndicator, StyleSheet,
@@ -15,6 +15,7 @@ import { firebaseAuth, firestore } from '@/constants/services';
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 import { FlagRideModal } from '@/components/FlagRideModal';
 import { roleKey } from '@/src/utils/roleIdentity';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 type BookingRequest = {
   id: string;
@@ -30,11 +31,6 @@ type BookingRequest = {
   createdAtMs: number;
 };
 
-const NAVY   = '#15233A';
-const ORANGE = '#DE5D20';
-const BG     = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED  = '#8B94A6';
 
 type Posting = {
   id: string;
@@ -127,7 +123,6 @@ function postingScheduledAt(r: any): Date | null {
     parseDateTime(r.date || r.departureDate || r.scheduledDate, r.time || r.departureTimeText || r.scheduledTime)
   );
 }
-
 function toPosting(id: string, r: any): Posting {
   return {
     id,
@@ -162,6 +157,58 @@ function isPostingOutdated(p: Posting, now = Date.now()): boolean {
 }
 
 export default function MyPostingsScreen() {
+  const { colors } = useAppTheme();
+  const s = useMemo(() => StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.bg },
+    safe: { flex: 1 },
+    scroll: { flex: 1 },
+    content: { paddingHorizontal: 20, paddingBottom: 40 },
+    header: {
+      minHeight: 64, flexDirection: 'row', alignItems: 'center',
+      paddingTop: 8, paddingBottom: 10,
+    },
+    backBtn: {
+      width: 40, height: 40, borderRadius: 20,
+      alignItems: 'center', justifyContent: 'center',
+      backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border,
+    },
+    headerTitle: {
+      flex: 1, marginLeft: 12, fontSize: 24, lineHeight: 30,
+      fontWeight: '700', color: colors.textPrimary,
+    },
+    newBtn: {
+      width: 40, height: 40, borderRadius: 20,
+      alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary,
+    },
+    tabs: {
+      height: 46, flexDirection: 'row', marginBottom: 20,
+      backgroundColor: colors.bgSecondary, borderRadius: 14, padding: 3,
+    },
+    tab: { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 11 },
+    tabActive: {
+      backgroundColor: colors.bgCard, shadowColor: colors.textPrimary, shadowOpacity: 0.06,
+      shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2,
+    },
+    tabText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+    tabTextActive: { color: colors.textPrimary, fontWeight: '700' },
+    loadingWrap: { minHeight: 300, alignItems: 'center', justifyContent: 'center' },
+    emptyState: {
+      minHeight: 280, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: colors.bgCard, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border,
+      borderRadius: 18, paddingHorizontal: 28, paddingVertical: 32,
+    },
+    emptyIcon: {
+      width: 56, height: 56, borderRadius: 28,
+      alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primaryDim,
+    },
+    emptyTitle: { marginTop: 16, fontSize: 18, fontWeight: '700', color: colors.textPrimary },
+    emptyText: { marginTop: 7, fontSize: 13, lineHeight: 19, color: colors.textSecondary, textAlign: 'center' },
+    postBtn: {
+      minHeight: 44, marginTop: 20, flexDirection: 'row', alignItems: 'center', gap: 7,
+      backgroundColor: colors.primary, borderRadius: 22, paddingHorizontal: 24, justifyContent: 'center',
+    },
+    postBtnText: { color: colors.textInverse, fontSize: 14, fontWeight: '700' },
+  }), [colors]);
   const { goBack: handleBack } = useReturnNavigation('/(driver)');
   const [postings, setPostings] = useState<Posting[]>([]);
   const [loading, setLoading]   = useState(true);
@@ -223,6 +270,10 @@ export default function MyPostingsScreen() {
         if (!inactive.has(r.status.toLowerCase())) snapA.set(d.id, r);
       });
       flush();
+    }, (error) => {
+      snapA.clear();
+      flush();
+      console.warn('[MyPostings] ridePostingRequests driverId listener error:', error);
     });
 
     let unsubB = () => {};
@@ -235,6 +286,10 @@ export default function MyPostingsScreen() {
           if (!inactive.has(r.status.toLowerCase())) snapB.set(d.id, r);
         });
         flush();
+      }, (error) => {
+        snapB.clear();
+        flush();
+        console.warn('[MyPostings] ridePostingRequests driverEmail listener error:', error);
       });
     }
 
@@ -253,6 +308,9 @@ export default function MyPostingsScreen() {
         if (postingId) map[String(postingId)] = d.id;
       });
       setConfirmedIdByPostingId(map);
+    }, (error) => {
+      setConfirmedIdByPostingId({});
+      console.warn('[MyPostings] confirmedRides listener error:', error);
     });
   }, []);
 
@@ -342,6 +400,10 @@ export default function MyPostingsScreen() {
     const unsubA = onSnapshot(qA, (snap) => {
       snapA = snap.docs.map((d) => toPosting(d.id, d.data()));
       flush();
+    }, (error) => {
+      snapA = [];
+      flush();
+      console.warn('[MyPostings] ridePostings driverId listener error:', error);
     });
 
     let unsubB = () => {};
@@ -350,6 +412,10 @@ export default function MyPostingsScreen() {
       unsubB = onSnapshot(qB, (snap) => {
         snapB = snap.docs.map((d) => toPosting(d.id, d.data()));
         flush();
+      }, (error) => {
+        snapB = [];
+        flush();
+        console.warn('[MyPostings] ridePostings driverEmail listener error:', error);
       });
     }
 
@@ -396,7 +462,7 @@ export default function MyPostingsScreen() {
 
   return (
     <View style={s.root}>
-      <StatusBar style="dark" />
+      <StatusBar style={colors.statusBar === 'dark-content' ? 'dark' : 'light'} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
         <ScrollView
           style={s.scroll}
@@ -411,7 +477,7 @@ export default function MyPostingsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Go back"
             >
-              <Ionicons name="arrow-back" size={20} color={NAVY} />
+              <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
             </TouchableOpacity>
             <Text style={s.headerTitle}>My Postings</Text>
             <TouchableOpacity
@@ -421,7 +487,7 @@ export default function MyPostingsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Post a new ride"
             >
-              <Ionicons name="add" size={23} color="#FFF" />
+              <Ionicons name="add" size={23} color={colors.textInverse} />
             </TouchableOpacity>
           </View>
 
@@ -442,12 +508,12 @@ export default function MyPostingsScreen() {
 
           {loading ? (
             <View style={s.loadingWrap}>
-              <ActivityIndicator color={ORANGE} size="large" />
+              <ActivityIndicator color={colors.primary} size="large" />
             </View>
           ) : shown.length === 0 ? (
             <View style={s.emptyState}>
               <View style={s.emptyIcon}>
-                <Ionicons name="car-outline" size={28} color={ORANGE} />
+                <Ionicons name="car-outline" size={28} color={colors.primary} />
               </View>
               <Text style={s.emptyTitle}>
                 {tab === 'active' ? 'No active postings' : 'No past postings'}
@@ -463,7 +529,7 @@ export default function MyPostingsScreen() {
                   onPress={() => router.push('/(driver)/book' as any)}
                   activeOpacity={0.85}
                 >
-                  <Ionicons name="add" size={18} color="#FFF" />
+                  <Ionicons name="add" size={18} color={colors.textInverse} />
                   <Text style={s.postBtnText}>Post a Ride</Text>
                 </TouchableOpacity>
               )}
@@ -515,6 +581,82 @@ function PostingCard({
   onMessage: (req: BookingRequest) => void;
   confirmedId?: string;
 }) {
+  const { colors } = useAppTheme();
+  const ps = useMemo(() => StyleSheet.create({
+    card: {
+      backgroundColor: colors.bgCard, borderRadius: 18, padding: 16, marginBottom: 14,
+      borderWidth: 1, borderColor: colors.border,
+      shadowColor: colors.textPrimary, shadowOpacity: 0.05, shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 }, elevation: 2,
+    },
+    cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+    statusPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+    cardFlagBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.redDim, alignItems: 'center', justifyContent: 'center' },
+    statusText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.4 },
+    dateText: { fontSize: 12, color: colors.textSecondary, fontWeight: '500' },
+    route: { flexDirection: 'row', gap: 12, marginBottom: 14 },
+    routeDots: { alignItems: 'center', paddingTop: 3 },
+    dotFilled: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.textPrimary },
+    routeLine: { width: 1.5, height: 22, backgroundColor: colors.border, marginVertical: 2 },
+    dotOutline: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },
+    routeText: { fontSize: 14, lineHeight: 18, fontWeight: '600', color: colors.textPrimary },
+    meta: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
+    metaChip: {
+      flexDirection: 'row', alignItems: 'center', gap: 4,
+      backgroundColor: colors.bgSecondary, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 5,
+    },
+    metaLabel: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
+    vibes: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
+    vibeTag: { backgroundColor: colors.primaryDim, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4 },
+    vibeText: { fontSize: 12, color: colors.primary, fontWeight: '600' },
+    notes: { fontSize: 13, color: colors.textSecondary, marginBottom: 12, lineHeight: 18 },
+    actions: { flexDirection: 'row', gap: 8, marginTop: 4 },
+    actionsDivided: {
+      marginTop: 16,
+      paddingTop: 14,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+    },
+    editBtn: {
+      minHeight: 42, flex: 1, flexDirection: 'row', alignItems: 'center',
+      justifyContent: 'center', gap: 5, backgroundColor: colors.bgSecondary,
+      borderRadius: 21, borderWidth: 1, borderColor: colors.border,
+    },
+    editBtnText: { fontSize: 13, fontWeight: '700', color: colors.textPrimary },
+    cancelBtn: {
+      minHeight: 42, flex: 1, flexDirection: 'row', alignItems: 'center',
+      justifyContent: 'center', gap: 5, backgroundColor: colors.redDim,
+      borderRadius: 21, borderWidth: 1, borderColor: colors.redBorder,
+    },
+    cancelBtnText: { fontSize: 13, fontWeight: '700', color: colors.red },
+    requestRow: {
+      marginTop: 12, paddingTop: 12,
+      borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
+    },
+    requestRowTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+    requestDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.amber },
+    requestName: { fontSize: 14, fontWeight: '700', color: colors.textPrimary },
+    requestMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+    requestActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+    msgBtn: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+      gap: 5, minHeight: 40, paddingHorizontal: 14,
+      backgroundColor: colors.bgSecondary, borderRadius: 20,
+      borderWidth: 1, borderColor: colors.border,
+    },
+    msgBtnText: { fontSize: 13, fontWeight: '700', color: colors.textPrimary },
+    acceptBtn: {
+      flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: colors.textPrimary, borderRadius: 20,
+    },
+    acceptBtnText: { fontSize: 13, fontWeight: '700', color: colors.textInverse },
+    declineBtn: {
+      flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: colors.redDim, borderRadius: 20, borderWidth: 1, borderColor: colors.redBorder,
+    },
+    declineBtnText: { fontSize: 13, fontWeight: '700', color: colors.red },
+  }), [colors]);
+
   const hasRequests = incomingRequests.length > 0;
   const [flagVisible, setFlagVisible] = useState(false);
   const isExpired = isPostingOutdated(p);
@@ -526,87 +668,87 @@ function PostingCard({
     : hasRequests ? `${incomingRequests.length} Request${incomingRequests.length > 1 ? 's' : ''}`
     : 'Active';
 
-  const statusColor = p.status === 'cancelled' ? '#DC2626'
-    : p.status === 'completed' ? '#16A34A'
-    : isExpired ? MUTED
-    : hasRequests ? '#D97706'
-    : ORANGE;
+  const statusColor = p.status === 'cancelled' ? colors.red
+    : p.status === 'completed' ? colors.green
+    : isExpired ? colors.textSecondary
+    : hasRequests ? colors.amber
+    : colors.primary;
 
   return (
-    <View style={s.card}>
+    <View style={ps.card}>
       {/* Status row */}
-      <View style={s.cardTop}>
-        <View style={[s.statusPill, { backgroundColor: `${statusColor}15` }]}>
+      <View style={ps.cardTop}>
+        <View style={[ps.statusPill, { backgroundColor: `${statusColor}15` }]}>
           <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: statusColor, marginRight: 5 }} />
-          <Text style={[s.statusText, { color: statusColor }]}>{statusLabel.toUpperCase()}</Text>
+          <Text style={[ps.statusText, { color: statusColor }]}>{statusLabel.toUpperCase()}</Text>
         </View>
         <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
           {(p.date || p.time) ? (
-            <Text style={s.dateText}>{[p.date, p.time].filter(Boolean).join(' - ')}</Text>
+            <Text style={ps.dateText}>{[p.date, p.time].filter(Boolean).join(' - ')}</Text>
           ) : null}
           {confirmedId ? (
-            <TouchableOpacity style={s.cardFlagBtn} onPress={() => setFlagVisible(true)} activeOpacity={0.75}>
-              <Ionicons name="flag-outline" size={14} color="#B54A4A" />
+            <TouchableOpacity style={ps.cardFlagBtn} onPress={() => setFlagVisible(true)} activeOpacity={0.75}>
+              <Ionicons name="flag-outline" size={14} color={colors.red} />
             </TouchableOpacity>
           ) : null}
         </View>
       </View>
 
       {/* Route */}
-      <View style={s.route}>
-        <View style={s.routeDots}>
-          <View style={s.dotFilled} />
-          <View style={s.routeLine} />
-          <View style={s.dotOutline} />
+      <View style={ps.route}>
+        <View style={ps.routeDots}>
+          <View style={ps.dotFilled} />
+          <View style={ps.routeLine} />
+          <View style={ps.dotOutline} />
         </View>
         <View style={{ flex: 1, gap: 10 }}>
-          <Text style={s.routeText} numberOfLines={1}>{p.from}</Text>
-          <Text style={s.routeText} numberOfLines={1}>{p.to}</Text>
+          <Text style={ps.routeText} numberOfLines={1}>{p.from}</Text>
+          <Text style={ps.routeText} numberOfLines={1}>{p.to}</Text>
         </View>
       </View>
 
       {/* Meta row */}
-      <View style={s.meta}>
+      <View style={ps.meta}>
         {p.price != null && (
-          <View style={s.metaChip}>
-            <Ionicons name="cash-outline" size={13} color={ORANGE} />
-            <Text style={[s.metaLabel, { color: ORANGE, fontWeight: '700' }]}>${p.price.toFixed(2)}/seat</Text>
+          <View style={ps.metaChip}>
+            <Ionicons name="cash-outline" size={13} color={colors.primary} />
+            <Text style={[ps.metaLabel, { color: colors.primary, fontWeight: '700' }]}>${p.price.toFixed(2)}/seat</Text>
           </View>
         )}
-        <View style={s.metaChip}>
-          <Ionicons name="people-outline" size={13} color={MUTED} />
-          <Text style={s.metaLabel}>{p.seats} seat{p.seats !== 1 ? 's' : ''}</Text>
+        <View style={ps.metaChip}>
+          <Ionicons name="people-outline" size={13} color={colors.textSecondary} />
+          <Text style={ps.metaLabel}>{p.seats} seat{p.seats !== 1 ? 's' : ''}</Text>
         </View>
         {p.distance ? (
-          <View style={s.metaChip}>
-            <Ionicons name="navigate-outline" size={13} color={MUTED} />
-            <Text style={s.metaLabel}>{p.distance}</Text>
+          <View style={ps.metaChip}>
+            <Ionicons name="navigate-outline" size={13} color={colors.textSecondary} />
+            <Text style={ps.metaLabel}>{p.distance}</Text>
           </View>
         ) : null}
       </View>
 
       {p.vibes.length > 0 && (
-        <View style={s.vibes}>
+        <View style={ps.vibes}>
           {p.vibes.map((v) => (
-            <View key={v} style={s.vibeTag}>
-              <Text style={s.vibeText}>{v}</Text>
+            <View key={v} style={ps.vibeTag}>
+              <Text style={ps.vibeText}>{v}</Text>
             </View>
           ))}
         </View>
       )}
 
       {p.notes ? (
-        <Text style={s.notes} numberOfLines={2}>{p.notes}</Text>
+        <Text style={ps.notes} numberOfLines={2}>{p.notes}</Text>
       ) : null}
 
       {/* Incoming booking requests */}
       {incomingRequests.map((req) => {
         const isActing = actingOnRequest === req.id;
         return (
-          <View key={req.id} style={s.requestRow}>
+          <View key={req.id} style={ps.requestRow}>
             {/* Tappable rider info → opens rider profile */}
             <TouchableOpacity
-              style={s.requestRowTop}
+              style={ps.requestRowTop}
               activeOpacity={0.7}
               onPress={() => req.riderId && router.push({
                 pathname: '/(driver)/rider/[id]',
@@ -614,48 +756,48 @@ function PostingCard({
               } as any)}
               disabled={!req.riderId}
             >
-              <View style={s.requestDot} />
+              <View style={ps.requestDot} />
               <View style={{ flex: 1 }}>
-                <Text style={s.requestName}>{req.riderName}</Text>
+                <Text style={ps.requestName}>{req.riderName}</Text>
                 {req.passengers > 0 && (
-                  <Text style={s.requestMeta}>
+                  <Text style={ps.requestMeta}>
                     {req.passengers} passenger{req.passengers !== 1 ? 's' : ''}
                     {req.contributionAmount != null ? ` · $${req.contributionAmount.toFixed(2)}` : ''}
                   </Text>
                 )}
               </View>
               {req.riderId ? (
-                <Ionicons name="chevron-forward" size={15} color={MUTED} />
+                <Ionicons name="chevron-forward" size={15} color={colors.textSecondary} />
               ) : null}
             </TouchableOpacity>
 
-            <View style={s.requestActions}>
+            <View style={ps.requestActions}>
               <TouchableOpacity
-                style={s.msgBtn}
+                style={ps.msgBtn}
                 activeOpacity={0.75}
                 onPress={() => onMessage(req)}
                 disabled={!req.riderId}
               >
-                <Ionicons name="chatbubble-outline" size={14} color={NAVY} />
-                <Text style={s.msgBtnText}>Message</Text>
+                <Ionicons name="chatbubble-outline" size={14} color={colors.textPrimary} />
+                <Text style={ps.msgBtnText}>Message</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[s.acceptBtn, isActing && { opacity: 0.6 }]}
+                style={[ps.acceptBtn, isActing && { opacity: 0.6 }]}
                 onPress={() => onAccept(req)}
                 disabled={isActing}
                 activeOpacity={0.8}
               >
                 {isActing
-                  ? <ActivityIndicator size="small" color="#FFF" />
-                  : <Text style={s.acceptBtnText}>Accept</Text>}
+                  ? <ActivityIndicator size="small" color={colors.textInverse} />
+                  : <Text style={ps.acceptBtnText}>Accept</Text>}
               </TouchableOpacity>
               <TouchableOpacity
-                style={[s.declineBtn, isActing && { opacity: 0.6 }]}
+                style={[ps.declineBtn, isActing && { opacity: 0.6 }]}
                 onPress={() => onDecline(req)}
                 disabled={isActing}
                 activeOpacity={0.8}
               >
-                <Text style={s.declineBtnText}>Decline</Text>
+                <Text style={ps.declineBtnText}>Decline</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -664,22 +806,22 @@ function PostingCard({
 
       {/* Actions */}
       {!isPast && (
-        <View style={[s.actions, hasRequests && s.actionsDivided]}>
-          <TouchableOpacity style={s.editBtn} onPress={onEdit} activeOpacity={0.8}>
-            <Ionicons name="pencil-outline" size={14} color={NAVY} />
-            <Text style={s.editBtnText}>Edit</Text>
+        <View style={[ps.actions, hasRequests && ps.actionsDivided]}>
+          <TouchableOpacity style={ps.editBtn} onPress={onEdit} activeOpacity={0.8}>
+            <Ionicons name="pencil-outline" size={14} color={colors.textPrimary} />
+            <Text style={ps.editBtnText}>Edit</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[s.cancelBtn, cancelling && { opacity: 0.6 }]}
+            style={[ps.cancelBtn, cancelling && { opacity: 0.6 }]}
             onPress={onCancel}
             disabled={cancelling}
             activeOpacity={0.8}
           >
             {cancelling
-              ? <ActivityIndicator size="small" color="#DC2626" />
+              ? <ActivityIndicator size="small" color={colors.red} />
               : <>
-                  <Ionicons name="close-outline" size={14} color="#DC2626" />
-                  <Text style={s.cancelBtnText}>Cancel Ride</Text>
+                  <Ionicons name="close-outline" size={14} color={colors.red} />
+                  <Text style={ps.cancelBtnText}>Cancel Ride</Text>
                 </>}
           </TouchableOpacity>
         </View>
@@ -695,127 +837,3 @@ function PostingCard({
     </View>
   );
 }
-
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: BG },
-  safe: { flex: 1 },
-  scroll: { flex: 1 },
-  content: { paddingHorizontal: 20, paddingBottom: 40 },
-  header: {
-    minHeight: 64, flexDirection: 'row', alignItems: 'center',
-    paddingTop: 8, paddingBottom: 10,
-  },
-  backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#FFF', borderWidth: 1, borderColor: BORDER,
-  },
-  headerTitle: {
-    flex: 1, marginLeft: 12, fontSize: 24, lineHeight: 30,
-    fontWeight: '700', color: NAVY,
-  },
-  newBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: ORANGE,
-  },
-  tabs: {
-    height: 46, flexDirection: 'row', marginBottom: 20,
-    backgroundColor: '#EFEBE4', borderRadius: 14, padding: 3,
-  },
-  tab: { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 11 },
-  tabActive: {
-    backgroundColor: '#FFF', shadowColor: '#000', shadowOpacity: 0.06,
-    shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2,
-  },
-  tabText: { fontSize: 13, fontWeight: '600', color: MUTED },
-  tabTextActive: { color: NAVY, fontWeight: '700' },
-  loadingWrap: { minHeight: 300, alignItems: 'center', justifyContent: 'center' },
-  emptyState: {
-    minHeight: 280, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#FFF', borderWidth: 1, borderStyle: 'dashed', borderColor: BORDER,
-    borderRadius: 18, paddingHorizontal: 28, paddingVertical: 32,
-  },
-  emptyIcon: {
-    width: 56, height: 56, borderRadius: 28,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(222,93,32,0.1)',
-  },
-  emptyTitle: { marginTop: 16, fontSize: 18, fontWeight: '700', color: NAVY },
-  emptyText: { marginTop: 7, fontSize: 13, lineHeight: 19, color: MUTED, textAlign: 'center' },
-  postBtn: {
-    minHeight: 44, marginTop: 20, flexDirection: 'row', alignItems: 'center', gap: 7,
-    backgroundColor: ORANGE, borderRadius: 22, paddingHorizontal: 24, justifyContent: 'center',
-  },
-  postBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
-  card: {
-    backgroundColor: '#FFF', borderRadius: 18, padding: 16, marginBottom: 14,
-    borderWidth: 1, borderColor: BORDER,
-    shadowColor: NAVY, shadowOpacity: 0.05, shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 }, elevation: 2,
-  },
-  cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
-  statusPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
-  cardFlagBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#FDECEC', alignItems: 'center', justifyContent: 'center' },
-  statusText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.4 },
-  dateText: { fontSize: 12, color: MUTED, fontWeight: '500' },
-  route: { flexDirection: 'row', gap: 12, marginBottom: 14 },
-  routeDots: { alignItems: 'center', paddingTop: 3 },
-  dotFilled: { width: 8, height: 8, borderRadius: 4, backgroundColor: NAVY },
-  routeLine: { width: 1.5, height: 22, backgroundColor: BORDER, marginVertical: 2 },
-  dotOutline: { width: 8, height: 8, borderRadius: 4, backgroundColor: ORANGE },
-  routeText: { fontSize: 14, lineHeight: 18, fontWeight: '600', color: NAVY },
-  meta: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
-  metaChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: '#F3EFE8', borderRadius: 10, paddingHorizontal: 9, paddingVertical: 5,
-  },
-  metaLabel: { fontSize: 12, color: MUTED, fontWeight: '600' },
-  vibes: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
-  vibeTag: { backgroundColor: 'rgba(222,93,32,0.08)', borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4 },
-  vibeText: { fontSize: 12, color: ORANGE, fontWeight: '600' },
-  notes: { fontSize: 13, color: MUTED, marginBottom: 12, lineHeight: 18 },
-  actions: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  actionsDivided: {
-    marginTop: 16,
-    paddingTop: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: BORDER,
-  },
-  editBtn: {
-    minHeight: 42, flex: 1, flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'center', gap: 5, backgroundColor: '#F3EFE8',
-    borderRadius: 21, borderWidth: 1, borderColor: BORDER,
-  },
-  editBtnText: { fontSize: 13, fontWeight: '700', color: NAVY },
-  cancelBtn: {
-    minHeight: 42, flex: 1, flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'center', gap: 5, backgroundColor: '#FEF2F2',
-    borderRadius: 21, borderWidth: 1, borderColor: '#FECACA',
-  },
-  cancelBtnText: { fontSize: 13, fontWeight: '700', color: '#DC2626' },
-  requestRow: {
-    marginTop: 12, paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER,
-  },
-  requestRowTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
-  requestDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D97706' },
-  requestName: { fontSize: 14, fontWeight: '700', color: NAVY },
-  requestMeta: { fontSize: 12, color: MUTED, marginTop: 2 },
-  requestActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  msgBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 5, minHeight: 40, paddingHorizontal: 14,
-    backgroundColor: '#F3EFE8', borderRadius: 20,
-    borderWidth: 1, borderColor: BORDER,
-  },
-  msgBtnText: { fontSize: 13, fontWeight: '700', color: NAVY },
-  acceptBtn: {
-    flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: NAVY, borderRadius: 20,
-  },
-  acceptBtnText: { fontSize: 13, fontWeight: '700', color: '#FFF' },
-  declineBtn: {
-    flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#FEF2F2', borderRadius: 20, borderWidth: 1, borderColor: '#FECACA',
-  },
-  declineBtnText: { fontSize: 13, fontWeight: '700', color: '#DC2626' },
-});

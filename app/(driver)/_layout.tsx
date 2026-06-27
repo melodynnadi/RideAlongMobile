@@ -1,6 +1,12 @@
-﻿import { Tabs } from 'expo-router';
+import { Tabs } from 'expo-router';
+
+import { usePendingRatingGate } from '@/src/hooks/usePendingRatingGate';
+import { useAuthStore } from '@/stores/authStore';
 
 export default function DriverTabLayout() {
+  const { isAuthenticated, isEmailVerified } = useAuthStore();
+  usePendingRatingGate('driver', isAuthenticated && isEmailVerified);
+
   return (
     <Tabs
       screenOptions={{

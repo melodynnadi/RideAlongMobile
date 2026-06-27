@@ -27,6 +27,15 @@ import {
   type RideAlongRole,
 } from '@/src/utils/roleIdentity';
 
+function handleSnapshotError(scope: string, error: unknown) {
+  const code = (error as { code?: string } | null)?.code;
+  if (code === 'permission-denied') {
+    console.warn(`[${scope}] Firestore permission denied; listener stopped.`);
+    return;
+  }
+  console.warn(`[${scope}] Firestore listener error:`, error);
+}
+
 export type RiderProfile = {
   id: string;
   firstName: string;
@@ -365,14 +374,30 @@ export function subscribeRiderProfile(uid: string, onData: (profile: RiderProfil
       about: textValue(data.about, data.bio, data.description, sharedData?.about, sharedData?.bio, sharedData?.description) || undefined,
     });
   };
-  const riderUnsubscribe = onSnapshot(doc(firestore, 'riders', uid), (snapshot) => {
-    riderData = snapshot.exists() ? snapshot.data() : null;
-    emit();
-  });
-  const sharedUnsubscribe = onSnapshot(doc(firestore, 'users', uid), (snapshot) => {
-    sharedData = snapshot.exists() ? snapshot.data() : null;
-    emit();
-  });
+  const riderUnsubscribe = onSnapshot(
+    doc(firestore, 'riders', uid),
+    (snapshot) => {
+      riderData = snapshot.exists() ? snapshot.data() : null;
+      emit();
+    },
+    (error) => {
+      riderData = null;
+      emit();
+      handleSnapshotError('subscribeRiderProfile:riders', error);
+    },
+  );
+  const sharedUnsubscribe = onSnapshot(
+    doc(firestore, 'users', uid),
+    (snapshot) => {
+      sharedData = snapshot.exists() ? snapshot.data() : null;
+      emit();
+    },
+    (error) => {
+      sharedData = null;
+      emit();
+      handleSnapshotError('subscribeRiderProfile:users', error);
+    },
+  );
   return () => {
     riderUnsubscribe();
     sharedUnsubscribe();
@@ -381,19 +406,26 @@ export function subscribeRiderProfile(uid: string, onData: (profile: RiderProfil
 
 export function subscribeRiderConfirmedRides(uid: string, onData: (rides: MobileRidePosting[]) => void): Unsubscribe {
   const confirmedQuery = query(collection(firestore, 'confirmedRides'), where('riderId', '==', uid));
-  return onSnapshot(confirmedQuery, (snapshot) => {
-    const now = Date.now();
-    const rides = snapshot.docs
-      .map((snapshot) => rideFromDoc(snapshot as QueryDocumentSnapshot<DocumentData>))
-      .filter((ride) => !isInactiveRide(ride))
-      .filter((ride) => {
-        const s = String(ride.status || '').toUpperCase();
-        if (s === 'IN_PROGRESS' || s === 'DRIVER_COMPLETED' || s === 'RIDER_COMPLETED' || s === 'FLAGGED') return true;
-        return !ride.date || ride.date.getTime() >= now;
-      });
-    rides.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
-    onData(rides);
-  });
+  return onSnapshot(
+    confirmedQuery,
+    (snapshot) => {
+      const now = Date.now();
+      const rides = snapshot.docs
+        .map((snapshot) => rideFromDoc(snapshot as QueryDocumentSnapshot<DocumentData>))
+        .filter((ride) => !isInactiveRide(ride))
+        .filter((ride) => {
+          const s = String(ride.status || '').toUpperCase();
+          if (s === 'IN_PROGRESS' || s === 'DRIVER_COMPLETED' || s === 'RIDER_COMPLETED' || s === 'FLAGGED') return true;
+          return !ride.date || ride.date.getTime() >= now;
+        });
+      rides.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
+      onData(rides);
+    },
+    (error) => {
+      onData([]);
+      handleSnapshotError('subscribeRiderConfirmedRides', error);
+    },
+  );
 }
 
 export function subscribeRiderRequests(uid: string, onData: (requests: MobileRideRequest[]) => void): Unsubscribe {
@@ -429,68 +461,98 @@ export function subscribeRiderRequests(uid: string, onData: (requests: MobileRid
     onData(merged);
   };
 
-  const unsubA = onSnapshot(byRiderId, (snap) => { snapshotA = snap.docs.map(toCard); merge(); });
-  const unsubB = onSnapshot(byUserId,  (snap) => { snapshotB = snap.docs.map(toCard); merge(); });
+  const unsubA = onSnapshot(
+    byRiderId,
+    (snap) => { snapshotA = snap.docs.map(toCard); merge(); },
+    (error) => {
+      snapshotA = [];
+      merge();
+      handleSnapshotError('subscribeRiderRequests:riderId', error);
+    },
+  );
+  const unsubB = onSnapshot(
+    byUserId,
+    (snap) => { snapshotB = snap.docs.map(toCard); merge(); },
+    (error) => {
+      snapshotB = [];
+      merge();
+      handleSnapshotError('subscribeRiderRequests:userId', error);
+    },
+  );
 
   return () => { unsubA(); unsubB(); };
 }
 
 export function subscribeRiderConversations(uid: string, onData: (items: MobileConversation[]) => void): Unsubscribe {
   const chatsQuery = query(collection(firestore, 'chats'), where('participants', 'array-contains', uid));
-  return onSnapshot(chatsQuery, async (snapshot) => {
-    const riderChats = snapshot.docs.filter((chat) => chatBelongsToRole(chat.data(), uid, 'rider'));
-    const items = await Promise.all(riderChats.map(async (chat) => {
-      const data = chat.data();
-      const participants = Array.isArray(data.participants) ? data.participants.map(String) : [];
-      const otherUserId = textValue(data.driverId, data.driverUID, data.driverUid)
-        || participants.find((id) => id !== uid);
-      let profile: DocumentData | undefined;
-      if (otherUserId) {
-        const driver = await getDoc(doc(firestore, 'drivers', otherUserId)).catch(() => null);
-        profile = driver?.exists() ? driver.data() : undefined;
-      }
-      const name = textValue(
-        profile?.displayName,
-        profile?.name,
-        `${textValue(profile?.firstName)} ${textValue(profile?.lastName)}`,
-        data.otherUserName,
-      ) || 'RideAlong member';
-      const initials = name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
-      const photoURL = profile?.photoURL || profile?.avatarUrl || null;
-      const unreadCounts = data.unreadCounts || {};
-      const roleField = roleUnreadField('rider', uid);
-      const legacyField = legacyUnreadField(uid);
-      return {
-        id: chat.id,
-        otherUserId,
-        name,
-        initials,
-        photoURL,
-        preview: textValue(data.lastMessage?.text, data.lastMessage, data.lastMessageText) || 'Start the conversation',
-        updatedAt: toDate(data.lastMessageTimestamp || data.lastMessageAt || data.updatedAt || data.createdAt),
-        unread: Number(data[roleField] ?? data[legacyField] ?? unreadCounts[roleKey('rider', uid)] ?? unreadCounts[uid] ?? data.unreadCount ?? 0),
-        rideId: textValue(data.rideId, data.confirmedRideId) || undefined,
-      } satisfies MobileConversation;
-    }));
-    items.sort((a, b) => (b.updatedAt?.getTime() ?? 0) - (a.updatedAt?.getTime() ?? 0));
-    onData(items);
-  });
+  return onSnapshot(
+    chatsQuery,
+    async (snapshot) => {
+      const riderChats = snapshot.docs.filter((chat) => chatBelongsToRole(chat.data(), uid, 'rider'));
+      const items = await Promise.all(riderChats.map(async (chat) => {
+        const data = chat.data();
+        const participants = Array.isArray(data.participants) ? data.participants.map(String) : [];
+        const otherUserId = textValue(data.driverId, data.driverUID, data.driverUid)
+          || participants.find((id) => id !== uid);
+        let profile: DocumentData | undefined;
+        if (otherUserId) {
+          const driver = await getDoc(doc(firestore, 'drivers', otherUserId)).catch(() => null);
+          profile = driver?.exists() ? driver.data() : undefined;
+        }
+        const name = textValue(
+          profile?.displayName,
+          profile?.name,
+          `${textValue(profile?.firstName)} ${textValue(profile?.lastName)}`,
+          data.otherUserName,
+        ) || 'RideAlong member';
+        const initials = name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+        const photoURL = profile?.photoURL || profile?.avatarUrl || null;
+        const unreadCounts = data.unreadCounts || {};
+        const roleField = roleUnreadField('rider', uid);
+        const legacyField = legacyUnreadField(uid);
+        return {
+          id: chat.id,
+          otherUserId,
+          name,
+          initials,
+          photoURL,
+          preview: textValue(data.lastMessage?.text, data.lastMessage, data.lastMessageText) || 'Start the conversation',
+          updatedAt: toDate(data.lastMessageTimestamp || data.lastMessageAt || data.updatedAt || data.createdAt),
+          unread: Number(data[roleField] ?? data[legacyField] ?? unreadCounts[roleKey('rider', uid)] ?? unreadCounts[uid] ?? data.unreadCount ?? 0),
+          rideId: textValue(data.rideId, data.confirmedRideId) || undefined,
+        } satisfies MobileConversation;
+      }));
+      items.sort((a, b) => (b.updatedAt?.getTime() ?? 0) - (a.updatedAt?.getTime() ?? 0));
+      onData(items);
+    },
+    (error) => {
+      onData([]);
+      handleSnapshotError('subscribeRiderConversations', error);
+    },
+  );
 }
 
 export function subscribeChatMessages(chatId: string, onData: (messages: MobileMessage[]) => void): Unsubscribe {
   const messagesQuery = query(collection(firestore, 'chats', chatId, 'messages'), orderBy('timestamp', 'asc'));
-  return onSnapshot(messagesQuery, (snapshot) => {
-    onData(snapshot.docs.map((item) => {
-      const data = item.data();
-      return {
-        id: item.id,
-        senderId: textValue(data.senderId, data.userId, data.authorId),
-        senderRole: data.senderRole === 'driver' ? 'driver' : data.senderRole === 'rider' ? 'rider' : undefined,
-        text: textValue(data.text, data.message, data.body),
-        createdAt: toDate(data.timestamp || data.createdAt || data.sentAt),
-      };
-    }));
-  });
+  return onSnapshot(
+    messagesQuery,
+    (snapshot) => {
+      onData(snapshot.docs.map((item) => {
+        const data = item.data();
+        return {
+          id: item.id,
+          senderId: textValue(data.senderId, data.userId, data.authorId),
+          senderRole: data.senderRole === 'driver' ? 'driver' : data.senderRole === 'rider' ? 'rider' : undefined,
+          text: textValue(data.text, data.message, data.body),
+          createdAt: toDate(data.timestamp || data.createdAt || data.sentAt),
+        };
+      }));
+    },
+    (error) => {
+      onData([]);
+      handleSnapshotError('subscribeChatMessages', error);
+    },
+  );
 }
 
 export async function sendChatMessage(chatId: string, senderId: string, text: string, senderRole: RideAlongRole = 'rider'): Promise<void> {
@@ -557,21 +619,29 @@ export function subscribeRiderNotifications(uid: string, onData: (items: MobileN
     const merged = Array.from(byId.values()).sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
     onData(merged);
   };
-  const unsubs = queries.map((notificationsQuery, index) => onSnapshot(notificationsQuery, async (snapshot) => {
-    const mapped = await Promise.all(snapshot.docs.map(async (item) => {
-      const data = item.data();
-      if (!(await notificationTargetsRider(data, uid))) return null;
-      return {
-        id: item.id,
-        title: textValue(data.title, data.type) || 'RideAlong update',
-        body: textValue(data.body, data.message, data.text, data.description),
-        createdAt: toDate(data.createdAt || data.timestamp || data.sentAt),
-        read: isReadForRole(data, uid, 'rider'),
-        type: textValue(data.type, data.category) || 'notification',
-      } satisfies MobileNotification;
-    }));
-    buckets.set(index, mapped.filter((item): item is MobileNotification => Boolean(item)));
-    flush();
-  }));
+  const unsubs = queries.map((notificationsQuery, index) => onSnapshot(
+    notificationsQuery,
+    async (snapshot) => {
+      const mapped = await Promise.all(snapshot.docs.map(async (item) => {
+        const data = item.data();
+        if (!(await notificationTargetsRider(data, uid))) return null;
+        return {
+          id: item.id,
+          title: textValue(data.title, data.type) || 'RideAlong update',
+          body: textValue(data.body, data.message, data.text, data.description),
+          createdAt: toDate(data.createdAt || data.timestamp || data.sentAt),
+          read: isReadForRole(data, uid, 'rider'),
+          type: textValue(data.type, data.category) || 'notification',
+        } satisfies MobileNotification;
+      }));
+      buckets.set(index, mapped.filter((item): item is MobileNotification => Boolean(item)));
+      flush();
+    },
+    (error) => {
+      buckets.set(index, []);
+      flush();
+      handleSnapshotError(`subscribeRiderNotifications:${index}`, error);
+    },
+  ));
   return () => unsubs.forEach((unsubscribe) => unsubscribe());
 }

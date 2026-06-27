@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -17,12 +17,7 @@ import { doc, getDoc, addDoc, deleteDoc, collection, serverTimestamp, query, whe
 import { firestore, firebaseAuth } from '@/constants/services';
 import { Ionicons } from '@expo/vector-icons';
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
-
-const NAVY   = '#15233A';
-const ORANGE = '#DE5D20';
-const BG     = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED  = '#8B94A6';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 const PREF_ICONS: Record<string, string> = {
   musicPreference:       'musical-notes-outline',
@@ -69,6 +64,64 @@ function fmtTime(val: any): string {
 }
 
 export default function RequestDeepLinkScreen() {
+  const { colors } = useAppTheme();
+  const s = useMemo(() => StyleSheet.create({
+    root:   { flex: 1, backgroundColor: colors.bg },
+    safe:   { flex: 1 },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 0,
+      paddingTop: 8,
+      paddingBottom: 4,
+      minHeight: 64,
+    },
+    backBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
+    headerTitle: { color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+    shareBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
+
+    body:      { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 24, gap: 12 },
+    card:      { backgroundColor: colors.bgCard, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: colors.border, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
+    cardTitle: { fontSize: 11, fontWeight: '800', color: colors.textSecondary, letterSpacing: 1.2, marginBottom: 12, textTransform: 'uppercase' },
+
+    personRow:        { flexDirection: 'row', alignItems: 'center', gap: 14 },
+    avatarImg:        { width: 56, height: 56, borderRadius: 28 },
+    avatarPlaceholder:{ width: 56, height: 56, borderRadius: 28, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center' },
+    personName:       { fontSize: 17, fontWeight: '800', color: colors.textPrimary, marginBottom: 4 },
+    metaRow:          { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    metaText:         { fontSize: 13, color: colors.textSecondary, fontWeight: '500' },
+
+    routeRow:  { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+    dot:       { width: 11, height: 11, borderRadius: 6, backgroundColor: colors.textPrimary, marginTop: 4, flexShrink: 0 },
+    routeDash: { width: 2, height: 16, marginLeft: 4, marginVertical: 4, backgroundColor: colors.border },
+    routeText: { flex: 1, fontSize: 14, fontWeight: '600', lineHeight: 20, color: colors.textPrimary },
+
+    infoRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+    infoLabel: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
+    infoValue: { fontSize: 14, color: colors.textSecondary, fontWeight: '500', maxWidth: '55%', textAlign: 'right' },
+
+    prefRow:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 12 },
+    prefBorder:{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+    prefIcon:  { width: 30, height: 30, borderRadius: 9, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
+    prefLabel: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.textPrimary },
+    prefValue: { fontSize: 13, color: colors.textSecondary, fontWeight: '500' },
+
+    notesText: { fontSize: 14, lineHeight: 21, color: colors.textPrimary },
+
+    footer:     { paddingHorizontal: 16, paddingBottom: 28, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.bgCard },
+    btn:        { borderRadius: 27, paddingVertical: 16, alignItems: 'center' },
+    btnDisabled:{ backgroundColor: colors.textSecondary },
+    btnText:    { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
+
+    errorTitle:    { fontSize: 20, fontWeight: '700', marginBottom: 8, color: colors.textPrimary },
+    errorSub:      { fontSize: 14, textAlign: 'center', marginBottom: 24, lineHeight: 20, color: colors.textSecondary },
+    browseBtn:     { borderRadius: 27, paddingVertical: 14, paddingHorizontal: 28, backgroundColor: colors.primary },
+    browseBtnText: { color: colors.textInverse, fontWeight: '700', fontSize: 15 },
+  }), [colors]);
+
   const { id } = useLocalSearchParams<{ id: string }>();
   const { goBack } = useReturnNavigation('/(driver)/requests');
   const requestId = Array.isArray(id) ? id[0] : id;
@@ -226,10 +279,10 @@ export default function RequestDeepLinkScreen() {
   if (loading) {
     return (
       <View style={s.root}>
-        <StatusBar barStyle="dark-content" />
+        <StatusBar barStyle={colors.statusBar} />
         <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
           <View style={s.center}>
-            <ActivityIndicator color={ORANGE} size="large" />
+            <ActivityIndicator color={colors.primary} size="large" />
           </View>
         </SafeAreaView>
       </View>
@@ -239,10 +292,10 @@ export default function RequestDeepLinkScreen() {
   if (notFound || !request) {
     return (
       <View style={s.root}>
-        <StatusBar barStyle="dark-content" />
+        <StatusBar barStyle={colors.statusBar} />
         <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
           <TouchableOpacity style={s.backBtn} onPress={goBack}>
-            <Ionicons name="chevron-back" size={22} color={NAVY} />
+            <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
           </TouchableOpacity>
           <View style={s.center}>
             <Text style={s.errorTitle}>Request not found</Text>
@@ -282,18 +335,18 @@ export default function RequestDeepLinkScreen() {
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={colors.statusBar} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
         <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
 
           {/* ── Header ── */}
           <View style={s.header}>
             <TouchableOpacity onPress={goBack} style={s.backBtn}>
-              <Ionicons name="chevron-back" size={22} color={NAVY} />
+              <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
             </TouchableOpacity>
             <Text style={s.headerTitle}>Ride Request</Text>
             <TouchableOpacity onPress={shareRequest} style={s.shareBtn}>
-              <Ionicons name="share-outline" size={20} color={ORANGE} />
+              <Ionicons name="share-outline" size={20} color={colors.primary} />
             </TouchableOpacity>
           </View>
 
@@ -308,7 +361,7 @@ export default function RequestDeepLinkScreen() {
                 <Image source={{ uri: riderAvatarUrl }} style={s.avatarImg} />
               ) : (
                 <View style={s.avatarPlaceholder}>
-                  <Ionicons name="person-outline" size={28} color={MUTED} />
+                  <Ionicons name="person-outline" size={28} color={colors.textSecondary} />
                 </View>
               )}
               <View style={{ flex: 1 }}>
@@ -316,7 +369,7 @@ export default function RequestDeepLinkScreen() {
                 <View style={s.metaRow}>
                   {typeof riderRating === 'number' ? (
                     <>
-                      <Ionicons name="star" size={13} color="#F59E0B" />
+                      <Ionicons name="star" size={13} color={colors.amber} />
                       <Text style={s.metaText}>{riderRating.toFixed(1)}</Text>
                     </>
                   ) : (
@@ -324,7 +377,7 @@ export default function RequestDeepLinkScreen() {
                   )}
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={14} color={MUTED} />
+              <Ionicons name="chevron-forward" size={14} color={colors.textSecondary} />
             </View>
           </TouchableOpacity>
 
@@ -337,7 +390,7 @@ export default function RequestDeepLinkScreen() {
             </View>
             <View style={s.routeDash} />
             <View style={s.routeRow}>
-              <Ionicons name="location" size={14} color="#EF4444" />
+              <Ionicons name="location" size={14} color={colors.red} />
               <Text style={s.routeText} numberOfLines={2}>{dropoff || 'Dropoff'}</Text>
             </View>
           </View>
@@ -360,7 +413,7 @@ export default function RequestDeepLinkScreen() {
             {price != null && (
               <View style={s.infoRow}>
                 <Text style={s.infoLabel}>Budget</Text>
-                <Text style={[s.infoValue, { color: ORANGE, fontWeight: '700' }]}>${typeof price === 'number' ? price.toFixed(2) : price}</Text>
+                <Text style={[s.infoValue, { color: colors.primary, fontWeight: '700' }]}>${typeof price === 'number' ? price.toFixed(2) : price}</Text>
               </View>
             )}
             {Boolean(duration) && (
@@ -388,7 +441,7 @@ export default function RequestDeepLinkScreen() {
                 return (
                   <View key={key} style={[s.prefRow, idx < prefEntries.length - 1 && s.prefBorder]}>
                     <View style={s.prefIcon}>
-                      <Ionicons name={icon as any} size={14} color={ORANGE} />
+                      <Ionicons name={icon as any} size={14} color={colors.primary} />
                     </View>
                     <Text style={s.prefLabel}>{label}</Text>
                     <Text style={s.prefValue}>{valStr}</Text>
@@ -401,7 +454,7 @@ export default function RequestDeepLinkScreen() {
           {/* ── Rider Notes ── */}
           <View style={s.card}>
             <Text style={s.cardTitle}>Rider Notes</Text>
-            <Text style={[s.notesText, !notes && { color: MUTED, fontStyle: 'italic' }]}>
+            <Text style={[s.notesText, !notes && { color: colors.textSecondary, fontStyle: 'italic' }]}>
               {notes || 'No notes provided'}
             </Text>
           </View>
@@ -427,25 +480,25 @@ export default function RequestDeepLinkScreen() {
 
             if (isConfirmed) {
               return (
-                <TouchableOpacity style={[s.btn, { backgroundColor: '#F3EFE8', opacity: riderId ? 1 : 0.5 }]} onPress={openRiderChat} disabled={!riderId} activeOpacity={0.8}>
-                  <Text style={[s.btnText, { color: NAVY }]}>Message Rider</Text>
+                <TouchableOpacity style={[s.btn, { backgroundColor: colors.bgSecondary, opacity: riderId ? 1 : 0.5 }]} onPress={openRiderChat} disabled={!riderId} activeOpacity={0.8}>
+                  <Text style={[s.btnText, { color: colors.textPrimary }]}>Message Rider</Text>
                 </TouchableOpacity>
               );
             }
             if (alreadyOffered) {
               return (
                 <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <TouchableOpacity style={[s.btn, { backgroundColor: '#F3EFE8', flex: 1 }]} onPress={openRiderChat} disabled={!riderId} activeOpacity={0.8}>
-                    <Text style={[s.btnText, { color: NAVY }]}>Message Rider</Text>
+                  <TouchableOpacity style={[s.btn, { backgroundColor: colors.bgSecondary, flex: 1 }]} onPress={openRiderChat} disabled={!riderId} activeOpacity={0.8}>
+                    <Text style={[s.btnText, { color: colors.textPrimary }]}>Message Rider</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[s.btn, { backgroundColor: '#1A2942', flex: 1, opacity: submitting ? 0.6 : 1 }]} onPress={withdrawOffer} disabled={submitting} activeOpacity={0.8}>
+                  <TouchableOpacity style={[s.btn, { backgroundColor: colors.textPrimary, flex: 1, opacity: submitting ? 0.6 : 1 }]} onPress={withdrawOffer} disabled={submitting} activeOpacity={0.8}>
                     <Text style={s.btnText}>{submitting ? 'Withdrawing…' : 'Withdraw Offer'}</Text>
                   </TouchableOpacity>
                 </View>
               );
             }
             return (
-              <TouchableOpacity style={[s.btn, { backgroundColor: ORANGE, opacity: submitting ? 0.7 : 1 }]} onPress={sendOffer} disabled={submitting} activeOpacity={0.85}>
+              <TouchableOpacity style={[s.btn, { backgroundColor: colors.primary, opacity: submitting ? 0.7 : 1 }]} onPress={sendOffer} disabled={submitting} activeOpacity={0.85}>
                 <Text style={s.btnText}>{submitting ? 'Sending…' : 'Send an Offer'}</Text>
               </TouchableOpacity>
             );
@@ -456,59 +509,3 @@ export default function RequestDeepLinkScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: BG },
-  safe:   { flex: 1 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 0,
-    paddingTop: 8,
-    paddingBottom: 4,
-    minHeight: 64,
-  },
-  backBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: BORDER },
-  headerTitle: { color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
-  shareBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FEF0E8', alignItems: 'center', justifyContent: 'center' },
-
-  body:      { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 24, gap: 12 },
-  card:      { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 16, borderWidth: 1, borderColor: BORDER, shadowColor: NAVY, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
-  cardTitle: { fontSize: 11, fontWeight: '800', color: MUTED, letterSpacing: 1.2, marginBottom: 12, textTransform: 'uppercase' },
-
-  personRow:        { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  avatarImg:        { width: 56, height: 56, borderRadius: 28 },
-  avatarPlaceholder:{ width: 56, height: 56, borderRadius: 28, backgroundColor: '#F3EFE8', alignItems: 'center', justifyContent: 'center' },
-  personName:       { fontSize: 17, fontWeight: '800', color: NAVY, marginBottom: 4 },
-  metaRow:          { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  metaText:         { fontSize: 13, color: MUTED, fontWeight: '500' },
-
-  routeRow:  { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  dot:       { width: 11, height: 11, borderRadius: 6, backgroundColor: NAVY, marginTop: 4, flexShrink: 0 },
-  routeDash: { width: 2, height: 16, marginLeft: 4, marginVertical: 4, backgroundColor: BORDER },
-  routeText: { flex: 1, fontSize: 14, fontWeight: '600', lineHeight: 20, color: NAVY },
-
-  infoRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER },
-  infoLabel: { fontSize: 14, fontWeight: '600', color: NAVY },
-  infoValue: { fontSize: 14, color: MUTED, fontWeight: '500', maxWidth: '55%', textAlign: 'right' },
-
-  prefRow:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 12 },
-  prefBorder:{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER },
-  prefIcon:  { width: 30, height: 30, borderRadius: 9, backgroundColor: '#FEF0E8', alignItems: 'center', justifyContent: 'center' },
-  prefLabel: { flex: 1, fontSize: 14, fontWeight: '600', color: NAVY },
-  prefValue: { fontSize: 13, color: MUTED, fontWeight: '500' },
-
-  notesText: { fontSize: 14, lineHeight: 21, color: NAVY },
-
-  footer:     { paddingHorizontal: 16, paddingBottom: 28, paddingTop: 12, borderTopWidth: 1, borderTopColor: BORDER, backgroundColor: '#FFFFFF' },
-  btn:        { borderRadius: 27, paddingVertical: 16, alignItems: 'center' },
-  btnDisabled:{ backgroundColor: MUTED },
-  btnText:    { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
-
-  errorTitle:    { fontSize: 20, fontWeight: '700', marginBottom: 8, color: NAVY },
-  errorSub:      { fontSize: 14, textAlign: 'center', marginBottom: 24, lineHeight: 20, color: MUTED },
-  browseBtn:     { borderRadius: 27, paddingVertical: 14, paddingHorizontal: 28, backgroundColor: ORANGE },
-  browseBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
-});

@@ -1,10 +1,11 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { View, Text, Modal, TouchableOpacity, TextInput, StyleSheet, ScrollView, Platform, Keyboard } from 'react-native';
 import { X, Calendar, MapPin } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TimeBucket, type RideFilterOptions, getDefaultFilters } from '@/utils/rideFilters';
 import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 type Suggestion = { description: string; place_id: string; mainText: string; secondaryText: string };
 
@@ -23,7 +24,292 @@ export function RideFiltersModal({
   initialFilters,
   showSeatsFilter = false
 }: RideFiltersModalProps) {
+  const { colors } = useAppTheme();
   const [filters, setFilters] = useState<RideFilterOptions>(initialFilters);
+
+  const styles = useMemo(() => StyleSheet.create({
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(15, 23, 42, 0.38)',
+      justifyContent: 'flex-end',
+    },
+    modalContent: {
+      backgroundColor: colors.bg,
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+      maxHeight: '92%',
+      overflow: 'hidden',
+      ...Platform.select({
+        ios: {
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.14,
+          shadowRadius: 18,
+        },
+        android: {
+          elevation: 8,
+        },
+      }),
+    },
+    dragHandle: {
+      width: 42,
+      height: 5,
+      borderRadius: 3,
+      backgroundColor: colors.border,
+      alignSelf: 'center',
+      marginTop: 10,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingHorizontal: 20,
+      paddingTop: 14,
+      paddingBottom: 18,
+    },
+    headerIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+    headerCopy: {
+      flex: 1,
+    },
+    headerTitle: {
+      fontSize: 25,
+      lineHeight: 31,
+      fontWeight: '700',
+      letterSpacing: -0.3,
+      color: colors.textPrimary,
+    },
+    headerSubtitle: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      marginTop: 2,
+    },
+    closeButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.bgCard,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    scrollContent: {
+      paddingHorizontal: 16,
+      paddingBottom: 20,
+    },
+    filterGroup: {
+      marginBottom: 12,
+      padding: 16,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+    },
+    filterLabel: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.textPrimary,
+      marginBottom: 10,
+    },
+    helperText: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      marginTop: 6,
+    },
+    inputContainer: {
+      minHeight: 50,
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 14,
+      backgroundColor: colors.bgSecondary,
+    },
+    inputIcon: {
+      marginLeft: 14,
+    },
+    textInput: {
+      flex: 1,
+      height: 50,
+      paddingHorizontal: 12,
+      paddingVertical: 0,
+      fontSize: 15,
+      color: colors.textPrimary,
+    },
+    timeBucketContainer: {
+      flexDirection: 'column',
+      gap: 8,
+    },
+    timePill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 14,
+      paddingVertical: 11,
+      borderRadius: 14,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      backgroundColor: colors.bgSecondary,
+    },
+    timePillActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primaryDim,
+    },
+    timePillLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textPrimary,
+      lineHeight: 18,
+    },
+    timePillLabelActive: {
+      color: colors.primary,
+    },
+    timePillSub: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      lineHeight: 15,
+    },
+    timePillSubActive: {
+      color: colors.primary,
+      opacity: 0.8,
+    },
+    priceRangeContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    priceInputWrapper: {
+      flex: 1,
+      minHeight: 50,
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 14,
+      backgroundColor: colors.bgSecondary,
+    },
+    priceCurrency: {
+      fontSize: 16,
+      fontWeight: '500',
+      color: colors.textSecondary,
+      marginLeft: 14,
+    },
+    priceInput: {
+      flex: 1,
+      height: 50,
+      paddingHorizontal: 10,
+      paddingVertical: 0,
+      fontSize: 15,
+      color: colors.textPrimary,
+    },
+    priceSeparator: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      fontWeight: '500',
+    },
+    seatsContainer: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    seatButton: {
+      flex: 1,
+      minHeight: 48,
+      paddingHorizontal: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 24,
+      backgroundColor: colors.bgSecondary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    seatButtonActive: {
+      borderColor: colors.textPrimary,
+      backgroundColor: colors.textPrimary,
+    },
+    seatButtonText: {
+      fontSize: 16,
+      fontWeight: '500',
+      color: colors.textPrimary,
+    },
+    seatButtonTextActive: {
+      color: colors.textInverse,
+    },
+    footer: {
+      flexDirection: 'row',
+      paddingHorizontal: 16,
+      paddingTop: 14,
+      paddingBottom: 18,
+      gap: 12,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      backgroundColor: colors.bgCard,
+    },
+    clearButton: {
+      minWidth: 104,
+      height: 52,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 26,
+      backgroundColor: colors.bgCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    clearButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    applyButton: {
+      flex: 1,
+      height: 52,
+      borderRadius: 26,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    applyButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.textInverse,
+    },
+    suggestionsPanel: {
+      marginTop: 8,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      overflow: 'hidden',
+    },
+    suggestionItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.divider,
+    },
+    suggestionIconWrap: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      backgroundColor: colors.primaryDim,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    suggestionMainText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.textPrimary,
+      lineHeight: 18,
+    },
+    suggestionSecondaryText: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      marginTop: 1,
+      lineHeight: 16,
+    },
+  }), [colors]);
 
   useEffect(() => {
     if (visible) setFilters(initialFilters);
@@ -106,14 +392,14 @@ export function RideFiltersModal({
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerIcon}>
-              <Ionicons name="funnel-outline" size={16} color="#DE5D20" />
+              <Ionicons name="funnel-outline" size={16} color={colors.primary} />
             </View>
             <View style={styles.headerCopy}>
               <Text style={styles.headerTitle}>Filter rides</Text>
               <Text style={styles.headerSubtitle}>Narrow results by trip details</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <X size={20} color="#15233A" />
+              <X size={20} color={colors.textPrimary} />
             </TouchableOpacity>
           </View>
 
@@ -123,13 +409,13 @@ export function RideFiltersModal({
             <View style={styles.filterGroup}>
               <Text style={styles.filterLabel}>Date</Text>
               <View style={styles.inputContainer}>
-                <Calendar size={19} color="#8B94A6" style={styles.inputIcon} />
+                <Calendar size={19} color={colors.textSecondary} style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
                   placeholder="YYYY-MM-DD"
                   value={filters.date || ''}
                   onChangeText={(text) => updateFilter('date', text || null)}
-                  placeholderTextColor="#A0AEC0"
+                  placeholderTextColor={colors.textTertiary}
                 />
               </View>
               <Text style={styles.helperText}>Leave empty for any date</Text>
@@ -152,7 +438,7 @@ export function RideFiltersModal({
                       onPress={() => updateFilter('timeBucket', active ? null : key)}
                       activeOpacity={0.75}
                     >
-                      <Ionicons name={icon} size={15} color={active ? '#DE5D20' : '#8B94A6'} />
+                      <Ionicons name={icon} size={15} color={active ? colors.primary : colors.textSecondary} />
                       <View style={{ marginLeft: 6 }}>
                         <Text style={[styles.timePillLabel, active && styles.timePillLabelActive]}>{label}</Text>
                         <Text style={[styles.timePillSub, active && styles.timePillSubActive]}>{sub}</Text>
@@ -167,7 +453,7 @@ export function RideFiltersModal({
             <View style={styles.filterGroup}>
               <Text style={styles.filterLabel}>Pickup location</Text>
               <View style={styles.inputContainer}>
-                <MapPin size={19} color="#8B94A6" style={styles.inputIcon} />
+                <MapPin size={19} color={colors.textSecondary} style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
                   placeholder="Enter pickup location"
@@ -179,11 +465,11 @@ export function RideFiltersModal({
                     pickupTimer.current = setTimeout(() => fetchSuggestions(text, setPickupSuggestions, setShowPickupSuggestions), 250);
                   }}
                   onBlur={() => setTimeout(() => setShowPickupSuggestions(false), 150)}
-                  placeholderTextColor="#A0AEC0"
+                  placeholderTextColor={colors.textTertiary}
                 />
                 {filters.pickupLocation ? (
                   <TouchableOpacity onPress={() => { updateFilter('pickupLocation', null); setPickupSuggestions([]); }} style={{ paddingRight: 12 }}>
-                    <Ionicons name="close-circle" size={17} color="#8B94A6" />
+                    <Ionicons name="close-circle" size={17} color={colors.textSecondary} />
                   </TouchableOpacity>
                 ) : null}
               </View>
@@ -202,7 +488,7 @@ export function RideFiltersModal({
                       }}
                     >
                       <View style={styles.suggestionIconWrap}>
-                        <Ionicons name={idx === 0 ? 'location' : 'location-outline'} size={14} color="#DE5D20" />
+                        <Ionicons name={idx === 0 ? 'location' : 'location-outline'} size={14} color={colors.primary} />
                       </View>
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={styles.suggestionMainText} numberOfLines={1}>{s.mainText}</Text>
@@ -218,7 +504,7 @@ export function RideFiltersModal({
             <View style={styles.filterGroup}>
               <Text style={styles.filterLabel}>Destination</Text>
               <View style={styles.inputContainer}>
-                <MapPin size={19} color="#8B94A6" style={styles.inputIcon} />
+                <MapPin size={19} color={colors.textSecondary} style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
                   placeholder="Enter dropoff location"
@@ -230,11 +516,11 @@ export function RideFiltersModal({
                     dropoffTimer.current = setTimeout(() => fetchSuggestions(text, setDropoffSuggestions, setShowDropoffSuggestions), 250);
                   }}
                   onBlur={() => setTimeout(() => setShowDropoffSuggestions(false), 150)}
-                  placeholderTextColor="#A0AEC0"
+                  placeholderTextColor={colors.textTertiary}
                 />
                 {filters.dropoffLocation ? (
                   <TouchableOpacity onPress={() => { updateFilter('dropoffLocation', null); setDropoffSuggestions([]); }} style={{ paddingRight: 12 }}>
-                    <Ionicons name="close-circle" size={17} color="#8B94A6" />
+                    <Ionicons name="close-circle" size={17} color={colors.textSecondary} />
                   </TouchableOpacity>
                 ) : null}
               </View>
@@ -253,7 +539,7 @@ export function RideFiltersModal({
                       }}
                     >
                       <View style={styles.suggestionIconWrap}>
-                        <Ionicons name={idx === 0 ? 'location' : 'location-outline'} size={14} color="#DE5D20" />
+                        <Ionicons name={idx === 0 ? 'location' : 'location-outline'} size={14} color={colors.primary} />
                       </View>
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={styles.suggestionMainText} numberOfLines={1}>{s.mainText}</Text>
@@ -279,7 +565,7 @@ export function RideFiltersModal({
                     onChangeText={(text) =>
                       updateFilter('minPrice', text ? parseFloat(text) : null)
                     }
-                    placeholderTextColor="#A0AEC0"
+                    placeholderTextColor={colors.textTertiary}
                   />
                 </View>
                 <Text style={styles.priceSeparator}>to</Text>
@@ -293,7 +579,7 @@ export function RideFiltersModal({
                     onChangeText={(text) =>
                       updateFilter('maxPrice', text ? parseFloat(text) : null)
                     }
-                    placeholderTextColor="#A0AEC0"
+                    placeholderTextColor={colors.textTertiary}
                   />
                 </View>
               </View>
@@ -357,287 +643,3 @@ export function RideFiltersModal({
     </Modal>
   );
 }
-
-const styles = StyleSheet.create({
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.38)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#FBFAF7',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    maxHeight: '92%',
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.14,
-        shadowRadius: 18,
-      },
-      android: {
-        elevation: 8,
-      },
-    }),
-  },
-  dragHandle: {
-    width: 42,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: '#D4CEC4',
-    alignSelf: 'center',
-    marginTop: 10,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingTop: 14,
-    paddingBottom: 18,
-  },
-  headerIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  headerCopy: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 25,
-    lineHeight: 31,
-    fontWeight: '700',
-    letterSpacing: -0.3,
-    color: '#15233A',
-  },
-  headerSubtitle: {
-    color: '#8B94A6',
-    fontSize: 13,
-    marginTop: 2,
-  },
-  closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E0D8',
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 20,
-  },
-  filterGroup: {
-    marginBottom: 12,
-    padding: 16,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#E5E0D8',
-    backgroundColor: '#FFFFFF',
-  },
-  filterLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#15233A',
-    marginBottom: 10,
-  },
-  helperText: {
-    fontSize: 11,
-    color: '#8B94A6',
-    marginTop: 6,
-  },
-  inputContainer: {
-    minHeight: 50,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#D7DCE3',
-    borderRadius: 14,
-    backgroundColor: '#FCFCFB',
-  },
-  inputIcon: {
-    marginLeft: 14,
-  },
-  textInput: {
-    flex: 1,
-    height: 50,
-    paddingHorizontal: 12,
-    paddingVertical: 0,
-    fontSize: 15,
-    color: '#15233A',
-  },
-  timeBucketContainer: {
-    flexDirection: 'column',
-    gap: 8,
-  },
-  timePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: '#D7DCE3',
-    backgroundColor: '#FCFCFB',
-  },
-  timePillActive: {
-    borderColor: '#DE5D20',
-    backgroundColor: '#FFF2E9',
-  },
-  timePillLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#15233A',
-    lineHeight: 18,
-  },
-  timePillLabelActive: {
-    color: '#DE5D20',
-  },
-  timePillSub: {
-    fontSize: 11,
-    color: '#8B94A6',
-    lineHeight: 15,
-  },
-  timePillSubActive: {
-    color: '#DE5D20',
-    opacity: 0.8,
-  },
-  priceRangeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  priceInputWrapper: {
-    flex: 1,
-    minHeight: 50,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#D7DCE3',
-    borderRadius: 14,
-    backgroundColor: '#FCFCFB',
-  },
-  priceCurrency: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#8B94A6',
-    marginLeft: 14,
-  },
-  priceInput: {
-    flex: 1,
-    height: 50,
-    paddingHorizontal: 10,
-    paddingVertical: 0,
-    fontSize: 15,
-    color: '#15233A',
-  },
-  priceSeparator: {
-    fontSize: 14,
-    color: '#8B94A6',
-    fontWeight: '500',
-  },
-  seatsContainer: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  seatButton: {
-    flex: 1,
-    minHeight: 48,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: '#D7DCE3',
-    borderRadius: 24,
-    backgroundColor: '#FCFCFB',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  seatButtonActive: {
-    borderColor: '#15233A',
-    backgroundColor: '#15233A',
-  },
-  seatButtonText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#15233A',
-  },
-  seatButtonTextActive: {
-    color: '#FFFFFF',
-  },
-  footer: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 18,
-    gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E0D8',
-    backgroundColor: '#FFFFFF',
-  },
-  clearButton: {
-    minWidth: 104,
-    height: 52,
-    borderWidth: 1,
-    borderColor: '#D7DCE3',
-    borderRadius: 26,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  clearButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#15233A',
-  },
-  applyButton: {
-    flex: 1,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#DE5D20',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  applyButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  suggestionsPanel: {
-    marginTop: 8,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E5E0D8',
-    backgroundColor: '#FFFFFF',
-    overflow: 'hidden',
-  },
-  suggestionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1EEE8',
-  },
-  suggestionIconWrap: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#FEF0E8',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  suggestionMainText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#15233A',
-    lineHeight: 18,
-  },
-  suggestionSecondaryText: {
-    fontSize: 12,
-    color: '#8B94A6',
-    marginTop: 1,
-    lineHeight: 16,
-  },
-});

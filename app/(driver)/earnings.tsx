@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Alert, RefreshControl,
   TouchableOpacity, Linking, Animated, AppState, ActivityIndicator, StatusBar,
@@ -14,12 +14,7 @@ import { logActivity } from '@/src/services/activity';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { doc, setDoc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
-
-const NAVY   = '#15233A';
-const ORANGE = '#DE5D20';
-const BG     = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED  = '#8B94A6';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 type EarningsSummary = {
   available: number;
@@ -29,6 +24,103 @@ type EarningsSummary = {
 };
 
 export default function EarningsScreen() {
+  const { colors } = useAppTheme();
+  const s = useMemo(() => StyleSheet.create({
+    root:        { flex: 1, backgroundColor: colors.bg },
+    safe:        { flex: 1 },
+    loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
+    loadingText: { color: colors.textSecondary, fontSize: 15, fontWeight: '500' as const },
+
+    hdr:      { minHeight: 64, position: 'relative' as const, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, paddingTop: 8, paddingBottom: 16 },
+    backBtn:  { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bgCard, alignItems: 'center' as const, justifyContent: 'center' as const, borderWidth: 1, borderColor: colors.border },
+    hdrTitle: { color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700' as const, letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+
+    content: { paddingHorizontal: 20, paddingTop: 4 },
+
+    heroBanner: {
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      padding: 24,
+      marginBottom: 16,
+      shadowColor: colors.textPrimary,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.07,
+      shadowRadius: 14,
+      elevation: 2,
+    },
+    heroLabel:  { color: colors.textSecondary, fontSize: 10, fontWeight: '800' as const, letterSpacing: 1.5, marginBottom: 8 },
+    heroAmount: { color: colors.primary, fontSize: 44, fontWeight: '300' as const, letterSpacing: -1.5, marginBottom: 4 },
+    heroSub:    { color: colors.textSecondary, fontSize: 13 },
+
+    statsRow: { flexDirection: 'row' as const, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, marginBottom: 24, overflow: 'hidden' as const },
+    statCard: { flex: 1, alignItems: 'center' as const, paddingVertical: 14 },
+    statMid:  { borderLeftWidth: 1, borderRightWidth: 1, borderColor: colors.border },
+    statNum:  { color: colors.textPrimary, fontSize: 18, fontWeight: '700' as const, marginBottom: 2 },
+    statLabel:{ color: colors.textSecondary, fontSize: 11, fontWeight: '600' as const },
+
+    sectionLabel: { color: colors.textSecondary, fontSize: 10, fontWeight: '800' as const, letterSpacing: 1.5, marginBottom: 8, marginTop: 4 },
+    sectionCard: {
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      marginBottom: 20,
+      overflow: 'hidden' as const,
+      shadowColor: colors.textPrimary,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 8,
+      elevation: 1,
+    },
+
+    statusRow:        { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 12, padding: 16 },
+    statusIcon:       { width: 36, height: 36, borderRadius: 18, alignItems: 'center' as const, justifyContent: 'center' as const, flexShrink: 0 },
+    statusIconEnabled:{ backgroundColor: colors.greenDim },
+    statusIconOff:    { backgroundColor: colors.bgSecondary },
+    statusInfo:       { flex: 1 },
+    statusTitle:      { color: colors.textPrimary, fontSize: 15, fontWeight: '600' as const },
+    statusSub:        { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+    setupBtn:         { backgroundColor: colors.primary, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, minWidth: 70, alignItems: 'center' as const },
+    setupBtnText:     { color: colors.textInverse, fontSize: 13, fontWeight: '700' as const },
+    manageBtn:        { borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
+    manageBtnText:    { color: colors.textPrimary, fontSize: 13, fontWeight: '600' as const },
+
+    bankHeader:      { minHeight: 64, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, padding: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
+    bankHeaderTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' as const },
+    addBankBtn:      { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.textPrimary, alignItems: 'center' as const, justifyContent: 'center' as const },
+    bankItem:        { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
+    bankItemBorder:  { borderBottomWidth: 1, borderBottomColor: colors.border },
+    bankIcon:        { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.bgSecondary, alignItems: 'center' as const, justifyContent: 'center' as const, flexShrink: 0 },
+    bankInfo:        { flex: 1 },
+    bankName:        { color: colors.textPrimary, fontSize: 15, fontWeight: '600' as const },
+    bankSub:         { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+    bankActions:     { flexDirection: 'row' as const, gap: 8 },
+    bankActionBtn:   { width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgSecondary, alignItems: 'center' as const, justifyContent: 'center' as const },
+    bankEmpty:       { paddingVertical: 20, alignItems: 'center' as const },
+    bankEmptyText:   { color: colors.textSecondary, fontSize: 13 },
+
+    recentHdr: { minHeight: 64, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: 8, marginTop: 4 },
+    viewAllText: { color: colors.primary, fontSize: 13, fontWeight: '600' as const },
+
+    payoutRow:          { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
+    payoutRowBorder:    { borderBottomWidth: 1, borderBottomColor: colors.border },
+    payoutIcon:         { width: 30, height: 30, borderRadius: 15, alignItems: 'center' as const, justifyContent: 'center' as const, flexShrink: 0 },
+    payoutIconPending:  { backgroundColor: colors.primaryDim },
+    payoutIconDone:     { backgroundColor: colors.greenDim },
+    payoutInfo:         { flex: 1 },
+    payoutType:         { color: colors.textPrimary, fontSize: 14, fontWeight: '600' as const },
+    payoutDate:         { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+    payoutAmount:       { color: colors.green, fontSize: 15, fontWeight: '700' as const },
+    payoutAmountPending:{ color: colors.primary },
+
+    actionBar:  { position: 'absolute' as const, bottom: 0, left: 0, right: 0, paddingHorizontal: 20, paddingBottom: 30, paddingTop: 12, backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border },
+    depositBtn: { height: 54, borderRadius: 27, backgroundColor: colors.primary, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const },
+    depositBtnDisabled: { backgroundColor: colors.border },
+    depositBtnText:     { color: colors.textInverse, fontSize: 15, fontWeight: '700' as const },
+  }), [colors]);
+
   const { goBack } = useReturnNavigation('/(driver)/profile');
   const [loading, setLoading]             = useState(true);
   const [refreshing, setRefreshing]       = useState(false);
@@ -281,21 +373,21 @@ export default function EarningsScreen() {
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={colors.statusBar} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>{!dataLoaded ? (
           <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
 {/* Header */}
         <View style={s.hdr}>
           <TouchableOpacity style={s.backBtn} onPress={goBack}>
-            <Ionicons name="chevron-back" size={20} color={NAVY} />
+            <Ionicons name="chevron-back" size={20} color={colors.textPrimary} />
           </TouchableOpacity>
           <Text style={s.hdrTitle}>Earnings</Text>
           <TouchableOpacity style={s.backBtn} onPress={onRefresh} disabled={refreshing}>
-            <Ionicons name="refresh-outline" size={18} color={NAVY} />
+            <Ionicons name="refresh-outline" size={18} color={colors.textPrimary} />
           </TouchableOpacity>
         </View>
             <View style={s.loadingWrap}>
-            <ActivityIndicator size="large" color={ORANGE} />
+            <ActivityIndicator size="large" color={colors.primary} />
             <Text style={s.loadingText}>Loading your earnings…</Text>
           </View>
           </ScrollView>
@@ -304,16 +396,16 @@ export default function EarningsScreen() {
             <ScrollView
               showsVerticalScrollIndicator={false}
               contentContainerStyle={s.content}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ORANGE} />}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
             >
 {/* Header */}
         <View style={s.hdr}>
           <TouchableOpacity style={s.backBtn} onPress={goBack}>
-            <Ionicons name="chevron-back" size={20} color={NAVY} />
+            <Ionicons name="chevron-back" size={20} color={colors.textPrimary} />
           </TouchableOpacity>
           <Text style={s.hdrTitle}>Earnings</Text>
           <TouchableOpacity style={s.backBtn} onPress={onRefresh} disabled={refreshing}>
-            <Ionicons name="refresh-outline" size={18} color={NAVY} />
+            <Ionicons name="refresh-outline" size={18} color={colors.textPrimary} />
           </TouchableOpacity>
         </View>
 
@@ -329,11 +421,11 @@ export default function EarningsScreen() {
               {/* Stats row */}
               <View style={s.statsRow}>
                 <View style={s.statCard}>
-                  <Text style={[s.statNum, { color: ORANGE }]}>${availableBalance.toFixed(2)}</Text>
+                  <Text style={[s.statNum, { color: colors.primary }]}>${availableBalance.toFixed(2)}</Text>
                   <Text style={s.statLabel}>Available</Text>
                 </View>
                 <View style={[s.statCard, s.statMid]}>
-                  <Text style={s.statNum}>${(summary.pending ?? 0).toFixed(2)}</Text>
+                  <Text style={[s.statNum]}>${(summary.pending ?? 0).toFixed(2)}</Text>
                   <Text style={s.statLabel}>Pending</Text>
                 </View>
                 <View style={s.statCard}>
@@ -347,7 +439,7 @@ export default function EarningsScreen() {
               <View style={s.sectionCard}>
                 <View style={s.statusRow}>
                   <View style={[s.statusIcon, isPayoutsEnabled ? s.statusIconEnabled : s.statusIconOff]}>
-                    <Ionicons name={isPayoutsEnabled ? 'checkmark' : 'close'} size={16} color={isPayoutsEnabled ? '#10B981' : MUTED} />
+                    <Ionicons name={isPayoutsEnabled ? 'checkmark' : 'close'} size={16} color={isPayoutsEnabled ? colors.green : colors.textSecondary} />
                   </View>
                   <View style={s.statusInfo}>
                     <Text style={s.statusTitle}>{isPayoutsEnabled ? 'Payouts enabled' : 'Payouts not set up'}</Text>
@@ -381,7 +473,7 @@ export default function EarningsScreen() {
                   bankAccounts.map((account, idx) => (
                     <View key={account.id} style={[s.bankItem, idx < bankAccounts.length - 1 && s.bankItemBorder]}>
                       <View style={s.bankIcon}>
-                        <Ionicons name="business-outline" size={18} color={MUTED} />
+                        <Ionicons name="business-outline" size={18} color={colors.textSecondary} />
                       </View>
                       <View style={s.bankInfo}>
                         <Text style={s.bankName}>{account.bankName}</Text>
@@ -393,11 +485,11 @@ export default function EarningsScreen() {
                       <View style={s.bankActions}>
                         {!account.isDefault && (
                           <TouchableOpacity style={s.bankActionBtn} onPress={() => handleSetDefaultBankAccount(account)}>
-                            <Ionicons name="star-outline" size={16} color={ORANGE} />
+                            <Ionicons name="star-outline" size={16} color={colors.primary} />
                           </TouchableOpacity>
                         )}
                         <TouchableOpacity style={s.bankActionBtn} onPress={() => handleRemoveBankAccount(account)}>
-                          <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                          <Ionicons name="trash-outline" size={16} color={colors.red} />
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -423,7 +515,7 @@ export default function EarningsScreen() {
                     return (
                       <View key={payout.id} style={[s.payoutRow, idx < recentPayouts.length - 1 && s.payoutRowBorder]}>
                         <View style={[s.payoutIcon, isPending ? s.payoutIconPending : s.payoutIconDone]}>
-                          <Ionicons name={isPending ? 'time-outline' : 'checkmark'} size={14} color={isPending ? ORANGE : '#10B981'} />
+                          <Ionicons name={isPending ? 'time-outline' : 'checkmark'} size={14} color={isPending ? colors.primary : colors.green} />
                         </View>
                         <View style={s.payoutInfo}>
                           <Text style={s.payoutType}>{payout.method === 'instant' ? 'Instant Deposit' : 'Standard Payout'}</Text>
@@ -476,99 +568,3 @@ export default function EarningsScreen() {
     </View>
   );
 }
-
-const s = StyleSheet.create({
-  root:        { flex: 1, backgroundColor: BG },
-  safe:        { flex: 1 },
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
-  loadingText: { color: MUTED, fontSize: 15, fontWeight: '500' },
-
-  hdr:      { minHeight: 64, position: 'relative', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8, paddingBottom: 16 },
-  backBtn:  { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E5E0D8' },
-  hdrTitle: { color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
-
-  content: { paddingHorizontal: 20, paddingTop: 4 },
-
-  heroBanner: {
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: '#FFFFFF',
-    padding: 24,
-    marginBottom: 16,
-    shadowColor: NAVY,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.07,
-    shadowRadius: 14,
-    elevation: 2,
-  },
-  heroLabel:  { color: MUTED, fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginBottom: 8 },
-  heroAmount: { color: ORANGE, fontSize: 44, fontWeight: '300', letterSpacing: -1.5, marginBottom: 4 },
-  heroSub:    { color: MUTED, fontSize: 13 },
-
-  statsRow: { flexDirection: 'row', borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', marginBottom: 24, overflow: 'hidden' },
-  statCard: { flex: 1, alignItems: 'center', paddingVertical: 14 },
-  statMid:  { borderLeftWidth: 1, borderRightWidth: 1, borderColor: BORDER },
-  statNum:  { color: NAVY, fontSize: 18, fontWeight: '700', marginBottom: 2 },
-  statLabel:{ color: MUTED, fontSize: 11, fontWeight: '600' },
-
-  sectionLabel: { color: MUTED, fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginBottom: 8, marginTop: 4 },
-  sectionCard: {
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: '#FFFFFF',
-    marginBottom: 20,
-    overflow: 'hidden',
-    shadowColor: NAVY,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 1,
-  },
-
-  statusRow:        { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
-  statusIcon:       { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  statusIconEnabled:{ backgroundColor: '#ECFDF5' },
-  statusIconOff:    { backgroundColor: '#F3F4F6' },
-  statusInfo:       { flex: 1 },
-  statusTitle:      { color: NAVY, fontSize: 15, fontWeight: '600' },
-  statusSub:        { color: MUTED, fontSize: 12, marginTop: 2 },
-  setupBtn:         { backgroundColor: ORANGE, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, minWidth: 70, alignItems: 'center' },
-  setupBtnText:     { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
-  manageBtn:        { borderWidth: 1, borderColor: BORDER, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
-  manageBtnText:    { color: NAVY, fontSize: 13, fontWeight: '600' },
-
-  bankHeader:      { minHeight: 64, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: BORDER },
-  bankHeaderTitle: { color: NAVY, fontSize: 15, fontWeight: '600' },
-  addBankBtn:      { width: 30, height: 30, borderRadius: 15, backgroundColor: NAVY, alignItems: 'center', justifyContent: 'center' },
-  bankItem:        { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
-  bankItemBorder:  { borderBottomWidth: 1, borderBottomColor: BORDER },
-  bankIcon:        { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F3EFE8', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  bankInfo:        { flex: 1 },
-  bankName:        { color: NAVY, fontSize: 15, fontWeight: '600' },
-  bankSub:         { color: MUTED, fontSize: 12, marginTop: 2 },
-  bankActions:     { flexDirection: 'row', gap: 8 },
-  bankActionBtn:   { width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FAFAF8', alignItems: 'center', justifyContent: 'center' },
-  bankEmpty:       { paddingVertical: 20, alignItems: 'center' },
-  bankEmptyText:   { color: MUTED, fontSize: 13 },
-
-  recentHdr: { minHeight: 64, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, marginTop: 4 },
-  viewAllText: { color: ORANGE, fontSize: 13, fontWeight: '600' },
-
-  payoutRow:          { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
-  payoutRowBorder:    { borderBottomWidth: 1, borderBottomColor: BORDER },
-  payoutIcon:         { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  payoutIconPending:  { backgroundColor: '#FEF0E8' },
-  payoutIconDone:     { backgroundColor: '#ECFDF5' },
-  payoutInfo:         { flex: 1 },
-  payoutType:         { color: NAVY, fontSize: 14, fontWeight: '600' },
-  payoutDate:         { color: MUTED, fontSize: 12, marginTop: 2 },
-  payoutAmount:       { color: '#10B981', fontSize: 15, fontWeight: '700' },
-  payoutAmountPending:{ color: ORANGE },
-
-  actionBar:  { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 20, paddingBottom: 30, paddingTop: 12, backgroundColor: BG, borderTopWidth: 1, borderTopColor: BORDER },
-  depositBtn: { height: 54, borderRadius: 27, backgroundColor: ORANGE, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  depositBtnDisabled: { backgroundColor: '#D1D5DB' },
-  depositBtnText:     { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-});

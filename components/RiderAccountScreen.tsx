@@ -15,15 +15,9 @@ import { hitSlop, layout } from '@/theme/designSystem';
 import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
 import { UniversitySearch } from '@/components/ui/UniversitySearch';
 import { MAJORS } from '@/constants/universities';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
-const NAVY = '#15233A';
-const ORANGE = '#DE5D20';
-const BG = '#FBFAF7';
-const PAPER = '#F6F3ED';
-const BORDER = '#E5E0D8';
-const MUTED = '#7D8698';
-
-function AccountField({ label, value, onChangeText, placeholder, keyboardType, editable = true, note }: {
+function AccountField({ label, value, onChangeText, placeholder, keyboardType, editable = true, note, styles, colors }: {
   label: string;
   value: string;
   onChangeText?: (value: string) => void;
@@ -31,6 +25,8 @@ function AccountField({ label, value, onChangeText, placeholder, keyboardType, e
   keyboardType?: 'default' | 'email-address' | 'phone-pad';
   editable?: boolean;
   note?: string;
+  styles: ReturnType<typeof makeStyles>;
+  colors: any;
 }) {
   return (
     <View style={styles.fieldGroup}>
@@ -40,20 +36,103 @@ function AccountField({ label, value, onChangeText, placeholder, keyboardType, e
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
-          placeholderTextColor="#9AA3B2"
+          placeholderTextColor={colors.textSecondary}
           keyboardType={keyboardType}
           editable={editable}
           autoCapitalize={keyboardType === 'email-address' ? 'none' : 'words'}
           style={[styles.input, !editable && styles.readOnlyText]}
         />
-        {!editable ? <Ionicons name="lock-closed" size={16} color={MUTED} /> : null}
+        {!editable ? <Ionicons name="lock-closed" size={16} color={colors.textSecondary} /> : null}
       </View>
       {note ? <Text style={styles.fieldNote}>{note}</Text> : null}
     </View>
   );
 }
 
+function makeStyles(colors: any) {
+  return StyleSheet.create({
+    root: { flex: 1, alignItems: 'center', backgroundColor: colors.bg },
+    safe: { flex: 1, width: '100%', maxWidth: Platform.OS === 'web' ? 430 : undefined, backgroundColor: colors.bg },
+    content: { width: '100%', maxWidth: layout.contentMaxWidth, alignSelf: 'center', paddingHorizontal: layout.screenPadding, paddingBottom: 36 },
+    header: { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+    backButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center'},
+    headerTitle: { color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+    loading: { minHeight: 280, alignItems: 'center', justifyContent: 'center', gap: 12 },
+    muted: { color: colors.textSecondary, fontSize: 14 },
+    identity: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 24 },
+    avatarButton: { width: 72, height: 72 },
+    avatar: { width: 68, height: 68, borderRadius: 34, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+    avatarImage: { width: '100%', height: '100%', borderRadius: 34 },
+    avatarLoading: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(21,35,58,0.45)' },
+    cameraBadge: { position: 'absolute', right: 0, bottom: 0, width: 27, height: 27, borderRadius: 14, borderWidth: 2, borderColor: colors.bg, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+    avatarText: { color: colors.primary, fontSize: 22, fontWeight: '700' },
+    identityCopy: { flex: 1 },
+    identityName: { color: colors.textPrimary, fontSize: 20, lineHeight: 26, fontWeight: '700' },
+    identitySchool: { color: colors.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 3 },
+    section: { marginBottom: 24 },
+    sectionTitle: { color: colors.textPrimary, fontSize: 18, lineHeight: 24, fontWeight: '700', marginBottom: 14 },
+    nameRow: { flexDirection: 'row', gap: 12 },
+    nameField: { flex: 1 },
+    fieldGroup: { marginBottom: 16 },
+    label: { color: colors.textSecondary, fontSize: 10, lineHeight: 15, letterSpacing: 1.3, fontWeight: '700', marginBottom: 7 },
+    inputWrap: { minHeight: 54, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15 },
+    aboutInput: { minHeight: 112, alignItems: 'flex-start', color: colors.textPrimary, fontSize: 15, lineHeight: 21, paddingTop: 14, paddingBottom: 14 },
+    inputReadOnly: { backgroundColor: colors.bgSecondary },
+    input: { flex: 1, color: colors.textPrimary, fontSize: 15, paddingVertical: 14 },
+    readOnlyText: { color: colors.textSecondary },
+    selectInput: { minHeight: 54, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, gap: 10 },
+    selectInputText: { flex: 1, color: colors.textPrimary, fontSize: 15, fontWeight: '500' },
+    selectInputPlaceholder: { flex: 1, color: colors.textSecondary, fontSize: 15 },
+    fieldNote: { color: colors.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 6, paddingHorizontal: 2 },
+    phoneRow: { minHeight: 68, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14 },
+    phoneIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
+    phoneCopy: { flex: 1 },
+    phoneValue: { color: colors.textPrimary, fontSize: 15, lineHeight: 20, fontWeight: '600' },
+    phoneNote: { color: colors.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 2 },
+    actionRow: { minHeight: 76, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16 },
+    actionIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
+    actionCopy: { flex: 1 },
+    actionTitle: { color: colors.textPrimary, fontSize: 15, lineHeight: 20, fontWeight: '700' },
+    actionSubtitle: { color: colors.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 2 },
+    saveButton: { minHeight: 54, borderRadius: 27, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+    buttonDisabled: { opacity: 0.5 },
+    saveText: { color: colors.textInverse, fontSize: 15, fontWeight: '700' },
+    dangerSection: { marginTop: 30, marginBottom: 4 },
+    dangerLabel: { color: colors.red, fontSize: 10, lineHeight: 15, letterSpacing: 1.3, fontWeight: '700', marginBottom: 8, paddingHorizontal: 2 },
+    deleteRow: { minHeight: 76, borderRadius: 18, borderWidth: 1, borderColor: colors.redBorder, backgroundColor: colors.redDim, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16 },
+    deleteIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: colors.redDim, alignItems: 'center', justifyContent: 'center' },
+    deleteTitle: { color: colors.red, fontSize: 15, lineHeight: 20, fontWeight: '700' },
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(21,35,58,0.35)', justifyContent: 'flex-end' },
+    modalSheet: { borderTopLeftRadius: 26, borderTopRightRadius: 26, backgroundColor: colors.bg, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 30 },
+    modalHandle: { width: 42, height: 5, borderRadius: 3, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 18 },
+    modalHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, marginBottom: 20 },
+    modalTitleCopy: { flex: 1 },
+    modalTitle: { color: colors.textPrimary, fontSize: 22, lineHeight: 28, fontWeight: '700' },
+    modalSubtitle: { color: colors.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 4 },
+    modalClose: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' },
+    deletePasswordWrap: { minHeight: 54, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, marginBottom: 16 },
+    deleteButton: { minHeight: 54, borderRadius: 27, backgroundColor: colors.red, alignItems: 'center', justifyContent: 'center' },
+    pickerOverlay: { flex: 1, backgroundColor: 'rgba(21,35,58,0.42)', justifyContent: 'flex-end' },
+    pickerSheet: { backgroundColor: colors.bg, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 36, maxHeight: '88%' as any },
+    pickerHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
+    pickerHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 10 },
+    pickerHeaderIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
+    pickerTitle: { flex: 1, color: colors.textPrimary, fontSize: 17, fontWeight: '700' },
+    pickerClose: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center' },
+    pickerSearchWrap: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginVertical: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, gap: 8 },
+    pickerSearchInput: { flex: 1, fontSize: 14, color: colors.textPrimary, padding: 0 },
+    pickerItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 15, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: colors.border },
+    pickerItemText: { color: colors.textPrimary, fontSize: 15, fontWeight: '500', flex: 1 },
+    pickerItemTextActive: { color: colors.primary, fontWeight: '700' },
+    pickerEmpty: { alignItems: 'center', paddingVertical: 32 },
+    pickerEmptyText: { color: colors.textSecondary, fontSize: 14 },
+  });
+}
+
 export default function RiderAccountScreen() {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+
   const { returnTo } = useLocalSearchParams<{ returnTo?: string | string[] }>();
   const returnTarget = Array.isArray(returnTo) ? returnTo[0] : returnTo;
   const goBack = () => router.replace((returnTarget || '/(rider)/settings') as any);
@@ -172,22 +251,22 @@ export default function RiderAccountScreen() {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
             <TouchableOpacity style={styles.backButton} onPress={goBack} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={hitSlop}>
-              <Ionicons name="arrow-back" size={19} color={NAVY} />
+              <Ionicons name="arrow-back" size={19} color={colors.textPrimary} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Account</Text>
           </View>
 
           {loading || !profile ? (
-            <View style={styles.loading}><ActivityIndicator color={ORANGE} /><Text style={styles.muted}>Loading your account...</Text></View>
+            <View style={styles.loading}><ActivityIndicator color={colors.primary} /><Text style={styles.muted}>Loading your account...</Text></View>
           ) : (
             <>
               <View style={styles.identity}>
                 <TouchableOpacity style={styles.avatarButton} onPress={() => void editAvatar()} disabled={uploadingAvatar} accessibilityRole="button" accessibilityLabel="Change profile picture">
                   <View style={styles.avatar}>
                     {profile.avatarUrl ? <Image source={{ uri: profile.avatarUrl }} style={styles.avatarImage} contentFit="cover" /> : <Text style={styles.avatarText}>{initials}</Text>}
-                    {uploadingAvatar ? <View style={styles.avatarLoading}><ActivityIndicator color="#FFFFFF" /></View> : null}
+                    {uploadingAvatar ? <View style={styles.avatarLoading}><ActivityIndicator color={colors.textInverse} /></View> : null}
                   </View>
-                  <View style={styles.cameraBadge}><Ionicons name="camera" size={14} color="#FFFFFF" /></View>
+                  <View style={styles.cameraBadge}><Ionicons name="camera" size={14} color={colors.textInverse} /></View>
                 </TouchableOpacity>
                 <View style={styles.identityCopy}>
                   <Text style={styles.identityName}>{`${profile.firstName} ${profile.lastName}`.trim() || 'RideAlong rider'}</Text>
@@ -198,10 +277,10 @@ export default function RiderAccountScreen() {
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Personal information</Text>
                 <View style={styles.nameRow}>
-                  <View style={styles.nameField}><AccountField label="FIRST NAME" value={profile.firstName} onChangeText={(firstName) => setProfile({ ...profile, firstName })} placeholder="First name" /></View>
-                  <View style={styles.nameField}><AccountField label="LAST NAME" value={profile.lastName} onChangeText={(lastName) => setProfile({ ...profile, lastName })} placeholder="Last name" /></View>
+                  <View style={styles.nameField}><AccountField label="FIRST NAME" value={profile.firstName} onChangeText={(firstName) => setProfile({ ...profile, firstName })} placeholder="First name" styles={styles} colors={colors} /></View>
+                  <View style={styles.nameField}><AccountField label="LAST NAME" value={profile.lastName} onChangeText={(lastName) => setProfile({ ...profile, lastName })} placeholder="Last name" styles={styles} colors={colors} /></View>
                 </View>
-                <AccountField label="VERIFIED .EDU EMAIL" value={profile.email} editable={false} keyboardType="email-address" note="Your sign-in email is managed through your verified RideAlong account." />
+                <AccountField label="VERIFIED .EDU EMAIL" value={profile.email} editable={false} keyboardType="email-address" note="Your sign-in email is managed through your verified RideAlong account." styles={styles} colors={colors} />
                 <View style={styles.fieldGroup}>
                   <Text style={styles.label}>PHONE NUMBER</Text>
                   <TouchableOpacity
@@ -210,12 +289,12 @@ export default function RiderAccountScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="Change phone number"
                   >
-                    <View style={styles.phoneIcon}><Ionicons name="call-outline" size={18} color={ORANGE} /></View>
+                    <View style={styles.phoneIcon}><Ionicons name="call-outline" size={18} color={colors.primary} /></View>
                     <View style={styles.phoneCopy}>
                       <Text style={styles.phoneValue}>{profile.phone || 'Add a phone number'}</Text>
                       <Text style={styles.phoneNote}>Change and verify your phone number</Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={18} color={MUTED} />
+                    <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                   </TouchableOpacity>
                 </View>
                 <View style={styles.fieldGroup}>
@@ -226,7 +305,7 @@ export default function RiderAccountScreen() {
                   <Text style={styles.label}>MAJOR</Text>
                   <TouchableOpacity style={styles.selectInput} onPress={() => setShowMajorPicker(true)} accessibilityRole="button">
                     <Text style={profile.major ? styles.selectInputText : styles.selectInputPlaceholder}>{profile.major || 'Select your major'}</Text>
-                    <Ionicons name="chevron-down" size={18} color={MUTED} />
+                    <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
                   </TouchableOpacity>
                 </View>
                 <View style={styles.fieldGroup}>
@@ -235,7 +314,7 @@ export default function RiderAccountScreen() {
                     value={profile.about}
                     onChangeText={(about) => setProfile({ ...profile, about })}
                     placeholder="Share what classmates should know about riding with you."
-                    placeholderTextColor="#9AA3B2"
+                    placeholderTextColor={colors.textSecondary}
                     multiline
                     maxLength={240}
                     style={[styles.inputWrap, styles.aboutInput]}
@@ -248,22 +327,22 @@ export default function RiderAccountScreen() {
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Security</Text>
                 <TouchableOpacity style={styles.actionRow} onPress={() => router.push({ pathname: '/(rider)/settings/change-password', params: { returnTo: '/(rider)/settings/account-settings' } } as any)} accessibilityRole="button">
-                  <View style={styles.actionIcon}><Ionicons name="key-outline" size={19} color={ORANGE} /></View>
+                  <View style={styles.actionIcon}><Ionicons name="key-outline" size={19} color={colors.primary} /></View>
                   <View style={styles.actionCopy}><Text style={styles.actionTitle}>Change password</Text><Text style={styles.actionSubtitle}>Update your account password securely</Text></View>
-                  <Ionicons name="chevron-forward" size={18} color={MUTED} />
+                  <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
 
               <TouchableOpacity style={[styles.saveButton, saving && styles.buttonDisabled]} onPress={() => void save()} disabled={saving} accessibilityRole="button">
-                {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveText}>Save changes</Text>}
+                {saving ? <ActivityIndicator color={colors.textInverse} /> : <Text style={styles.saveText}>Save changes</Text>}
               </TouchableOpacity>
 
               <View style={styles.dangerSection}>
                 <Text style={styles.dangerLabel}>DANGER ZONE</Text>
                 <TouchableOpacity style={styles.deleteRow} onPress={() => setDeleteOpen(true)} accessibilityRole="button">
-                  <View style={styles.deleteIcon}><Ionicons name="trash-outline" size={19} color="#C94747" /></View>
+                  <View style={styles.deleteIcon}><Ionicons name="trash-outline" size={19} color={colors.red} /></View>
                   <View style={styles.actionCopy}><Text style={styles.deleteTitle}>Delete account</Text><Text style={styles.actionSubtitle}>Permanently remove your account and profile data</Text></View>
-                  <Ionicons name="chevron-forward" size={18} color={MUTED} />
+                  <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
             </>
@@ -277,15 +356,15 @@ export default function RiderAccountScreen() {
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <View style={styles.modalTitleCopy}><Text style={styles.modalTitle}>Delete your account?</Text><Text style={styles.modalSubtitle}>This permanently deletes your RideAlong account and profile data. This cannot be undone.</Text></View>
-              <TouchableOpacity style={styles.modalClose} onPress={closeDelete} hitSlop={hitSlop}><Ionicons name="close" size={20} color={NAVY} /></TouchableOpacity>
+              <TouchableOpacity style={styles.modalClose} onPress={closeDelete} hitSlop={hitSlop}><Ionicons name="close" size={20} color={colors.textPrimary} /></TouchableOpacity>
             </View>
             <Text style={styles.label}>CURRENT PASSWORD</Text>
             <View style={styles.deletePasswordWrap}>
-              <TextInput value={deletePassword} onChangeText={setDeletePassword} placeholder="Enter your password" placeholderTextColor="#9AA3B2" secureTextEntry={deletePasswordHidden} autoCapitalize="none" style={styles.input} />
-              <TouchableOpacity onPress={() => setDeletePasswordHidden((hidden) => !hidden)} hitSlop={hitSlop}><Ionicons name={deletePasswordHidden ? 'eye-outline' : 'eye-off-outline'} size={20} color={MUTED} /></TouchableOpacity>
+              <TextInput value={deletePassword} onChangeText={setDeletePassword} placeholder="Enter your password" placeholderTextColor={colors.textSecondary} secureTextEntry={deletePasswordHidden} autoCapitalize="none" style={styles.input} />
+              <TouchableOpacity onPress={() => setDeletePasswordHidden((hidden) => !hidden)} hitSlop={hitSlop}><Ionicons name={deletePasswordHidden ? 'eye-outline' : 'eye-off-outline'} size={20} color={colors.textSecondary} /></TouchableOpacity>
             </View>
             <TouchableOpacity style={[styles.deleteButton, (!deletePassword || deleting) && styles.buttonDisabled]} onPress={() => void deleteAccount()} disabled={!deletePassword || deleting}>
-              {deleting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveText}>Delete account permanently</Text>}
+              {deleting ? <ActivityIndicator color={colors.textInverse} /> : <Text style={styles.saveText}>Delete account permanently</Text>}
             </TouchableOpacity>
           </View>
         </KeyboardAwareModalView>
@@ -296,18 +375,18 @@ export default function RiderAccountScreen() {
           <View style={styles.pickerSheet}>
             <View style={styles.pickerHandle} />
             <View style={styles.pickerHeader}>
-              <View style={styles.pickerHeaderIcon}><Ionicons name="book-outline" size={16} color={ORANGE} /></View>
+              <View style={styles.pickerHeaderIcon}><Ionicons name="book-outline" size={16} color={colors.primary} /></View>
               <Text style={styles.pickerTitle}>Select Major</Text>
               <TouchableOpacity style={styles.pickerClose} onPress={() => { setShowMajorPicker(false); setMajorSearch(''); }} hitSlop={hitSlop}>
-                <Ionicons name="close" size={20} color={MUTED} />
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
             <View style={styles.pickerSearchWrap}>
-              <Ionicons name="search-outline" size={16} color={MUTED} />
+              <Ionicons name="search-outline" size={16} color={colors.textSecondary} />
               <TextInput
                 style={styles.pickerSearchInput}
                 placeholder="Search majors..."
-                placeholderTextColor={MUTED}
+                placeholderTextColor={colors.textSecondary}
                 value={majorSearch}
                 onChangeText={setMajorSearch}
                 autoCorrect={false}
@@ -315,7 +394,7 @@ export default function RiderAccountScreen() {
               />
               {majorSearch.length > 0 ? (
                 <TouchableOpacity onPress={() => setMajorSearch('')} hitSlop={hitSlop}>
-                  <Ionicons name="close-circle" size={16} color={MUTED} />
+                  <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
                 </TouchableOpacity>
               ) : null}
             </View>
@@ -332,7 +411,7 @@ export default function RiderAccountScreen() {
                   activeOpacity={0.75}
                 >
                   <Text style={[styles.pickerItemText, profile?.major === major && styles.pickerItemTextActive]}>{major}</Text>
-                  {profile?.major === major ? <Ionicons name="checkmark" size={18} color={ORANGE} /> : null}
+                  {profile?.major === major ? <Ionicons name="checkmark" size={18} color={colors.primary} /> : null}
                 </TouchableOpacity>
               ))}
               {MAJORS.filter((major) => major.toLowerCase().includes(majorSearch.toLowerCase())).length === 0 ? (
@@ -345,81 +424,3 @@ export default function RiderAccountScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center', backgroundColor: BG },
-  safe: { flex: 1, width: '100%', maxWidth: Platform.OS === 'web' ? 430 : undefined, backgroundColor: BG },
-  content: { width: '100%', maxWidth: layout.contentMaxWidth, alignSelf: 'center', paddingHorizontal: layout.screenPadding, paddingBottom: 36 },
-  header: { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  backButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center'},
-  headerTitle: { color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
-  loading: { minHeight: 280, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  muted: { color: MUTED, fontSize: 14 },
-  identity: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 24 },
-  avatarButton: { width: 72, height: 72 },
-  avatar: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#FCEBDD', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  avatarImage: { width: '100%', height: '100%', borderRadius: 34 },
-  avatarLoading: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(21,35,58,0.45)' },
-  cameraBadge: { position: 'absolute', right: 0, bottom: 0, width: 27, height: 27, borderRadius: 14, borderWidth: 2, borderColor: BG, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { color: ORANGE, fontSize: 22, fontWeight: '700' },
-  identityCopy: { flex: 1 },
-  identityName: { color: NAVY, fontSize: 20, lineHeight: 26, fontWeight: '700' },
-  identitySchool: { color: MUTED, fontSize: 13, lineHeight: 19, marginTop: 3 },
-  section: { marginBottom: 24 },
-  sectionTitle: { color: NAVY, fontSize: 18, lineHeight: 24, fontWeight: '700', marginBottom: 14 },
-  nameRow: { flexDirection: 'row', gap: 12 },
-  nameField: { flex: 1 },
-  fieldGroup: { marginBottom: 16 },
-  label: { color: '#8B94A6', fontSize: 10, lineHeight: 15, letterSpacing: 1.3, fontWeight: '700', marginBottom: 7 },
-  inputWrap: { minHeight: 54, borderRadius: 14, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15 },
-  aboutInput: { minHeight: 112, alignItems: 'flex-start', color: NAVY, fontSize: 15, lineHeight: 21, paddingTop: 14, paddingBottom: 14 },
-  inputReadOnly: { backgroundColor: PAPER },
-  input: { flex: 1, color: NAVY, fontSize: 15, paddingVertical: 14 },
-  readOnlyText: { color: '#5F6878' },
-  selectInput: { minHeight: 54, borderRadius: 14, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, gap: 10 },
-  selectInputText: { flex: 1, color: NAVY, fontSize: 15, fontWeight: '500' },
-  selectInputPlaceholder: { flex: 1, color: '#9AA3B2', fontSize: 15 },
-  fieldNote: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 6, paddingHorizontal: 2 },
-  phoneRow: { minHeight: 68, borderRadius: 14, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14 },
-  phoneIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center' },
-  phoneCopy: { flex: 1 },
-  phoneValue: { color: NAVY, fontSize: 15, lineHeight: 20, fontWeight: '600' },
-  phoneNote: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 2 },
-  actionRow: { minHeight: 76, borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16 },
-  actionIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center' },
-  actionCopy: { flex: 1 },
-  actionTitle: { color: NAVY, fontSize: 15, lineHeight: 20, fontWeight: '700' },
-  actionSubtitle: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 2 },
-  saveButton: { minHeight: 54, borderRadius: 27, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center' },
-  buttonDisabled: { opacity: 0.5 },
-  saveText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-  dangerSection: { marginTop: 30, marginBottom: 4 },
-  dangerLabel: { color: '#A66A6A', fontSize: 10, lineHeight: 15, letterSpacing: 1.3, fontWeight: '700', marginBottom: 8, paddingHorizontal: 2 },
-  deleteRow: { minHeight: 76, borderRadius: 18, borderWidth: 1, borderColor: '#F0D4D4', backgroundColor: '#FFF9F9', flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16 },
-  deleteIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: '#FDECEC', alignItems: 'center', justifyContent: 'center' },
-  deleteTitle: { color: '#B33F3F', fontSize: 15, lineHeight: 20, fontWeight: '700' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(21,35,58,0.35)', justifyContent: 'flex-end' },
-  modalSheet: { borderTopLeftRadius: 26, borderTopRightRadius: 26, backgroundColor: BG, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 30 },
-  modalHandle: { width: 42, height: 5, borderRadius: 3, backgroundColor: '#D1D5DB', alignSelf: 'center', marginBottom: 18 },
-  modalHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, marginBottom: 20 },
-  modalTitleCopy: { flex: 1 },
-  modalTitle: { color: NAVY, fontSize: 22, lineHeight: 28, fontWeight: '700' },
-  modalSubtitle: { color: MUTED, fontSize: 12, lineHeight: 18, marginTop: 4 },
-  modalClose: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  deletePasswordWrap: { minHeight: 54, borderRadius: 14, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, marginBottom: 16 },
-  deleteButton: { minHeight: 54, borderRadius: 27, backgroundColor: '#C94747', alignItems: 'center', justifyContent: 'center' },
-  pickerOverlay: { flex: 1, backgroundColor: 'rgba(21,35,58,0.42)', justifyContent: 'flex-end' },
-  pickerSheet: { backgroundColor: BG, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 36, maxHeight: '88%' },
-  pickerHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: BORDER, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
-  pickerHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: BORDER, gap: 10 },
-  pickerHeaderIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center' },
-  pickerTitle: { flex: 1, color: NAVY, fontSize: 17, fontWeight: '700' },
-  pickerClose: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F1F3F6', alignItems: 'center', justifyContent: 'center' },
-  pickerSearchWrap: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginVertical: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', gap: 8 },
-  pickerSearchInput: { flex: 1, fontSize: 14, color: NAVY, padding: 0 },
-  pickerItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 15, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  pickerItemText: { color: NAVY, fontSize: 15, fontWeight: '500', flex: 1 },
-  pickerItemTextActive: { color: ORANGE, fontWeight: '700' },
-  pickerEmpty: { alignItems: 'center', paddingVertical: 32 },
-  pickerEmptyText: { color: MUTED, fontSize: 14 },
-});

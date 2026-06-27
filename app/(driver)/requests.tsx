@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   ScrollView,
   Linking,
   StatusBar,
+  Share,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -35,12 +36,7 @@ import { DriverBottomNav } from '@/components/DriverBottomNav';
 import { RideFiltersModal } from '@/components/RideFiltersModal';
 import { getDefaultFilters, filterRides as applyRideFilters, hasActiveFilters, type RideFilterOptions } from '@/utils/rideFilters';
 import { useRideBrowseStore, type DriverRequestFilter } from '@/stores/rideBrowseStore';
-
-const NAVY   = '#15233A';
-const ORANGE = '#DE5D20';
-const BG     = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED  = '#8B94A6';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 type InboxItem = {
   id: string;
@@ -106,6 +102,47 @@ function getRideDateTime(r: any): Date | null {
     } catch {}
   }
   return dt;
+}
+
+const ACTIVE_REQUEST_STATUSES = new Set(['pending', 'open', 'requested']);
+const INACTIVE_REQUEST_STATUSES = new Set([
+  'accepted',
+  'assigned',
+  'confirmed',
+  'completed',
+  'complete',
+  'expired',
+  'cancelled',
+  'canceled',
+  'declined',
+  'rejected',
+  'in_progress',
+  'in-progress',
+  'driver_completed',
+  'rider_completed',
+  'flagged',
+]);
+
+function isPendingFutureRequest(data: any): boolean {
+  const status = String(data?.status || data?.state || 'pending').replace(/[-\s]/g, '_').toLowerCase();
+  if (INACTIVE_REQUEST_STATUSES.has(status)) return false;
+  if (!ACTIVE_REQUEST_STATUSES.has(status)) return false;
+
+  const rideDate = getRideDateTime(data);
+  if (!rideDate) return false;
+  return rideDate.getTime() >= Date.now() - 5 * 60 * 1000;
+}
+
+function isPendingFutureItem(item: InboxItem): boolean {
+  const status = String(item.status || 'pending').replace(/[-\s]/g, '_').toLowerCase();
+  if (INACTIVE_REQUEST_STATUSES.has(status)) return false;
+  if (!ACTIVE_REQUEST_STATUSES.has(status)) return false;
+
+  const rideDate = item.date
+    ? parseLocalDateString(item.time ? `${item.date} ${item.time}` : item.date) || parseLocalDateString(item.date)
+    : null;
+  if (!rideDate) return false;
+  return rideDate.getTime() >= Date.now() - 5 * 60 * 1000;
 }
 
 function extractAddress(r: any, kind: 'pickup' | 'dropoff'): string | undefined {
@@ -305,7 +342,7 @@ async function getConfirmedRideRequestIdSet(requestIds: string[]): Promise<Set<s
     for (let i = 0; i < requestIds.length; i += chunkSize) {
       const group = requestIds.slice(i, i + chunkSize);
       try {
-        const q = query(collection(firestore, 'confirmedRides'), where('status', '==', 'CONFIRMED'), where('rideRequestId', 'in', group));
+        const q = query(collection(firestore, 'confirmedRides'), where('rideRequestId', 'in', group));
         const snap = await getDocs(q);
         snap.forEach((d) => { const id = (d.data() as any)?.rideRequestId; if (id) out.add(String(id)); });
       } catch {}
@@ -347,13 +384,149 @@ function relativeDayLabel(dateStr?: string | null): string {
   } catch { return String(dateStr); }
 }
 
-function mergeRows(prev: InboxItem[], cur: InboxItem[]): InboxItem[] {
-  const map: Record<string, InboxItem> = {};
-  [...prev, ...cur].forEach((row) => { map[row.id] = row; });
-  return Object.values(map).sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.time || '').localeCompare(b.time || ''));
-}
-
 export default function RequestsInboxScreen() {
+  const { colors } = useAppTheme();
+  const s = useMemo(() => StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.bg },
+    safe: { flex: 1 },
+    content: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 102, flexGrow: 1 },
+    pageHeader: { marginBottom: 16 },
+    pageTitle: { color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25 },
+    searchBar: {
+      minHeight: 56,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingLeft: 16,
+      paddingRight: 12,
+      marginBottom: 16,
+      shadowColor: colors.textPrimary,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.05,
+      shadowRadius: 10,
+      elevation: 1,
+    },
+    searchInput: { flex: 1, height: 54, paddingVertical: 0, color: colors.textPrimary, fontSize: 14, fontWeight: '500' },
+    chipRow: { gap: 8, paddingBottom: 20 },
+    chip: {
+      minWidth: 72,
+      height: 42,
+      borderRadius: 21,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 15,
+    },
+    chipActive: { backgroundColor: colors.textPrimary, borderColor: colors.textPrimary },
+    chipText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600', textAlign: 'center' },
+    chipTextActive: { color: colors.textInverse },
+    card: {
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      padding: 16,
+      marginBottom: 14,
+      shadowColor: colors.textPrimary,
+      shadowOffset: { width: 0, height: 5 },
+      shadowOpacity: 0.05,
+      shadowRadius: 12,
+      elevation: 1,
+    },
+    cardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.textPrimary },
+    route: { flex: 1, color: colors.textPrimary, fontSize: 16, fontWeight: '700' },
+    cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+    riderCopy: { flex: 1, minWidth: 0 },
+    riderTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    statusSlot: { flex: 1, minWidth: 0, alignItems: 'flex-start' },
+    statusBadge: { minHeight: 22, borderRadius: 11, backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
+    statusBadgeOffered: { backgroundColor: colors.primaryDim, borderColor: colors.primaryBorder },
+    statusBadgeText: { color: colors.textPrimary, fontSize: 10, lineHeight: 13, fontWeight: '800' },
+    statusBadgeTextOffered: { color: colors.primary },
+    time: { color: colors.textSecondary, fontSize: 10, lineHeight: 14, fontWeight: '700', textAlign: 'right' },
+    compactMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, minHeight: 18 },
+    compactMetaText: { color: colors.textSecondary, fontSize: 12, lineHeight: 16, fontWeight: '700', flexShrink: 1 },
+    metaDivider: { width: 3, height: 3, borderRadius: 2, backgroundColor: colors.border, marginHorizontal: 2 },
+    routeCard: { flexDirection: 'row', gap: 10, marginTop: 11, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border },
+    routeRail: { width: 10, alignItems: 'center', paddingTop: 15, paddingBottom: 5 },
+    routeLine: { width: 2, flex: 1, minHeight: 26, backgroundColor: colors.border, marginVertical: 4 },
+    routeCopy: { flex: 1, minWidth: 0, gap: 8 },
+    locationBlock: { marginTop: 12, gap: 8 },
+    locationRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+    locationTextWrap: { flex: 1, minWidth: 0 },
+    locationLabel: { color: colors.textSecondary, fontSize: 9, lineHeight: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
+    pickupDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.textPrimary },
+    dropoffDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.primary },
+    locationText: { color: colors.textPrimary, fontSize: 14, lineHeight: 18, fontWeight: '700' },
+    dash: { display: 'none' },
+    cardBottom: { display: 'none' },
+    avatar: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: colors.primaryDim,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    avatarImage: { width: 44, height: 44, borderRadius: 22 },
+    avatarText: { color: colors.primary, fontSize: 15, fontWeight: '700' },
+    riderName: { flex: 1, color: colors.textPrimary, fontSize: 16, fontWeight: '800' },
+    riderMeta: { color: colors.textSecondary, fontSize: 12, fontWeight: '700', marginTop: 3 },
+    priceBlock: { alignItems: 'flex-end', marginLeft: 4 },
+    price: { color: colors.primary, fontSize: 28, lineHeight: 32, fontWeight: '600' },
+    priceOpen: { color: colors.textSecondary, fontSize: 16, lineHeight: 22, fontWeight: '700' },
+    priceCaption: { color: colors.textSecondary, fontSize: 8, lineHeight: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
+    actions: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 12 },
+    declineBtn: {
+      flex: 1,
+      minHeight: 46,
+      borderRadius: 23,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    declineBtnText: { color: colors.textPrimary, fontSize: 14, fontWeight: '700' },
+    offerBtn: {
+      flex: 1,
+      minHeight: 46,
+      borderRadius: 23,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    offerBtnText: { color: colors.textInverse, fontSize: 14, fontWeight: '700' },
+    disabled: { opacity: 0.55 },
+    loadingWrap: { alignItems: 'center', paddingTop: 60, gap: 14 },
+    loadingText: { color: colors.textSecondary, fontSize: 14, fontWeight: '500' },
+    emptyState: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 48, minHeight: 340 },
+    emptyIcon: {
+      width: 54,
+      height: 54,
+      borderRadius: 27,
+      backgroundColor: colors.primaryDim,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 16,
+    },
+    emptyTitle: { color: colors.textPrimary, fontSize: 19, lineHeight: 25, fontWeight: '700', textAlign: 'center', letterSpacing: -0.2 },
+    emptyText: { maxWidth: 280, color: colors.textSecondary, fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 6 },
+    emptyPrimary: { minHeight: 46, borderRadius: 23, backgroundColor: colors.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 22, marginTop: 18 },
+    emptyPrimaryText: { color: colors.textInverse, fontSize: 14, fontWeight: '700' },
+    filterBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+    filterDot: { position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: 4, backgroundColor: colors.primary, borderWidth: 1.5, borderColor: colors.bgCard },
+    shareCardBtn: { padding: 4, marginLeft: 2 },
+  }), [colors]);
+
   const router = useRouter();
   const uid = firebaseAuth.currentUser?.uid ?? null;
   const email = firebaseAuth.currentUser?.email ?? null;
@@ -370,6 +543,7 @@ export default function RequestsInboxScreen() {
   const [filterOptions, setFilterOptions] = useState<RideFilterOptions>(getDefaultFilters());
   const [showFilterModal, setShowFilterModal] = useState(false);
   const avatarLookupAttemptsRef = useRef<Set<string>>(new Set());
+  const requestQueryRowsRef = useRef<Record<string, InboxItem[]>>({});
 
   const allItems = useMemo<InboxItem[]>(() => {
     const map: Record<string, InboxItem> = {};
@@ -377,21 +551,22 @@ export default function RequestsInboxScreen() {
     return Object.values(map);
   }, [openItems, items]);
 
-  const scoreRequest = (item: InboxItem) => {
+  const scoreRequest = useCallback((item: InboxItem) => {
     const payout = typeof item.price === 'number' ? Math.min(item.price * 4, 40) : 12;
     const soon = isSameDay(item.date, 0) ? 25 : isSameDay(item.date, 1) ? 14 : 6;
     const distance = typeof item.distanceMiles === 'number' ? Math.max(0, 20 - item.distanceMiles) : 8;
     const rating = item.requesterId ? (userDataByUserId[item.requesterId]?.rating ?? 5) * 3 : 12;
     return Math.round(Math.min(98, payout + soon + distance + rating));
-  };
+  }, [userDataByUserId]);
 
   const filteredItems = useMemo(() => {
     const term = search.trim().toLowerCase();
     const base = allItems.filter((item) => {
+      if (!isPendingFutureItem(item)) return false;
       if (offeredByReqId[item.id]) return false;
       if (filter === 'today' && !isSameDay(item.date, 0)) return false;
       if (filter === 'tomorrow' && !isSameDay(item.date, 1)) return false;
-      if (filter === 'open' && !!items.find((x) => x.id === item.id)) return false;
+      if (filter === 'open' && !openItems.find((x) => x.id === item.id)) return false;
       if (filter === 'assigned' && !items.find((x) => x.id === item.id)) return false;
       if (filter === 'best' && scoreRequest(item) < 60) return false;
       if (!term) return true;
@@ -400,12 +575,12 @@ export default function RequestsInboxScreen() {
       return searchable.includes(term);
     });
     return applyRideFilters(base, filterOptions) as InboxItem[];
-  }, [allItems, items, filter, search, offeredByReqId, userDataByUserId, filterOptions]);
+  }, [allItems, items, openItems, filter, search, offeredByReqId, userDataByUserId, filterOptions, scoreRequest]);
 
   const finalItems = useMemo(() => {
     if (filter === 'best') return [...filteredItems].sort((a, b) => scoreRequest(b) - scoreRequest(a));
     return filteredItems;
-  }, [filteredItems, filter, userDataByUserId]);
+  }, [filteredItems, filter, scoreRequest]);
 
   const offerOnRequest = async (item: InboxItem) => {
     try {
@@ -481,13 +656,15 @@ export default function RequestsInboxScreen() {
     }
 
     setLoading(true);
+    requestQueryRowsRef.current = {};
     const base = collection(firestore, 'rideRequests');
-    const unsubs: Array<() => void> = [];
+    const unsubs: (() => void)[] = [];
 
-    const handler = (snap: any) => {
+    const handler = (sourceKey: string) => (snap: any) => {
       const rows: InboxItem[] = [];
       snap.forEach((d: any) => {
         const r = d.data() || {};
+        if (!isPendingFutureRequest(r)) return;
         const dt = getRideDateTime(r);
         const distInfo = getDistanceInfo(r);
         const pickupCoords = extractCoords(r, 'pickup');
@@ -522,7 +699,8 @@ export default function RequestsInboxScreen() {
           dropoffLng: dropoffCoords?.lng ?? null,
         });
       });
-      setItems((prev) => mergeRows(prev, rows));
+      requestQueryRowsRef.current[sourceKey] = rows;
+      setItems(Object.values(requestQueryRowsRef.current).flat());
       setLoading(false);
     };
 
@@ -541,7 +719,7 @@ export default function RequestsInboxScreen() {
       qs.push(query(base, where('driverEmail', '==', email)));
       qs.push(query(base, where('recipientsEmail', 'array-contains', email)));
     }
-    qs.forEach((qy) => { try { unsubs.push(onSnapshot(qy, handler, () => setLoading(false))); } catch {} });
+    qs.forEach((qy, index) => { try { unsubs.push(onSnapshot(qy, handler(`request-query-${index}`), () => setLoading(false))); } catch {} });
 
     try {
       const qOpen = query(base, where('status', '==', 'pending'));
@@ -559,8 +737,8 @@ export default function RequestsInboxScreen() {
           if (uid && r.userId === uid) return;
           if (email && typeof r.userEmail === 'string' && r.userEmail.toLowerCase() === email.toLowerCase()) return;
           if (r.driverId || r.assignedDriverId || r.providerId || r.recipientId) return;
+          if (!isPendingFutureRequest(r)) return;
           const dt = getRideDateTime(r);
-          if (dt && (Date.now() - dt.getTime()) / 3600000 > 24) return;
           const distInfo = getDistanceInfo(r);
           const pickupCoords = extractCoords(r, 'pickup');
           const dropoffCoords = extractCoords(r, 'dropoff');
@@ -726,16 +904,31 @@ export default function RequestsInboxScreen() {
     })();
   }, [items, openItems, userDataByUserId]);
 
+  const visibleAllCount = allItems.filter((item) => isPendingFutureItem(item) && !offeredByReqId[item.id]).length;
+
   const chips: { key: RequestFilter; label: string }[] = [
-    { key: 'all', label: `ALL\n${allItems.length}` },
+    { key: 'all', label: `ALL\n${visibleAllCount}` },
     { key: 'open', label: 'Open' },
     { key: 'today', label: 'Today' },
     { key: 'tomorrow', label: 'Tmrw' },
     { key: 'best', label: '★\nBest' },
   ];
 
+  const shareRideRequest = async (item: InboxItem) => {
+    const parts = [
+      'Ride request on RideAlong!',
+      `From: ${item.pickup}`,
+      `To: ${item.dropoff}`,
+      item.date ? `Date: ${item.date}` : null,
+      item.time ? `Time: ${item.time}` : null,
+      item.price ? `Contribution: $${Math.round(item.price)}` : null,
+    ].filter(Boolean).join('\n');
+    await Share.share({ message: parts }).catch(() => {});
+  };
+
   const renderItem = ({ item }: { item: InboxItem }) => {
     const isOffered = !!offeredByReqId[item.id];
+    const isConfirmed = offeredByReqId[item.id]?.status === 'accepted';
     const dayLabel = relativeDayLabel(item.date);
     const profileKey = item.requesterId || item.requesterEmail || '';
     const userData = profileKey ? userDataByUserId[profileKey] : undefined;
@@ -764,11 +957,20 @@ export default function RequestsInboxScreen() {
             <View style={s.riderTitleRow}>
               <Text style={s.riderName} numberOfLines={1}>{displayName}</Text>
               <View style={[s.statusBadge, isOffered && s.statusBadgeOffered]}>
-                <Text style={[s.statusBadgeText, isOffered && s.statusBadgeTextOffered]}>{isOffered ? 'Sent' : 'New'}</Text>
+                <Text style={[s.statusBadgeText, isOffered && s.statusBadgeTextOffered]}>
+                  {isOffered ? 'Sent' : 'New'}
+                </Text>
               </View>
             </View>
             <Text style={s.riderMeta}>{`★ ${userRating.toFixed(2)} · ${seatsLabel}`}</Text>
           </View>
+          <TouchableOpacity
+            style={s.shareCardBtn}
+            onPress={(e) => { e.stopPropagation?.(); shareRideRequest(item); }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="share-outline" size={18} color={colors.textSecondary} />
+          </TouchableOpacity>
           <View style={s.priceBlock}>
             {item.price ? (
               <Text style={s.price}>${Math.round(item.price)}</Text>
@@ -780,7 +982,7 @@ export default function RequestsInboxScreen() {
         </View>
 
         <View style={s.compactMetaRow}>
-          <Ionicons name="time-outline" size={14} color={MUTED} />
+          <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
           <Text style={s.compactMetaText} numberOfLines={1}>{scheduleText}</Text>
           {item.distanceText ? (
             <>
@@ -825,31 +1027,33 @@ export default function RequestsInboxScreen() {
           )}
         </View>
 
-        <View style={s.actions}>
-          <TouchableOpacity
-            style={s.declineBtn}
-            onPress={() => {
-              setOpenItems((prev) => prev.filter((r) => r.id !== item.id));
-              setItems((prev) => prev.filter((r) => r.id !== item.id));
-            }}
-          >
-            <Text style={s.declineBtnText}>Decline</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[s.offerBtn, isOffered && s.disabled]}
-            disabled={isOffered}
-            onPress={() => offerOnRequest(item)}
-          >
-            <Text style={s.offerBtnText}>{isOffered ? 'Sent ✓' : 'Offer ride'}</Text>
-          </TouchableOpacity>
-        </View>
+        {!isConfirmed && (
+          <View style={s.actions}>
+            <TouchableOpacity
+              style={s.declineBtn}
+              onPress={() => {
+                setOpenItems((prev) => prev.filter((r) => r.id !== item.id));
+                setItems((prev) => prev.filter((r) => r.id !== item.id));
+              }}
+            >
+              <Text style={s.declineBtnText}>Decline</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.offerBtn, isOffered && s.disabled]}
+              disabled={isOffered}
+              onPress={() => offerOnRequest(item)}
+            >
+              <Text style={s.offerBtnText}>{isOffered ? 'Sent ✓' : 'Offer ride'}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </TouchableOpacity>
     );
   };
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={colors.statusBar} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
         <FlatList
           data={finalItems}
@@ -865,22 +1069,22 @@ export default function RequestsInboxScreen() {
               </View>
 
               <View style={s.searchBar}>
-                <Ionicons name="search" size={18} color={NAVY} />
+                <Ionicons name="search" size={18} color={colors.textPrimary} />
                 <TextInput
                   value={search}
                   onChangeText={setSearch}
                   placeholder="Search by rider or destination..."
-                  placeholderTextColor={MUTED}
+                  placeholderTextColor={colors.textSecondary}
                   style={s.searchInput}
                   returnKeyType="search"
                 />
                 {search ? (
                   <TouchableOpacity onPress={() => setSearch('')}>
-                    <Ionicons name="close" size={18} color={MUTED} />
+                    <Ionicons name="close" size={18} color={colors.textSecondary} />
                   </TouchableOpacity>
                 ) : null}
                 <TouchableOpacity style={s.filterBtn} onPress={() => setShowFilterModal(true)} activeOpacity={0.7}>
-                  <Ionicons name="options-outline" size={19} color={hasActiveFilters(filterOptions) ? ORANGE : NAVY} />
+                  <Ionicons name="options-outline" size={19} color={hasActiveFilters(filterOptions) ? colors.primary : colors.textPrimary} />
                   {hasActiveFilters(filterOptions) && <View style={s.filterDot} />}
                 </TouchableOpacity>
               </View>
@@ -897,28 +1101,29 @@ export default function RequestsInboxScreen() {
                   </TouchableOpacity>
                 ))}
               </ScrollView>
+
             </View>
           }
           ListEmptyComponent={
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 32 }}>
               {loading ? (
                 <View style={s.loadingWrap}>
-                  <ActivityIndicator color={ORANGE} size="large" />
+                  <ActivityIndicator color={colors.primary} size="large" />
                   <Text style={s.loadingText}>Loading requests...</Text>
                 </View>
               ) : (
                 <View style={s.emptyState}>
-                  <View style={s.emptyIcon}><Ionicons name="car-outline" size={27} color={ORANGE} /></View>
-                  <Text style={s.emptyTitle}>{allItems.length ? 'No requests match' : 'No requests yet'}</Text>
+                  <View style={s.emptyIcon}><Ionicons name="car-outline" size={27} color={colors.primary} /></View>
+                  <Text style={s.emptyTitle}>{visibleAllCount ? 'No requests match' : 'No requests yet'}</Text>
                   <Text style={s.emptyText}>
-                    {allItems.length
+                    {visibleAllCount
                       ? 'Try a different search or clear the filters.'
                       : 'Rider requests will appear here as students post trips.'}
                   </Text>
                   <TouchableOpacity
                     style={s.emptyPrimary}
                     onPress={() => {
-                      if (allItems.length) {
+                      if (visibleAllCount) {
                         setSearch('');
                         setFilter('all');
                         setFilterOptions(getDefaultFilters());
@@ -928,8 +1133,8 @@ export default function RequestsInboxScreen() {
                     }}
                     accessibilityRole="button"
                   >
-                    <Ionicons name={allItems.length ? 'refresh-outline' : 'add-circle-outline'} size={18} color="#FFFFFF" />
-                    <Text style={s.emptyPrimaryText}>{allItems.length ? 'Clear filters' : 'Post a ride'}</Text>
+                    <Ionicons name={visibleAllCount ? 'refresh-outline' : 'add-circle-outline'} size={18} color={colors.textInverse} />
+                    <Text style={s.emptyPrimaryText}>{visibleAllCount ? 'Clear filters' : 'Post a ride'}</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -949,143 +1154,3 @@ export default function RequestsInboxScreen() {
     </View>
   );
 }
-
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: BG },
-  safe: { flex: 1 },
-  content: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 102, flexGrow: 1 },
-  pageHeader: { marginBottom: 16 },
-  pageTitle: { color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25 },
-  searchBar: {
-    minHeight: 56,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: '#FFFFFF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingLeft: 16,
-    paddingRight: 12,
-    marginBottom: 16,
-    shadowColor: NAVY,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 1,
-  },
-  searchInput: { flex: 1, height: 54, paddingVertical: 0, color: NAVY, fontSize: 14, fontWeight: '500' },
-  chipRow: { gap: 8, paddingBottom: 20 },
-  chip: {
-    minWidth: 72,
-    height: 42,
-    borderRadius: 21,
-    borderWidth: 1,
-    borderColor: '#D7DCE3',
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 15,
-  },
-  chipActive: { backgroundColor: NAVY, borderColor: NAVY },
-  chipText: { color: '#6B7280', fontSize: 13, fontWeight: '600', textAlign: 'center' },
-  chipTextActive: { color: '#FFFFFF' },
-  card: {
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    marginBottom: 14,
-    shadowColor: NAVY,
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    elevation: 1,
-  },
-  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: NAVY },
-  route: { flex: 1, color: NAVY, fontSize: 16, fontWeight: '700' },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 11 },
-  riderCopy: { flex: 1, minWidth: 0 },
-  riderTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  statusSlot: { flex: 1, minWidth: 0, alignItems: 'flex-start' },
-  statusBadge: { minHeight: 22, borderRadius: 11, backgroundColor: '#F3F5F8', borderWidth: 1, borderColor: '#E0E6EE', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
-  statusBadgeOffered: { backgroundColor: '#FEF0E8', borderColor: '#F5C9AF' },
-  statusBadgeText: { color: NAVY, fontSize: 10, lineHeight: 13, fontWeight: '800' },
-  statusBadgeTextOffered: { color: ORANGE },
-  time: { color: MUTED, fontSize: 10, lineHeight: 14, fontWeight: '700', textAlign: 'right' },
-  compactMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, minHeight: 18 },
-  compactMetaText: { color: MUTED, fontSize: 12, lineHeight: 16, fontWeight: '700', flexShrink: 1 },
-  metaDivider: { width: 3, height: 3, borderRadius: 2, backgroundColor: '#C4CBD6', marginHorizontal: 2 },
-  routeCard: { flexDirection: 'row', gap: 10, marginTop: 11, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F0ECE5' },
-  routeRail: { width: 10, alignItems: 'center', paddingTop: 15, paddingBottom: 5 },
-  routeLine: { width: 2, flex: 1, minHeight: 26, backgroundColor: '#CBD5E1', marginVertical: 4 },
-  routeCopy: { flex: 1, minWidth: 0, gap: 8 },
-  locationBlock: { marginTop: 12, gap: 8 },
-  locationRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  locationTextWrap: { flex: 1, minWidth: 0 },
-  locationLabel: { color: MUTED, fontSize: 9, lineHeight: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
-  pickupDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: NAVY },
-  dropoffDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: ORANGE },
-  locationText: { color: NAVY, fontSize: 14, lineHeight: 18, fontWeight: '700' },
-  dash: { display: 'none' },
-  cardBottom: { display: 'none' },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#F9E8DB',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  avatarImage: { width: 44, height: 44, borderRadius: 22 },
-  avatarText: { color: ORANGE, fontSize: 15, fontWeight: '700' },
-  riderName: { flex: 1, color: NAVY, fontSize: 16, fontWeight: '800' },
-  riderMeta: { color: MUTED, fontSize: 12, fontWeight: '700', marginTop: 3 },
-  priceBlock: { alignItems: 'flex-end', marginLeft: 4 },
-  price: { color: ORANGE, fontSize: 28, lineHeight: 32, fontWeight: '600' },
-  priceOpen: { color: MUTED, fontSize: 16, lineHeight: 22, fontWeight: '700' },
-  priceCaption: { color: MUTED, fontSize: 8, lineHeight: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 12 },
-  declineBtn: {
-    flex: 1,
-    minHeight: 46,
-    borderRadius: 23,
-    borderWidth: 1,
-    borderColor: '#D7DCE3',
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  declineBtnText: { color: NAVY, fontSize: 14, fontWeight: '700' },
-  offerBtn: {
-    flex: 1,
-    minHeight: 46,
-    borderRadius: 23,
-    backgroundColor: ORANGE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  offerBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
-  disabled: { opacity: 0.55 },
-  loadingWrap: { alignItems: 'center', paddingTop: 60, gap: 14 },
-  loadingText: { color: MUTED, fontSize: 14, fontWeight: '500' },
-  emptyState: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 48, minHeight: 340 },
-  emptyIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: '#F9E8DB',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  emptyTitle: { color: NAVY, fontSize: 19, lineHeight: 25, fontWeight: '700', textAlign: 'center', letterSpacing: -0.2 },
-  emptyText: { maxWidth: 280, color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 6 },
-  emptyPrimary: { minHeight: 46, borderRadius: 23, backgroundColor: ORANGE, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 22, marginTop: 18 },
-  emptyPrimaryText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
-  filterBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  filterDot: { position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: 4, backgroundColor: ORANGE, borderWidth: 1.5, borderColor: '#FFFFFF' },
-});

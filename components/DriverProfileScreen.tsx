@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Platform, ScrollView, StyleSheet, Text as RNText, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,27 +12,30 @@ import { pickAndUploadProfilePhoto } from '@/src/services/profilePhoto';
 import { useVerificationStore } from '@/stores/verificationStore';
 import { useAuthStore } from '@/stores/authStore';
 import { hitSlop, layout } from '@/theme/designSystem';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import type { AppColors } from '@/constants/theme';
 
-const NAVY = '#15233A';
-const ORANGE = '#DE5D20';
-const BG = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED = '#8B94A6';
 const FONT_SANS = Platform.OS === 'web' ? '"Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, sans-serif' : undefined;
 const FONT_MONO = Platform.OS === 'web' ? '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace' : undefined;
 
 function Text({ style, ...props }: React.ComponentProps<typeof RNText>) {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return <RNText {...props} style={[styles.text, style]} />;
 }
 
 function Pill({ label, active }: { label: string; active?: boolean }) {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return <Text style={[styles.pill, active && styles.pillActive]}>{label}</Text>;
 }
 
 function RatingPill({ rating }: { rating: number }) {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={[styles.pill, styles.ratingPill]}>
-      <Ionicons name="star" size={11} color={ORANGE} />
+      <Ionicons name="star" size={11} color={colors.primary} />
       <RNText style={styles.ratingPillText}>{rating.toFixed(2)}</RNText>
     </View>
   );
@@ -40,6 +43,8 @@ function RatingPill({ rating }: { rating: number }) {
 
 function MenuRow({ icon, title, sub, href, returnTo }: { icon: keyof typeof Ionicons.glyphMap; title: string; sub?: string; href?: string; returnTo?: string }) {
   const pathname = usePathname();
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <TouchableOpacity
       style={styles.menuRow}
@@ -47,18 +52,20 @@ function MenuRow({ icon, title, sub, href, returnTo }: { icon: keyof typeof Ioni
       disabled={!href}
       accessibilityRole={href ? 'link' : undefined}
     >
-      <View style={styles.menuIcon}><Ionicons name={icon} size={18} color="#6B7280" /></View>
+      <View style={styles.menuIcon}><Ionicons name={icon} size={18} color={colors.textSecondary} /></View>
       <View style={{ flex: 1 }}>
         <Text style={styles.menuTitle}>{title}</Text>
         {sub ? <Text style={styles.menuSub}>{sub}</Text> : null}
       </View>
-      <Ionicons name="chevron-forward" size={17} color={MUTED} />
+      <Ionicons name="chevron-forward" size={17} color={colors.textSecondary} />
     </TouchableOpacity>
   );
 }
 
 export default function DriverProfileScreen() {
   const insets = useSafeAreaInsets();
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { signOut, role, activeRole, switchRole, becomeRider } = useAuthStore();
   const { isVerified, verificationStatus } = useVerificationStore();
   const [loading, setLoading] = useState(true);
@@ -170,7 +177,7 @@ export default function DriverProfileScreen() {
     return (
       <View style={styles.root}>
         <SafeAreaView style={styles.loadingWrap}>
-          <ActivityIndicator color={ORANGE} size="large" />
+          <ActivityIndicator color={colors.primary} size="large" />
           <Text style={styles.loadingText}>Loading profile...</Text>
         </SafeAreaView>
       </View>
@@ -179,7 +186,7 @@ export default function DriverProfileScreen() {
 
   return (
     <View style={styles.root}>
-      <StatusBar style="dark" />
+      <StatusBar style={colors.statusBar === 'light-content' ? 'light' : 'dark'} />
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <ScrollView
           style={styles.scroll}
@@ -188,12 +195,12 @@ export default function DriverProfileScreen() {
         >
           <View style={styles.header}>
             <TouchableOpacity style={styles.circleBtn} onPress={() => router.replace('/(driver)' as any)} hitSlop={hitSlop}>
-              <Ionicons name="arrow-back" size={18} color={NAVY} />
+              <Ionicons name="arrow-back" size={18} color={colors.textPrimary} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Profile</Text>
             <View style={{ flex: 1 }} />
             <TouchableOpacity style={styles.circleBtn} onPress={() => router.push({ pathname: '/(driver)/settings', params: { returnTo: '/(driver)/profile' } } as any)} hitSlop={hitSlop}>
-              <Ionicons name="settings-outline" size={18} color={NAVY} />
+              <Ionicons name="settings-outline" size={18} color={colors.textPrimary} />
             </TouchableOpacity>
           </View>
 
@@ -212,7 +219,7 @@ export default function DriverProfileScreen() {
                   accessibilityLabel="Edit profile"
                   hitSlop={hitSlop}
                 >
-                  <Ionicons name="pencil" size={16} color={ORANGE} />
+                  <Ionicons name="pencil" size={16} color={colors.primary} />
                 </TouchableOpacity>
               </View>
               <Text style={styles.mutedSmall}>{driver?.personalInfo?.university || user?.email}</Text>
@@ -226,7 +233,7 @@ export default function DriverProfileScreen() {
           <View style={styles.profileActivity}>
             <View style={styles.profileActivityItem}><Text style={styles.profileActivityValue}>{stats.totalRides}</Text><Text style={styles.profileActivityLabel}>Completed</Text></View>
             <View style={styles.profileActivityDivider} />
-            <View style={styles.profileActivityItem}><Text style={[styles.profileActivityValue, { color: ORANGE }]}>${Math.round(stats.totalEarnings)}</Text><Text style={styles.profileActivityLabel}>Earned</Text></View>
+            <View style={styles.profileActivityItem}><Text style={[styles.profileActivityValue, { color: colors.primary }]}>${Math.round(stats.totalEarnings)}</Text><Text style={styles.profileActivityLabel}>Earned</Text></View>
             <View style={styles.profileActivityDivider} />
             <View style={styles.profileActivityItem}><Text style={styles.profileActivityValue}>{stats.avgRating ? stats.avgRating.toFixed(1) : 'â€”'}</Text><Text style={styles.profileActivityLabel}>Rating</Text></View>
           </View>
@@ -268,48 +275,50 @@ export default function DriverProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  text: { fontFamily: FONT_SANS, color: NAVY },
-  root: { flex: 1, backgroundColor: BG, alignItems: 'center' },
-  safe: { flex: 1, width: '100%', maxWidth: Platform.OS === 'web' ? 430 : undefined, backgroundColor: BG },
+function makeStyles(colors: AppColors) {
+  return StyleSheet.create({
+  text: { fontFamily: FONT_SANS, color: colors.textPrimary },
+  root: { flex: 1, backgroundColor: colors.bg, alignItems: 'center' },
+  safe: { flex: 1, width: '100%', maxWidth: Platform.OS === 'web' ? 430 : undefined, backgroundColor: colors.bg },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  loadingText: { color: MUTED, fontSize: 14 },
+  loadingText: { color: colors.textSecondary, fontSize: 14 },
   scroll: { flex: 1 },
   header: { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-  headerTitle: { fontFamily: FONT_SANS, color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
-  circleBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: BORDER},
+  headerTitle: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+  circleBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border},
   content: { flexGrow: 1, width: '100%', maxWidth: layout.contentMaxWidth, alignSelf: 'center', paddingHorizontal: layout.screenPadding, paddingTop: 4 },
   profileTopRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
   profileIdentityHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  editProfileButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center' },
-  bigAvatar: { width: 82, height: 82, borderRadius: 41, backgroundColor: '#F9E8DB', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  editProfileButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
+  bigAvatar: { width: 82, height: 82, borderRadius: 41, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   bigAvatarImage: { width: '100%', height: '100%' },
-  bigAvatarText: { color: ORANGE, fontSize: 26, fontWeight: '600' },
-  cameraBadge: { position: 'absolute', right: 0, bottom: 0, width: 24, height: 24, borderRadius: 12, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: BG },
-  profileName: { flex: 1, fontFamily: FONT_SANS, color: NAVY, fontSize: 25, fontWeight: '700', marginTop: 3 },
-  mutedSmall: { color: MUTED, fontSize: 13, marginTop: 4 },
+  bigAvatarText: { color: colors.primary, fontSize: 26, fontWeight: '600' },
+  cameraBadge: { position: 'absolute', right: 0, bottom: 0, width: 24, height: 24, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.bg },
+  profileName: { flex: 1, fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 25, fontWeight: '700', marginTop: 3 },
+  mutedSmall: { color: colors.textSecondary, fontSize: 13, marginTop: 4 },
   pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   profileBadgeRow: { marginTop: 6 },
-  pill: { fontFamily: FONT_MONO, borderRadius: 18, borderWidth: 1, borderColor: '#D7DCE3', color: '#6B7280', fontSize: 11, paddingHorizontal: 12, paddingVertical: 7, overflow: 'hidden' },
-  pillActive: { backgroundColor: NAVY, borderColor: NAVY, color: '#FFFFFF' },
+  pill: { fontFamily: FONT_MONO, borderRadius: 18, borderWidth: 1, borderColor: colors.border, color: colors.textSecondary, fontSize: 11, paddingHorizontal: 12, paddingVertical: 7, overflow: 'hidden' },
+  pillActive: { backgroundColor: colors.textPrimary, borderColor: colors.textPrimary, color: colors.textInverse },
   ratingPill: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  ratingPillText: { fontFamily: FONT_MONO, color: '#6B7280', fontSize: 11 },
-  profileActivity: { minHeight: 72, borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', marginBottom: 18, paddingHorizontal: 8 },
+  ratingPillText: { fontFamily: FONT_MONO, color: colors.textSecondary, fontSize: 11 },
+  profileActivity: { minHeight: 72, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', marginBottom: 18, paddingHorizontal: 8 },
   profileActivityItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
-  profileActivityDivider: { width: 1, height: 32, backgroundColor: BORDER },
-  profileActivityValue: { fontFamily: FONT_SANS, color: NAVY, fontSize: 20, lineHeight: 25, fontWeight: '700' },
-  profileActivityLabel: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 2 },
-  aboutCard: { borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 16, marginBottom: 18 },
-  aboutTitle: { fontFamily: FONT_SANS, color: NAVY, fontSize: 15, lineHeight: 20, fontWeight: '700', marginBottom: 6 },
-  aboutText: { color: '#5F6878', fontSize: 13, lineHeight: 20, fontWeight: '500' },
-  switchBtn: { height: 48, borderRadius: 24, backgroundColor: ORANGE, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 18 },
-  switchBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
-  menuCard: { borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', overflow: 'hidden', marginBottom: 18 },
-  menuRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 18, borderBottomWidth: 1, borderBottomColor: BORDER },
+  profileActivityDivider: { width: 1, height: 32, backgroundColor: colors.border },
+  profileActivityValue: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 20, lineHeight: 25, fontWeight: '700' },
+  profileActivityLabel: { color: colors.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 2 },
+  aboutCard: { borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 16, marginBottom: 18 },
+  aboutTitle: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 15, lineHeight: 20, fontWeight: '700', marginBottom: 6 },
+  aboutText: { color: colors.textSecondary, fontSize: 13, lineHeight: 20, fontWeight: '500' },
+  switchBtn: { height: 48, borderRadius: 24, backgroundColor: colors.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 18 },
+  switchBtnText: { color: colors.textInverse, fontSize: 14, fontWeight: '700' },
+  menuCard: { borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, overflow: 'hidden', marginBottom: 18 },
+  menuRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 18, borderBottomWidth: 1, borderBottomColor: colors.border },
   menuIcon: { width: 22, alignItems: 'center', justifyContent: 'center' },
-  menuTitle: { fontFamily: FONT_SANS, color: NAVY, fontSize: 15, fontWeight: '600' },
-  menuSub: { color: MUTED, fontSize: 12, marginTop: 2 },
-  logoutContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 20, paddingTop: 10, backgroundColor: 'rgba(251,250,247,0.96)' },
-  logoutBtn: { height: 52, borderRadius: 26, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center' },
-  logoutText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-});
+  menuTitle: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  menuSub: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+  logoutContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 20, paddingTop: 10, backgroundColor: colors.bgOverlay },
+  logoutBtn: { height: 52, borderRadius: 26, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  logoutText: { color: colors.textInverse, fontSize: 15, fontWeight: '700' },
+  });
+}

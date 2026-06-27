@@ -18,7 +18,7 @@ export const useRideBrowseStore = create<RideBrowseState>((set) => ({
   riderSearch: '',
   riderFilter: 'all',
   driverSearch: '',
-  driverFilter: 'open',
+  driverFilter: 'all',
   setRiderSearch: (riderSearch) => set({ riderSearch }),
   setRiderFilter: (riderFilter) => set({ riderFilter }),
   setDriverSearch: (driverSearch) => set({ driverSearch }),

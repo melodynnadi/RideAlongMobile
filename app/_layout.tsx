@@ -1,18 +1,22 @@
-import { useEffect } from 'react';
-import { View, ActivityIndicator } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { View } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Toast from 'react-native-toast-message';
+import * as NativeSplashScreen from 'expo-splash-screen';
 
 import '../global.css';
 
 import { useAuthStore } from '@/stores/authStore';
-import { ThemeProvider} from '@/hooks/ThemeContext';
+import { ThemeProvider } from '@/hooks/ThemeContext';
 import DismissKeyboardView from '@/components/DismissKeyboardView';
+import SplashScreen from '@/components/SplashScreen';
 
 const queryClient = new QueryClient();
+
+NativeSplashScreen.preventAutoHideAsync().catch(() => {});
 
 function AuthGate() {
   const router = useRouter();
@@ -57,17 +61,30 @@ function AuthGate() {
 
 function AppStack() {
   const isLoading = useAuthStore((s) => s.isLoading);
+  const [nativeSplashHidden, setNativeSplashHidden] = useState(false);
+  const [initialBootComplete, setInitialBootComplete] = useState(false);
 
-  if (isLoading) {
+  useEffect(() => {
+    if (!isLoading) setInitialBootComplete(true);
+  }, [isLoading]);
+
+  const handleLayout = useCallback(() => {
+    if (nativeSplashHidden) return;
+    NativeSplashScreen.hideAsync()
+      .catch(() => {})
+      .finally(() => setNativeSplashHidden(true));
+  }, [nativeSplashHidden]);
+
+  if (isLoading && !initialBootComplete) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#FBFAF7', alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator size="large" color="#DE5D20" />
+      <View style={{ flex: 1 }} onLayout={handleLayout}>
+        <SplashScreen />
       </View>
     );
   }
 
   return (
-    <>
+    <View style={{ flex: 1 }} onLayout={handleLayout}>
       <AuthGate />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
@@ -75,7 +92,7 @@ function AppStack() {
         <Stack.Screen name="(driver)" />
       </Stack>
       <Toast />
-    </>
+    </View>
   );
 }
 

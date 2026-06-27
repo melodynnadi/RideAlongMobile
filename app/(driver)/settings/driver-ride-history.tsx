@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -24,12 +24,7 @@ import FlagRideModal from '@/components/FlagRideModal';
 import { submitDriverFlag } from '@/src/services/flagService';
 
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
-
-const NAVY   = '#15233A';
-const ORANGE = '#DE5D20';
-const BG     = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED  = '#8B94A6';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 export type HistoryItem = {
   id: string;
@@ -50,6 +45,7 @@ export type HistoryItem = {
 };
 
 export default function RideHistoryScreen() {
+  const { colors } = useAppTheme();
   const { goBack } = useReturnNavigation('/(driver)/settings');
   const [items, setItems]       = useState<HistoryItem[]>([]);
   const [totalRides, setTotalRides] = useState(0);
@@ -57,6 +53,69 @@ export default function RideHistoryScreen() {
   const [avgRating, setAvgRating] = useState<number | null>(null);
   const [flagModalVisible, setFlagModalVisible] = useState(false);
   const [selectedRideId, setSelectedRideId]     = useState<string | null>(null);
+
+  const s = useMemo(() => StyleSheet.create({
+    root:    { flex: 1, backgroundColor: colors.bg },
+    safe:    { flex: 1 },
+
+    hdr:     { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10 },
+    backBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' },
+    hdrTitle:{ color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+
+    summaryCard: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginBottom: 20, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, paddingVertical: 15 },
+    summaryItem: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    summaryDivider: { width: 1, height: 34, backgroundColor: colors.border },
+    ratingSummary: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    statNum:     { color: colors.textPrimary, fontSize: 21, fontWeight: '700', marginBottom: 2 },
+    statLabel:   { color: colors.textSecondary, fontSize: 11, fontWeight: '600' },
+
+    listContent: { paddingHorizontal: 20, paddingBottom: 48 },
+
+    card: {
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      padding: 16,
+      marginBottom: 14,
+      shadowColor: colors.textPrimary,
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: 0.05,
+      shadowRadius: 10,
+      elevation: 1,
+    },
+    cardTop:   { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 16 },
+    statusBadge: { borderRadius: 10, backgroundColor: colors.greenDim, paddingHorizontal: 9, paddingVertical: 4 },
+    statusBadgeFlagged: { backgroundColor: colors.redDim },
+    statusBadgeText: { color: colors.green, fontSize: 10, fontWeight: '700' },
+    statusBadgeTextFlagged: { color: colors.red },
+    tripMeta: { flex: 1, color: colors.textSecondary, fontSize: 11, fontWeight: '500' },
+    routeBlock: { minHeight: 82, flexDirection: 'row', paddingHorizontal: 2 },
+    routeRail: { width: 18, alignItems: 'center', paddingVertical: 5 },
+    navyDot:   { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.textPrimary, flexShrink: 0 },
+    routeLine: { flex: 1, width: 1, marginVertical: 4, backgroundColor: colors.border },
+    orangeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary, flexShrink: 0 },
+    routeDetails: { flex: 1, justifyContent: 'space-between', paddingLeft: 8 },
+    routeLabel: { color: colors.textSecondary, fontSize: 9, lineHeight: 12, fontWeight: '700', letterSpacing: 1 },
+    routeText: { color: colors.textPrimary, fontSize: 15, lineHeight: 20, fontWeight: '600', marginTop: 1 },
+    cardPrice: { color: colors.primary, fontSize: 20, fontWeight: '700' },
+    cardFooter: { minHeight: 48, flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: colors.border, marginTop: 14, paddingTop: 13, gap: 10 },
+    avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+    avatarImage: { width: 36, height: 36, borderRadius: 18 },
+    avatarText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
+    riderInfo: { flex: 1, minWidth: 0 },
+    riderName: { color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
+    riderMeta: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
+    rating: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    ratingText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
+    flagBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.redDim },
+
+    loadingWrap: { alignItems: 'center', paddingTop: 60 },
+    emptyCard:   { borderRadius: 20, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border, backgroundColor: colors.bgCard, padding: 32, alignItems: 'center', marginTop: 4 },
+    emptyIcon:   { width: 54, height: 54, borderRadius: 27, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+    emptyTitle:  { color: colors.textPrimary, fontSize: 18, fontWeight: '700', marginBottom: 6 },
+    emptyText:   { color: colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19 },
+  }), [colors]);
 
   const handleFlagPress  = (rideId: string) => { setSelectedRideId(rideId); setFlagModalVisible(true); };
   const handleFlagSubmit = async (data: { reason: string; details?: string }) => {
@@ -294,15 +353,15 @@ export default function RideHistoryScreen() {
             <Text style={s.riderName} numberOfLines={1}>{riderName}</Text>
             <Text style={s.riderMeta}>{item.seatCount && item.seatCount > 1 ? `${item.seatCount} riders` : '1 rider'}</Text>
           </View>
-          {stars > 0 ? <View style={s.rating}><Ionicons name="star" size={14} color="#E9A23B" /><Text style={s.ratingText}>{item.rating?.toFixed(1)}</Text></View> : null}
-          {!isFlagged ? <TouchableOpacity style={s.flagBtn} onPress={() => handleFlagPress(item.id)} accessibilityLabel="Report ride"><Ionicons name="flag-outline" size={17} color="#B54A4A" /></TouchableOpacity> : null}
+          {stars > 0 ? <View style={s.rating}><Ionicons name="star" size={14} color={colors.amber} /><Text style={s.ratingText}>{item.rating?.toFixed(1)}</Text></View> : null}
+          {!isFlagged ? <TouchableOpacity style={s.flagBtn} onPress={() => handleFlagPress(item.id)} accessibilityLabel="Report ride"><Ionicons name="flag-outline" size={17} color={colors.red} /></TouchableOpacity> : null}
         </View>
       </View>
     );
   };
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={colors.statusBar} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
         <FlatList
           ListHeaderComponent={
@@ -310,7 +369,7 @@ export default function RideHistoryScreen() {
               {/* Header */}
         <View style={s.hdr}>
           <TouchableOpacity style={s.backBtn} onPress={goBack}>
-            <Ionicons name="chevron-back" size={22} color={NAVY} />
+            <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
           </TouchableOpacity>
           <Text style={s.hdrTitle}>Ride history</Text>
           <View style={{ width: 40 }} />
@@ -323,7 +382,7 @@ export default function RideHistoryScreen() {
           </View>
           <View style={s.summaryDivider} />
           <View style={s.summaryItem}>
-            <View style={s.ratingSummary}><Ionicons name="star" size={17} color="#E9A23B" /><Text style={s.statNum}>{typeof avgRating === 'number' ? avgRating.toFixed(1) : '-'}</Text></View>
+            <View style={s.ratingSummary}><Ionicons name="star" size={17} color={colors.amber} /><Text style={s.statNum}>{typeof avgRating === 'number' ? avgRating.toFixed(1) : '-'}</Text></View>
             <Text style={s.statLabel}>Average rating</Text>
           </View>
         </View>
@@ -338,11 +397,11 @@ export default function RideHistoryScreen() {
           ListEmptyComponent={
             loading ? (
               <View style={s.loadingWrap}>
-                <ActivityIndicator size="large" color={ORANGE} />
+                <ActivityIndicator size="large" color={colors.primary} />
               </View>
             ) : (
               <View style={s.emptyCard}>
-                <View style={s.emptyIcon}><Ionicons name="car-outline" size={26} color={ORANGE} /></View>
+                <View style={s.emptyIcon}><Ionicons name="car-outline" size={26} color={colors.primary} /></View>
                 <Text style={s.emptyTitle}>No rides yet</Text>
                 <Text style={s.emptyText}>Your completed rides will appear here.</Text>
               </View>
@@ -440,66 +499,3 @@ function normalizeDurationString(s: string): string {
     return s;
   } catch { return s; }
 }
-
-const s = StyleSheet.create({
-  root:    { flex: 1, backgroundColor: BG },
-  safe:    { flex: 1 },
-
-  hdr:     { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  hdrTitle:{ color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
-
-  summaryCard: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginBottom: 20, borderRadius: 16, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', paddingVertical: 15 },
-  summaryItem: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  summaryDivider: { width: 1, height: 34, backgroundColor: BORDER },
-  ratingSummary: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  statNum:     { color: NAVY, fontSize: 21, fontWeight: '700', marginBottom: 2 },
-  statLabel:   { color: MUTED, fontSize: 11, fontWeight: '600' },
-
-  listContent: { paddingHorizontal: 20, paddingBottom: 48 },
-
-  card: {
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    marginBottom: 14,
-    shadowColor: NAVY,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 1,
-  },
-  cardTop:   { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 16 },
-  statusBadge: { borderRadius: 10, backgroundColor: '#EAF6EF', paddingHorizontal: 9, paddingVertical: 4 },
-  statusBadgeFlagged: { backgroundColor: '#FDECEC' },
-  statusBadgeText: { color: '#168454', fontSize: 10, fontWeight: '700' },
-  statusBadgeTextFlagged: { color: '#B54A4A' },
-  tripMeta: { flex: 1, color: MUTED, fontSize: 11, fontWeight: '500' },
-  routeBlock: { minHeight: 82, flexDirection: 'row', paddingHorizontal: 2 },
-  routeRail: { width: 18, alignItems: 'center', paddingVertical: 5 },
-  navyDot:   { width: 8, height: 8, borderRadius: 4, backgroundColor: NAVY, flexShrink: 0 },
-  routeLine: { flex: 1, width: 1, marginVertical: 4, backgroundColor: '#D8DDE5' },
-  orangeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: ORANGE, flexShrink: 0 },
-  routeDetails: { flex: 1, justifyContent: 'space-between', paddingLeft: 8 },
-  routeLabel: { color: MUTED, fontSize: 9, lineHeight: 12, fontWeight: '700', letterSpacing: 1 },
-  routeText: { color: NAVY, fontSize: 15, lineHeight: 20, fontWeight: '600', marginTop: 1 },
-  cardPrice: { color: ORANGE, fontSize: 20, fontWeight: '700' },
-  cardFooter: { minHeight: 48, flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: BORDER, marginTop: 14, paddingTop: 13, gap: 10 },
-  avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F9E8DB', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  avatarImage: { width: 36, height: 36, borderRadius: 18 },
-  avatarText: { color: ORANGE, fontSize: 12, fontWeight: '700' },
-  riderInfo: { flex: 1, minWidth: 0 },
-  riderName: { color: NAVY, fontSize: 13, fontWeight: '700' },
-  riderMeta: { color: MUTED, fontSize: 11, marginTop: 2 },
-  rating: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  ratingText: { color: NAVY, fontSize: 12, fontWeight: '700' },
-  flagBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FDECEC' },
-
-  loadingWrap: { alignItems: 'center', paddingTop: 60 },
-  emptyCard:   { borderRadius: 20, borderWidth: 1, borderStyle: 'dashed', borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 32, alignItems: 'center', marginTop: 4 },
-  emptyIcon:   { width: 54, height: 54, borderRadius: 27, backgroundColor: '#FEF0E8', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  emptyTitle:  { color: NAVY, fontSize: 18, fontWeight: '700', marginBottom: 6 },
-  emptyText:   { color: MUTED, fontSize: 13, textAlign: 'center', lineHeight: 19 },
-});

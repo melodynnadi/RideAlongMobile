@@ -118,31 +118,31 @@ export type AppColors = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const lightColors: AppColors = {
-  // Scaffolding
-  bg:              '#F7F9FF',   // warm white, bee wing inspired
-  bgSecondary:     '#EEF2FF',
+  // Scaffolding — matches existing app cream palette
+  bg:              '#FBFAF7',
+  bgSecondary:     '#F2EFE9',
   bgCard:          '#FFFFFF',
   bgElevated:      '#FFFFFF',
-  bgInput:         'rgba(13,27,72,0.05)',
-  bgOverlay:       'rgba(247,249,255,0.92)',
+  bgInput:         'rgba(21,35,58,0.05)',
+  bgOverlay:       'rgba(251,250,247,0.92)',
 
-  // Brand (unchanged — bee body stays bee body)
-  primary:         '#F97316',
-  primaryLight:    '#FB923C',
-  primaryDim:      'rgba(249,115,22,0.10)',
-  primaryBorder:   'rgba(249,115,22,0.28)',
+  // Brand — matches existing app orange
+  primary:         '#DE5D20',
+  primaryLight:    '#E8714A',
+  primaryDim:      'rgba(222,93,32,0.10)',
+  primaryBorder:   'rgba(222,93,32,0.25)',
 
-  // Typography — navy as primary (bee stripe on white)
-  textPrimary:     '#0D1B48',   // deep navy, excellent contrast
-  textSecondary:   '#4A5D78',
-  textTertiary:    '#8B9CB5',
-  textInverse:     '#F0F6FF',
+  // Typography — matches existing app navy
+  textPrimary:     '#15233A',
+  textSecondary:   '#8A8A8E',
+  textTertiary:    '#B0ABAB',
+  textInverse:     '#FFFFFF',
 
-  // Borders & dividers
-  border:          'rgba(13,27,72,0.08)',
-  borderMid:       'rgba(13,27,72,0.14)',
-  borderStrong:    'rgba(13,27,72,0.24)',
-  divider:         'rgba(13,27,72,0.07)',
+  // Borders & dividers — matches existing app border
+  border:          '#E4E1D9',
+  borderMid:       'rgba(21,35,58,0.14)',
+  borderStrong:    'rgba(21,35,58,0.24)',
+  divider:         'rgba(228,225,217,0.8)',
 
   // Semantic — calibrated for white bg
   green:           '#059669',

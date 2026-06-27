@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Alert,
   Linking,
@@ -20,18 +20,15 @@ import { settingsService } from '@/src/services/settingsService';
 import { notificationService } from '@/src/services/notificationService';
 import { useVerificationStore } from '@/stores/verificationStore';
 import { useAppTheme } from '@/hooks/ThemeContext';
-
-const NAVY = '#15233A';
-const ORANGE = '#DE5D20';
-const BG = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED = '#8B94A6';
+import { AppColors } from '@/constants/theme';
 
 export default function SettingsScreen() {
   const handleBack = () => router.replace('/(driver)/profile' as any);
   const { isVerified, verificationStatus } = useVerificationStore();
-  const { isDark, setDark } = useAppTheme();
+  const { isDark, setDark, colors } = useAppTheme();
   const [pushEnabled, setPushEnabled] = useState(true);
+
+  const s = useMemo(() => makeStyles(colors), [colors]);
 
   useEffect(() => {
     settingsService.getSettings().then((settings) => {
@@ -110,7 +107,7 @@ export default function SettingsScreen() {
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={colors.statusBar} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scrollContent}>
           <View style={s.pageHeader}>
@@ -119,7 +116,7 @@ export default function SettingsScreen() {
               onPress={handleBack}
               activeOpacity={0.75}
             >
-              <Ionicons name="chevron-back" size={22} color={NAVY} />
+              <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
             </TouchableOpacity>
             <Text style={s.pageTitle}>Settings</Text>
           </View>
@@ -127,12 +124,16 @@ export default function SettingsScreen() {
           <Text style={[s.groupLabel, s.firstGroupLabel]}>ACCOUNT</Text>
           <View style={s.groupCard}>
             <NavRow
+              colors={colors}
+              s={s}
               icon="person-circle-outline"
               label="Account"
               sub="Email, phone, password"
               onPress={() => router.push({ pathname: '/(driver)/settings/account-settings', params: { returnTo: '/(driver)/settings' } } as any)}
             />
             <NavRow
+              colors={colors}
+              s={s}
               icon="school-outline"
               label=".edu verification"
               sub={verLabel}
@@ -144,6 +145,8 @@ export default function SettingsScreen() {
           <Text style={s.groupLabel}>PREFERENCES</Text>
           <View style={s.groupCard}>
             <NavRow
+              colors={colors}
+              s={s}
               icon="options-outline"
               label="Ride preferences"
               sub="Music, conversation & comfort"
@@ -155,6 +158,8 @@ export default function SettingsScreen() {
           <Text style={s.groupLabel}>SAFETY</Text>
           <View style={s.groupCard}>
             <NavRow
+              colors={colors}
+              s={s}
               icon="shield-outline"
               label="Emergency contacts"
               sub="Trusted people who can be alerted"
@@ -166,6 +171,8 @@ export default function SettingsScreen() {
           <Text style={s.groupLabel}>APP PREFERENCES</Text>
           <View style={s.groupCard}>
             <ToggleRow
+              colors={colors}
+              s={s}
               icon="notifications-outline"
               label="Push notifications"
               sub="Ride offers & account alerts"
@@ -173,6 +180,8 @@ export default function SettingsScreen() {
               onToggle={togglePush}
             />
             <ToggleRow
+              colors={colors}
+              s={s}
               icon="moon-outline"
               label="Dark mode"
               sub={isDark ? 'On' : 'Off'}
@@ -185,24 +194,32 @@ export default function SettingsScreen() {
           <Text style={s.groupLabel}>HELP & LEGAL</Text>
           <View style={s.groupCard}>
             <NavRow
+              colors={colors}
+              s={s}
               icon="help-buoy-outline"
               label="Help Center"
               sub="FAQs & how-to guides"
               onPress={() => openLink('https://ridealongapp.com/pages/help')}
             />
             <NavRow
+              colors={colors}
+              s={s}
               icon="mail-outline"
               label="Contact Support"
               sub="Response within 24h"
               onPress={() => openLink('mailto:support@ridealongapp.com')}
             />
             <NavRow
+              colors={colors}
+              s={s}
               icon="shield-checkmark-outline"
               label="Privacy Policy"
               sub="How we protect your data"
               onPress={() => openLink('https://ridealongapp.com/privacy')}
             />
             <NavRow
+              colors={colors}
+              s={s}
               icon="document-text-outline"
               label="Terms of Service"
               sub="User agreement"
@@ -217,9 +234,9 @@ export default function SettingsScreen() {
 }
 
 function NavRow({
-  icon, label, sub, onPress, isLast = false,
+  colors, s, icon, label, sub, onPress, isLast = false,
 }: {
-  icon: string; label: string; sub?: string; onPress: () => void; isLast?: boolean;
+  colors: AppColors; s: ReturnType<typeof makeStyles>; icon: string; label: string; sub?: string; onPress: () => void; isLast?: boolean;
 }) {
   return (
     <TouchableOpacity
@@ -228,26 +245,26 @@ function NavRow({
       activeOpacity={0.75}
     >
       <View style={s.rowIconWrap}>
-        <Ionicons name={icon as any} size={19} color={ORANGE} />
+        <Ionicons name={icon as any} size={19} color={colors.primary} />
       </View>
       <View style={s.rowMid}>
         <Text style={s.rowLabel}>{label}</Text>
         {sub ? <Text style={s.rowSub}>{sub}</Text> : null}
       </View>
-      <Ionicons name="chevron-forward" size={15} color={MUTED} />
+      <Ionicons name="chevron-forward" size={15} color={colors.textSecondary} />
     </TouchableOpacity>
   );
 }
 
 function ToggleRow({
-  icon, label, sub, value, onToggle, isLast = false,
+  colors, s, icon, label, sub, value, onToggle, isLast = false,
 }: {
-  icon: string; label: string; sub?: string; value: boolean; onToggle: (v: boolean) => void; isLast?: boolean;
+  colors: AppColors; s: ReturnType<typeof makeStyles>; icon: string; label: string; sub?: string; value: boolean; onToggle: (v: boolean) => void; isLast?: boolean;
 }) {
   return (
     <View style={[s.row, !isLast && s.rowBorder]}>
       <View style={s.rowIconWrap}>
-        <Ionicons name={icon as any} size={19} color={ORANGE} />
+        <Ionicons name={icon as any} size={19} color={colors.primary} />
       </View>
       <View style={s.rowMid}>
         <Text style={s.rowLabel}>{label}</Text>
@@ -256,63 +273,65 @@ function ToggleRow({
       <Switch
         value={value}
         onValueChange={onToggle}
-        trackColor={{ false: '#D1D5DB', true: ORANGE }}
-        thumbColor="#FFFFFF"
-        ios_backgroundColor="#D1D5DB"
+        trackColor={{ false: colors.switchTrackOff, true: colors.switchTrackOn }}
+        thumbColor={value ? colors.switchThumbOn : colors.switchThumbOff}
+        ios_backgroundColor={colors.switchIosBg}
         style={{ transform: [{ scaleX: 0.88 }, { scaleY: 0.88 }] }}
       />
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: BG },
-  safe: { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 60 },
-  pageHeader: { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pageTitle: { color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+function makeStyles(colors: AppColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.bg },
+    safe: { flex: 1 },
+    scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 60 },
+    pageHeader: { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
+    backBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    pageTitle: { color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
 
-  groupLabel: {
-    marginTop: 18,
-    marginBottom: 8,
-    paddingHorizontal: 2,
-    color: MUTED,
-    fontSize: 10,
-    lineHeight: 15,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-  },
-  firstGroupLabel: { marginTop: 2 },
-  groupCard: {
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: '#FFFFFF',
-    overflow: 'hidden',
-    marginBottom: 2,
-  },
+    groupLabel: {
+      marginTop: 18,
+      marginBottom: 8,
+      paddingHorizontal: 2,
+      color: colors.textSecondary,
+      fontSize: 10,
+      lineHeight: 15,
+      fontWeight: '800',
+      letterSpacing: 1.5,
+    },
+    firstGroupLabel: { marginTop: 2 },
+    groupCard: {
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      overflow: 'hidden',
+      marginBottom: 2,
+    },
 
-  row: {
-    minHeight: 68,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 18,
-    paddingVertical: 13,
-  },
-  rowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  rowIconWrap: { width: 36, height: 36, borderRadius: 11, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  rowMid: { flex: 1, minWidth: 0 },
-  rowLabel: { color: NAVY, fontSize: 15, fontWeight: '600' },
-  rowSub: { color: MUTED, fontSize: 12, lineHeight: 18, marginTop: 3 },
-});
+    row: {
+      minHeight: 68,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      paddingHorizontal: 18,
+      paddingVertical: 13,
+    },
+    rowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+    rowIconWrap: { width: 36, height: 36, borderRadius: 11, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+    rowMid: { flex: 1, minWidth: 0 },
+    rowLabel: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+    rowSub: { color: colors.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 3 },
+  });
+}

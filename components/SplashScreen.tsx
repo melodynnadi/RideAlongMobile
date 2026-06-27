@@ -1,45 +1,71 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Image } from 'react-native';
+import { Animated, Image, StyleSheet, View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 
-interface SplashScreenProps {
-  onLoadingComplete?: () => void;
-}
-
-export default function SplashScreen({ onLoadingComplete }: SplashScreenProps) {
+export default function SplashScreen() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  const scaleAnim = useRef(new Animated.Value(0.94)).current;
+  const glowAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Simple entrance animation
-    const animation = Animated.parallel([
+    const intro = Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 800,
+        duration: 420,
         useNativeDriver: true,
       }),
       Animated.spring(scaleAnim, {
         toValue: 1,
-        tension: 50,
-        friction: 7,
+        tension: 70,
+        friction: 8,
         useNativeDriver: true,
       }),
     ]);
 
-    animation.start();
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, {
+          toValue: 1,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowAnim, {
+          toValue: 0,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+      ])
+    );
 
-    // Auto-complete after 3 seconds
-    const timer = setTimeout(() => {
-      onLoadingComplete?.();
-    }, 3000);
+    intro.start();
+    pulse.start();
 
     return () => {
-      animation.stop();
-      clearTimeout(timer);
+      intro.stop();
+      pulse.stop();
     };
-  }, [fadeAnim, scaleAnim, onLoadingComplete]);
+  }, [fadeAnim, glowAnim, scaleAnim]);
 
   return (
     <View style={styles.container}>
+      <StatusBar style="dark" />
+      <Animated.View
+        style={[
+          styles.glow,
+          {
+            opacity: glowAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0.16, 0.3],
+            }),
+            transform: [{
+              scale: glowAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0.92, 1.08],
+              }),
+            }],
+          },
+        ]}
+      />
       <Animated.View
         style={[
           styles.content,
@@ -49,15 +75,11 @@ export default function SplashScreen({ onLoadingComplete }: SplashScreenProps) {
           },
         ]}
       >
-        {/* Logo and Text Layout matching web app */}
-        <View style={styles.logoContainer}>
-          <Image 
-            source={require('../assets/images/RideAlongWebLogo.png')}
-            style={styles.logoImage}
-            resizeMode="contain"
-          />
-          <Text style={styles.logoText}>RideAlong</Text>
-        </View>
+        <Image
+          source={require('../assets/logo+text - Edited.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
       </Animated.View>
     </View>
   );
@@ -66,25 +88,25 @@ export default function SplashScreen({ onLoadingComplete }: SplashScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FBFAF7',
     justifyContent: 'center',
     alignItems: 'center',
   },
+  glow: {
+    position: 'absolute',
+    width: 210,
+    height: 210,
+    borderRadius: 105,
+    backgroundColor: '#E05E1A',
+  },
   content: {
     alignItems: 'center',
+    width: '100%',
+    paddingHorizontal: 42,
   },
-  logoContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  logoImage: {
-    width: 40,
-    height: 40,
-  },
-  logoText: {
-    fontSize: 42,
-    fontWeight: '800',
-    color: '#E05E1A',
+  logo: {
+    width: '100%',
+    maxWidth: 320,
+    height: 92,
   },
 });

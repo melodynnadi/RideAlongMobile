@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   TextInput, Alert, ActivityIndicator, StatusBar,
@@ -17,14 +17,10 @@ import {
 } from '@/src/services/emergencyContactsService';
 
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
-
-const NAVY   = '#15233A';
-const ORANGE = '#DE5D20';
-const BG     = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED  = '#8B94A6';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 export default function EmergencyContactsScreen() {
+  const { colors } = useAppTheme();
   const { goBack } = useReturnNavigation('/(driver)/settings');
   const [isAddingContact, setIsAddingContact] = useState(false);
   const [editingContact, setEditingContact]   = useState<EmergencyContact | null>(null);
@@ -32,6 +28,56 @@ export default function EmergencyContactsScreen() {
   const [emergencyContacts, setEmergencyContacts] = useState<EmergencyContact[]>([]);
   const [loading, setLoading]                 = useState(true);
   const [saving, setSaving]                   = useState(false);
+
+  const s = useMemo(() => StyleSheet.create({
+    root:        { flex: 1, backgroundColor: colors.bg },
+    safe:        { flex: 1 },
+    loadingWrap: { paddingTop: 60, alignItems: 'center' },
+
+    hdr:      { minHeight: 64, flexDirection: 'row', alignItems: 'center', paddingTop: 8, paddingBottom: 10 },
+    backBtn:  { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' },
+    hdrTitle: { color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', flex: 1, marginLeft: 12 },
+
+    content: { paddingHorizontal: 20, paddingBottom: 60 },
+
+    addBtn:     { height: 50, borderRadius: 25, backgroundColor: colors.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 24 },
+    addBtnText: { color: colors.textInverse, fontSize: 15, fontWeight: '700' },
+
+    formCard: { borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 20, marginBottom: 24, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 1 },
+    formTitle:  { color: colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 20 },
+    formGroup:  { marginBottom: 14 },
+    formLabel:  { color: colors.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 6 },
+    input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: colors.textPrimary, fontSize: 14, fontWeight: '500', backgroundColor: colors.bgSecondary },
+    formActions:    { flexDirection: 'row', gap: 12, marginTop: 18 },
+    cancelBtn:      { flex: 1, height: 46, borderRadius: 23, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+    cancelBtnText:  { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
+    saveBtn:        { flex: 1, height: 46, borderRadius: 23, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+    saveBtnText:    { color: colors.textInverse, fontSize: 14, fontWeight: '700' },
+
+    sectionLabel: { color: colors.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginBottom: 10, marginTop: 4 },
+
+    emptyCard:  { borderRadius: 18, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border, backgroundColor: colors.bgCard, padding: 28, alignItems: 'center', marginBottom: 24 },
+    emptyIcon:  { width: 52, height: 52, borderRadius: 26, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+    emptyTitle: { color: colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 8 },
+    emptyText:  { color: colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 18 },
+
+    contactsCard: { borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, marginBottom: 24, overflow: 'hidden', shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
+    contactRow:   { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
+    contactBorder:{ borderBottomWidth: 1, borderBottomColor: colors.border },
+    contactIcon:  { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+    contactInfo:  { flex: 1 },
+    contactName:  { color: colors.textPrimary, fontSize: 15, fontWeight: '600', marginBottom: 2 },
+    contactPhone: { color: colors.textSecondary, fontSize: 13 },
+    contactRel:   { color: colors.primary, fontSize: 12, marginTop: 2, fontWeight: '500' },
+    contactActions:   { flexDirection: 'row', gap: 6 },
+    actionBtn:        { width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center' },
+    actionBtnDanger:  { borderColor: colors.redBorder, backgroundColor: colors.redDim },
+
+    infoCard: { borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 16, marginBottom: 24 },
+    infoTitle:  { color: colors.textPrimary, fontSize: 15, fontWeight: '700', marginBottom: 10 },
+    infoText:   { color: colors.textSecondary, fontSize: 13, marginBottom: 8 },
+    infoBullet: { color: colors.textSecondary, fontSize: 13, lineHeight: 20 },
+  }), [colors]);
 
   useEffect(() => { loadContacts(); }, []);
 
@@ -94,16 +140,16 @@ export default function EmergencyContactsScreen() {
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={colors.statusBar} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.content}>
 <View style={s.hdr}>
           <TouchableOpacity style={s.backBtn} onPress={goBack}>
-            <Ionicons name="arrow-back" size={19} color={NAVY} />
+            <Ionicons name="arrow-back" size={19} color={colors.textPrimary} />
           </TouchableOpacity>
           <Text style={s.hdrTitle}>Emergency Contacts</Text>
         </View>
           {loading ? (
-            <View style={s.loadingWrap}><ActivityIndicator size="large" color={ORANGE} /></View>
+            <View style={s.loadingWrap}><ActivityIndicator size="large" color={colors.primary} /></View>
           ) : (
             <>
               {isAddingContact ? (
@@ -111,26 +157,26 @@ export default function EmergencyContactsScreen() {
                   <Text style={s.formTitle}>{editingContact ? 'Edit Contact' : 'Add Emergency Contact'}</Text>
                   <View style={s.formGroup}>
                     <Text style={s.formLabel}>FULL NAME *</Text>
-                    <TextInput style={s.input} value={newContact.name} onChangeText={(t) => setNewContact((p) => ({ ...p, name: t }))} placeholder="Enter full name" placeholderTextColor={MUTED} />
+                    <TextInput style={s.input} value={newContact.name} onChangeText={(t) => setNewContact((p) => ({ ...p, name: t }))} placeholder="Enter full name" placeholderTextColor={colors.textSecondary} />
                   </View>
                   <View style={s.formGroup}>
                     <Text style={s.formLabel}>PHONE NUMBER *</Text>
-                    <TextInput style={s.input} value={newContact.phone} onChangeText={(t) => setNewContact((p) => ({ ...p, phone: t }))} placeholder="+1 (555) 123-4567" keyboardType="phone-pad" placeholderTextColor={MUTED} />
+                    <TextInput style={s.input} value={newContact.phone} onChangeText={(t) => setNewContact((p) => ({ ...p, phone: t }))} placeholder="+1 (555) 123-4567" keyboardType="phone-pad" placeholderTextColor={colors.textSecondary} />
                   </View>
                   <View style={[s.formGroup, { marginBottom: 0 }]}>
                     <Text style={s.formLabel}>RELATIONSHIP</Text>
-                    <TextInput style={s.input} value={newContact.relationship} onChangeText={(t) => setNewContact((p) => ({ ...p, relationship: t }))} placeholder="e.g., Mother, Friend, Roommate" placeholderTextColor={MUTED} />
+                    <TextInput style={s.input} value={newContact.relationship} onChangeText={(t) => setNewContact((p) => ({ ...p, relationship: t }))} placeholder="e.g., Mother, Friend, Roommate" placeholderTextColor={colors.textSecondary} />
                   </View>
                   <View style={s.formActions}>
                     <TouchableOpacity style={s.cancelBtn} onPress={handleCancel}><Text style={s.cancelBtnText}>Cancel</Text></TouchableOpacity>
                     <TouchableOpacity style={[s.saveBtn, saving && { opacity: 0.6 }]} onPress={handleSaveContact} disabled={saving}>
-                      {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={s.saveBtnText}>{editingContact ? 'Update' : 'Save'}</Text>}
+                      {saving ? <ActivityIndicator color={colors.textInverse} /> : <Text style={s.saveBtnText}>{editingContact ? 'Update' : 'Save'}</Text>}
                     </TouchableOpacity>
                   </View>
                 </View>
               ) : (
                 <TouchableOpacity style={s.addBtn} onPress={() => setIsAddingContact(true)}>
-                  <Ionicons name="add" size={20} color="#FFFFFF" />
+                  <Ionicons name="add" size={20} color={colors.textInverse} />
                   <Text style={s.addBtnText}>Add Emergency Contact</Text>
                 </TouchableOpacity>
               )}
@@ -138,7 +184,7 @@ export default function EmergencyContactsScreen() {
               <Text style={s.sectionLabel}>YOUR CONTACTS</Text>
               {emergencyContacts.length === 0 ? (
                 <View style={s.emptyCard}>
-                  <View style={s.emptyIcon}><Ionicons name="people-outline" size={26} color={ORANGE} /></View>
+                  <View style={s.emptyIcon}><Ionicons name="people-outline" size={26} color={colors.primary} /></View>
                   <Text style={s.emptyTitle}>No contacts yet</Text>
                   <Text style={s.emptyText}>Add emergency contacts so they can be notified if something goes wrong on a ride.</Text>
                 </View>
@@ -147,7 +193,7 @@ export default function EmergencyContactsScreen() {
                   {emergencyContacts.map((contact, idx) => (
                     <View key={contact.id} style={[s.contactRow, idx < emergencyContacts.length - 1 && s.contactBorder]}>
                       <View style={s.contactIcon}>
-                        <Ionicons name="person-outline" size={18} color={ORANGE} />
+                        <Ionicons name="person-outline" size={18} color={colors.primary} />
                       </View>
                       <View style={s.contactInfo}>
                         <Text style={s.contactName}>{contact.name}</Text>
@@ -156,10 +202,10 @@ export default function EmergencyContactsScreen() {
                       </View>
                       <View style={s.contactActions}>
                         <TouchableOpacity style={s.actionBtn} onPress={() => handleEditContact(contact)}>
-                          <Ionicons name="pencil-outline" size={15} color={MUTED} />
+                          <Ionicons name="pencil-outline" size={15} color={colors.textSecondary} />
                         </TouchableOpacity>
                         <TouchableOpacity style={[s.actionBtn, s.actionBtnDanger]} onPress={() => handleDeleteContact(contact.id, contact.name)}>
-                          <Ionicons name="trash-outline" size={15} color="#EF4444" />
+                          <Ionicons name="trash-outline" size={15} color={colors.red} />
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -181,53 +227,3 @@ export default function EmergencyContactsScreen() {
     </View>
   );
 }
-
-const s = StyleSheet.create({
-  root:        { flex: 1, backgroundColor: BG },
-  safe:        { flex: 1 },
-  loadingWrap: { paddingTop: 60, alignItems: 'center' },
-
-  hdr:      { minHeight: 64, flexDirection: 'row', alignItems: 'center', paddingTop: 8, paddingBottom: 10 },
-  backBtn:  { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  hdrTitle: { color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', flex: 1, marginLeft: 12 },
-
-  content: { paddingHorizontal: 20, paddingBottom: 60 },
-
-  addBtn:     { height: 50, borderRadius: 25, backgroundColor: ORANGE, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 24 },
-  addBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-
-  formCard: { borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 20, marginBottom: 24, shadowColor: NAVY, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 1 },
-  formTitle:  { color: NAVY, fontSize: 17, fontWeight: '700', marginBottom: 20 },
-  formGroup:  { marginBottom: 14 },
-  formLabel:  { color: MUTED, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 6 },
-  input: { borderWidth: 1, borderColor: BORDER, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: NAVY, fontSize: 14, fontWeight: '500', backgroundColor: '#FAFAF8' },
-  formActions:    { flexDirection: 'row', gap: 12, marginTop: 18 },
-  cancelBtn:      { flex: 1, height: 46, borderRadius: 23, borderWidth: 1, borderColor: BORDER, alignItems: 'center', justifyContent: 'center' },
-  cancelBtnText:  { color: NAVY, fontSize: 14, fontWeight: '600' },
-  saveBtn:        { flex: 1, height: 46, borderRadius: 23, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center' },
-  saveBtnText:    { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
-
-  sectionLabel: { color: MUTED, fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginBottom: 10, marginTop: 4 },
-
-  emptyCard:  { borderRadius: 18, borderWidth: 1, borderStyle: 'dashed', borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 28, alignItems: 'center', marginBottom: 24 },
-  emptyIcon:  { width: 52, height: 52, borderRadius: 26, backgroundColor: '#FEF0E8', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
-  emptyTitle: { color: NAVY, fontSize: 17, fontWeight: '700', marginBottom: 8 },
-  emptyText:  { color: MUTED, fontSize: 13, textAlign: 'center', lineHeight: 18 },
-
-  contactsCard: { borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', marginBottom: 24, overflow: 'hidden', shadowColor: NAVY, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
-  contactRow:   { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
-  contactBorder:{ borderBottomWidth: 1, borderBottomColor: BORDER },
-  contactIcon:  { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FEF0E8', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  contactInfo:  { flex: 1 },
-  contactName:  { color: NAVY, fontSize: 15, fontWeight: '600', marginBottom: 2 },
-  contactPhone: { color: MUTED, fontSize: 13 },
-  contactRel:   { color: ORANGE, fontSize: 12, marginTop: 2, fontWeight: '500' },
-  contactActions:   { flexDirection: 'row', gap: 6 },
-  actionBtn:        { width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FAFAF8', alignItems: 'center', justifyContent: 'center' },
-  actionBtnDanger:  { borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' },
-
-  infoCard: { borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 16, marginBottom: 24 },
-  infoTitle:  { color: NAVY, fontSize: 15, fontWeight: '700', marginBottom: 10 },
-  infoText:   { color: MUTED, fontSize: 13, marginBottom: 8 },
-  infoBullet: { color: MUTED, fontSize: 13, lineHeight: 20 },
-});

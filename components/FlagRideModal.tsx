@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, Modal, TouchableOpacity, StyleSheet, TextInput,
   ActivityIndicator, Alert, Switch, Platform, KeyboardAvoidingView, ScrollView,
@@ -8,13 +8,8 @@ import { firebaseAuth, firestore } from '@/constants/services';
 import { logActivity } from '@/utils/activityLogger';
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
 import { roleKey } from '@/src/utils/roleIdentity';
-
-const NAVY   = '#15233A';
-const ORANGE = '#DE5D20';
-const BG     = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED  = '#8B94A6';
-const RED    = '#DC2626';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import type { AppColors } from '@/constants/theme';
 
 export type FlagRideModalProps = {
   visible: boolean;
@@ -35,6 +30,8 @@ const REASONS = [
 ] as const;
 
 export function FlagRideModal({ visible, onClose, rideId, role = 'rider', onFlagged }: FlagRideModalProps) {
+  const { colors } = useAppTheme();
+  const s = useMemo(() => makeStyles(colors), [colors]);
   const [reason, setReason]             = useState<string>('');
   const [details, setDetails]           = useState<string>('');
   const [severityHigh, setSeverityHigh] = useState(false);
@@ -220,18 +217,18 @@ export function FlagRideModal({ visible, onClose, rideId, role = 'rider', onFlag
           {/* Header */}
           <View style={s.header}>
             <View style={s.headerIcon}>
-              <Ionicons name="flag" size={18} color={RED} />
+              <Ionicons name="flag" size={18} color={colors.red} />
             </View>
             <Text style={s.title}>Flag Ride</Text>
             <TouchableOpacity onPress={() => { if (!submitting) onClose(); }} style={s.closeBtn} activeOpacity={0.7}>
-              <Ionicons name="close" size={20} color={MUTED} />
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
           <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
             {loadingExisting ? (
-              <ActivityIndicator color={ORANGE} style={{ marginBottom: 16 }} />
+              <ActivityIndicator color={colors.primary} style={{ marginBottom: 16 }} />
             ) : null}
 
             {/* Reason */}
@@ -258,7 +255,7 @@ export function FlagRideModal({ visible, onClose, rideId, role = 'rider', onFlag
               value={details}
               onChangeText={(t) => setDetails(t.slice(0, 1000))}
               placeholder="Describe what happened (min 20 characters)..."
-              placeholderTextColor={MUTED}
+              placeholderTextColor={colors.textSecondary}
               textAlignVertical="top"
             />
             <Text style={s.charCount}>{details.trim().length} / 1000</Text>
@@ -273,8 +270,8 @@ export function FlagRideModal({ visible, onClose, rideId, role = 'rider', onFlag
                 value={severityHigh}
                 onValueChange={setSeverityHigh}
                 disabled={submitting}
-                trackColor={{ false: BORDER, true: 'rgba(220,38,38,0.3)' }}
-                thumbColor={severityHigh ? RED : '#FFF'}
+                trackColor={{ false: colors.border, true: colors.redBorder }}
+                thumbColor={severityHigh ? colors.red : colors.bgCard}
               />
             </View>
 
@@ -295,7 +292,7 @@ export function FlagRideModal({ visible, onClose, rideId, role = 'rider', onFlag
                 activeOpacity={0.85}
               >
                 {submitting
-                  ? <ActivityIndicator size="small" color="#FFF" />
+                  ? <ActivityIndicator size="small" color={colors.textInverse} />
                   : <Text style={s.submitBtnText}>Submit</Text>}
               </TouchableOpacity>
             </View>
@@ -307,38 +304,40 @@ export function FlagRideModal({ visible, onClose, rideId, role = 'rider', onFlag
   );
 }
 
-const s = StyleSheet.create({
-  overlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet:      { backgroundColor: BG, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 36, maxHeight: '90%' },
-  handle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: BORDER, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
+function makeStyles(colors: AppColors) {
+  return StyleSheet.create({
+  overlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  sheet:      { backgroundColor: colors.bg, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 36, maxHeight: '90%' },
+  handle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
 
-  header:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: BORDER, gap: 10 },
-  headerIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#FEF2F2', alignItems: 'center', justifyContent: 'center' },
-  title:      { flex: 1, color: NAVY, fontSize: 17, fontWeight: '700', letterSpacing: -0.2 },
-  closeBtn:   { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F1F3F6', alignItems: 'center', justifyContent: 'center' },
+  header:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 10 },
+  headerIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: colors.redDim, alignItems: 'center', justifyContent: 'center' },
+  title:      { flex: 1, color: colors.textPrimary, fontSize: 17, fontWeight: '700', letterSpacing: -0.2 },
+  closeBtn:   { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
 
   body:       { padding: 20, paddingBottom: 8 },
 
-  label:      { color: NAVY, fontSize: 13, fontWeight: '700', marginBottom: 10, letterSpacing: 0.1 },
+  label:      { color: colors.textPrimary, fontSize: 13, fontWeight: '700', marginBottom: 10, letterSpacing: 0.1 },
 
   pillRow:    { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  pill:       { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFF' },
-  pillSelected:     { backgroundColor: '#FEF2F2', borderColor: RED },
-  pillText:         { color: MUTED, fontSize: 13, fontWeight: '600' },
-  pillTextSelected: { color: RED, fontWeight: '700' },
+  pill:       { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard },
+  pillSelected:     { backgroundColor: colors.redDim, borderColor: colors.red },
+  pillText:         { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
+  pillTextSelected: { color: colors.red, fontWeight: '700' },
 
-  textarea:   { minHeight: 110, borderWidth: 1, borderColor: BORDER, borderRadius: 14, padding: 14, fontSize: 14, color: NAVY, backgroundColor: '#FFF', lineHeight: 20 },
-  charCount:  { color: MUTED, fontSize: 11, fontWeight: '500', marginTop: 6, textAlign: 'right' },
+  textarea:   { minHeight: 110, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 14, fontSize: 14, color: colors.textPrimary, backgroundColor: colors.bgCard, lineHeight: 20 },
+  charCount:  { color: colors.textSecondary, fontSize: 11, fontWeight: '500', marginTop: 6, textAlign: 'right' },
 
-  severityRow:  { flexDirection: 'row', alignItems: 'center', marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: BORDER },
-  severityHint: { color: MUTED, fontSize: 12, fontWeight: '500', marginTop: 2 },
+  severityRow:  { flexDirection: 'row', alignItems: 'center', marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border },
+  severityHint: { color: colors.textSecondary, fontSize: 12, fontWeight: '500', marginTop: 2 },
 
   actions:    { flexDirection: 'row', gap: 10, marginTop: 24 },
-  cancelBtn:  { flex: 1, paddingVertical: 14, borderRadius: 24, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFF', alignItems: 'center' },
-  cancelBtnText: { color: NAVY, fontSize: 14, fontWeight: '700' },
-  submitBtn:  { flex: 1, paddingVertical: 14, borderRadius: 24, backgroundColor: RED, alignItems: 'center' },
+  cancelBtn:  { flex: 1, paddingVertical: 14, borderRadius: 24, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center' },
+  cancelBtnText: { color: colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  submitBtn:  { flex: 1, paddingVertical: 14, borderRadius: 24, backgroundColor: colors.red, alignItems: 'center' },
   submitBtnDisabled: { opacity: 0.45 },
-  submitBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
-});
+  submitBtnText: { color: colors.textInverse, fontSize: 14, fontWeight: '700' },
+  });
+}
 
 export default FlagRideModal;

@@ -1,12 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-
-const NAVY = '#15233A';
-const ORANGE = '#DE5D20';
-const MUTED = '#8B94A6';
-const BORDER = '#E5E0D8';
-const BG = '#FBFAF7';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import type { AppColors } from '@/constants/theme';
 
 function pad2(value: number) {
   return String(value).padStart(2, '0');
@@ -95,6 +91,8 @@ export function DatePickerModal({
   onSelect: (value: string) => void;
   title?: string;
 }) {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [month, setMonth] = useState(() => parseSelectedDate(selectedDate));
   useEffect(() => {
     if (visible) setMonth(parseSelectedDate(selectedDate));
@@ -114,17 +112,17 @@ export function DatePickerModal({
               <Text style={styles.modalTitle}>{title}</Text>
             </View>
             <TouchableOpacity style={styles.closeIcon} onPress={onClose} accessibilityRole="button">
-              <Ionicons name="close" size={18} color={NAVY} />
+              <Ionicons name="close" size={18} color={colors.textPrimary} />
             </TouchableOpacity>
           </View>
 
           <View style={styles.monthRow}>
             <TouchableOpacity style={styles.navButton} onPress={() => setMonth(addMonths(month, -1))}>
-              <Ionicons name="chevron-back" size={18} color={NAVY} />
+              <Ionicons name="chevron-back" size={18} color={colors.textPrimary} />
             </TouchableOpacity>
             <Text style={styles.monthLabel}>{monthLabel}</Text>
             <TouchableOpacity style={styles.navButton} onPress={() => setMonth(addMonths(month, 1))}>
-              <Ionicons name="chevron-forward" size={18} color={NAVY} />
+              <Ionicons name="chevron-forward" size={18} color={colors.textPrimary} />
             </TouchableOpacity>
           </View>
 
@@ -176,6 +174,8 @@ export function TimePickerModal({
   onSelect: (value: string) => void;
   title?: string;
 }) {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const initial = parseTime(selectedTime);
   const [hour, setHour] = useState(initial.hour);
   const [minute, setMinute] = useState(initial.minute);
@@ -203,20 +203,20 @@ export function TimePickerModal({
               <Text style={styles.modalTitle}>{title}</Text>
             </View>
             <TouchableOpacity style={styles.closeIcon} onPress={onClose} accessibilityRole="button">
-              <Ionicons name="close" size={18} color={NAVY} />
+              <Ionicons name="close" size={18} color={colors.textPrimary} />
             </TouchableOpacity>
           </View>
 
           <View style={styles.timeDisplay}>
             <TouchableOpacity style={[styles.timeStepper, styles.timeStepperUp]} onPress={() => setHour((current) => current === 12 ? 1 : current + 1)}>
-              <Ionicons name="chevron-up" size={18} color={ORANGE} />
+              <Ionicons name="chevron-up" size={18} color={colors.primary} />
             </TouchableOpacity>
             <Text style={styles.timeValue}>{hour}:{pad2(minute)}</Text>
             <TouchableOpacity style={styles.periodButton} onPress={() => setPeriod(period === 'AM' ? 'PM' : 'AM')}>
               <Text style={styles.periodText}>{period}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.timeStepper, styles.timeStepperDown]} onPress={() => setHour((current) => current === 1 ? 12 : current - 1)}>
-              <Ionicons name="chevron-down" size={18} color={ORANGE} />
+              <Ionicons name="chevron-down" size={18} color={colors.primary} />
             </TouchableOpacity>
           </View>
 
@@ -250,41 +250,43 @@ export function TimePickerModal({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(21,35,58,0.32)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  card: { width: '100%', maxWidth: 390, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 18, shadowColor: NAVY, shadowOffset: { width: 0, height: 16 }, shadowOpacity: 0.18, shadowRadius: 30, elevation: 18 },
+function makeStyles(colors: AppColors) {
+  return StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(5,12,30,0.68)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  card: { width: '100%', maxWidth: 390, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 18, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 16 }, shadowOpacity: 0.18, shadowRadius: 30, elevation: 18 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  modalEyebrow: { color: MUTED, fontSize: 11, lineHeight: 14, fontWeight: '800', letterSpacing: 1.1, textTransform: 'uppercase' },
-  modalTitle: { color: NAVY, fontSize: 22, lineHeight: 28, fontWeight: '800', marginTop: 2 },
-  closeIcon: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: BG, alignItems: 'center', justifyContent: 'center' },
-  monthRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 16, backgroundColor: BG, padding: 8, marginBottom: 14 },
-  navButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: BORDER },
-  monthLabel: { color: NAVY, fontSize: 15, fontWeight: '800' },
+  modalEyebrow: { color: colors.textSecondary, fontSize: 11, lineHeight: 14, fontWeight: '800', letterSpacing: 1.1, textTransform: 'uppercase' },
+  modalTitle: { color: colors.textPrimary, fontSize: 22, lineHeight: 28, fontWeight: '800', marginTop: 2 },
+  closeIcon: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center' },
+  monthRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 16, backgroundColor: colors.bgSecondary, padding: 8, marginBottom: 14 },
+  navButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
+  monthLabel: { color: colors.textPrimary, fontSize: 15, fontWeight: '800' },
   weekdayRow: { flexDirection: 'row', marginBottom: 7 },
-  weekday: { flex: 1, textAlign: 'center', color: MUTED, fontSize: 11, fontWeight: '800' },
+  weekday: { flex: 1, textAlign: 'center', color: colors.textSecondary, fontSize: 11, fontWeight: '800' },
   dayRow: { flexDirection: 'row', gap: 5, marginBottom: 5 },
-  dayButton: { flex: 1, aspectRatio: 1, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#F1EEE8' },
+  dayButton: { flex: 1, aspectRatio: 1, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border },
   dayButtonEmpty: { opacity: 0, borderWidth: 0 },
-  dayButtonToday: { borderColor: ORANGE, backgroundColor: '#FFF7ED' },
-  dayButtonSelected: { borderColor: ORANGE, backgroundColor: ORANGE },
-  dayText: { color: NAVY, fontSize: 14, fontWeight: '700' },
-  dayTextToday: { color: ORANGE },
-  dayTextSelected: { color: '#FFFFFF', fontWeight: '900' },
-  timeDisplay: { minHeight: 110, borderRadius: 18, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
-  timeValue: { color: NAVY, fontSize: 46, lineHeight: 54, fontWeight: '900' },
-  timeStepper: { position: 'absolute', right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: BORDER, alignItems: 'center', justifyContent: 'center' },
+  dayButtonToday: { borderColor: colors.primary, backgroundColor: colors.primaryDim },
+  dayButtonSelected: { borderColor: colors.primary, backgroundColor: colors.primary },
+  dayText: { color: colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  dayTextToday: { color: colors.primary },
+  dayTextSelected: { color: colors.textInverse, fontWeight: '900' },
+  timeDisplay: { minHeight: 110, borderRadius: 18, backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  timeValue: { color: colors.textPrimary, fontSize: 46, lineHeight: 54, fontWeight: '900' },
+  timeStepper: { position: 'absolute', right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   timeStepperUp: { top: 14 },
   timeStepperDown: { bottom: 14 },
-  periodButton: { position: 'absolute', left: 16, top: 37, borderRadius: 18, backgroundColor: '#FEF0E8', paddingHorizontal: 13, paddingVertical: 8, borderWidth: 1, borderColor: '#F8CFB8' },
-  periodText: { color: ORANGE, fontSize: 13, fontWeight: '900' },
+  periodButton: { position: 'absolute', left: 16, top: 37, borderRadius: 18, backgroundColor: colors.primaryDim, paddingHorizontal: 13, paddingVertical: 8, borderWidth: 1, borderColor: colors.primaryBorder },
+  periodText: { color: colors.primary, fontSize: 13, fontWeight: '900' },
   minuteRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  minuteChip: { flex: 1, height: 42, borderRadius: 13, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  minuteChipActive: { backgroundColor: NAVY, borderColor: NAVY },
-  minuteChipText: { color: MUTED, fontSize: 14, fontWeight: '800' },
-  minuteChipTextActive: { color: '#FFFFFF' },
+  minuteChip: { flex: 1, height: 42, borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' },
+  minuteChipActive: { backgroundColor: colors.textPrimary, borderColor: colors.textPrimary },
+  minuteChipText: { color: colors.textSecondary, fontSize: 14, fontWeight: '800' },
+  minuteChipTextActive: { color: colors.textInverse },
   presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  presetChip: { borderRadius: 14, backgroundColor: '#FEF0E8', paddingHorizontal: 11, paddingVertical: 8 },
-  presetText: { color: ORANGE, fontSize: 12, fontWeight: '800' },
-  primaryButton: { height: 50, borderRadius: 25, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center' },
-  primaryText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
-});
+  presetChip: { borderRadius: 14, backgroundColor: colors.primaryDim, paddingHorizontal: 11, paddingVertical: 8 },
+  presetText: { color: colors.primary, fontSize: 12, fontWeight: '800' },
+  primaryButton: { height: 50, borderRadius: 25, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  primaryText: { color: colors.textInverse, fontSize: 16, fontWeight: '800' },
+  });
+}

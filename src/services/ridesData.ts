@@ -45,19 +45,31 @@ export function listenDriverActiveRides(
   // Include 'FLAGGED' so driver-side lists keep flagged rides visible after flagging
   where('status', 'in', ['CONFIRMED', 'IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED', 'FLAGGED'])
   );
-  return onSnapshot(qy, (snap) => {
-    const out: ConfirmedRide[] = [];
-    snap.forEach((d) => {
-      const data = d.data();
-      console.log(`[listenDriverActiveRides] Document ${d.id}:`, {
-        status: data.status,
-        statusAtFlag: data.statusAtFlag,
-        rawData: JSON.stringify(data, null, 2)
+  return onSnapshot(
+    qy,
+    (snap) => {
+      const out: ConfirmedRide[] = [];
+      snap.forEach((d) => {
+        const data = d.data();
+        console.log(`[listenDriverActiveRides] Document ${d.id}:`, {
+          status: data.status,
+          statusAtFlag: data.statusAtFlag,
+          rawData: JSON.stringify(data, null, 2)
+        });
+        out.push({ id: d.id, ...(data as any) });
       });
-      out.push({ id: d.id, ...(data as any) });
-    });
-    cb(out);
-  });
+      cb(out);
+    },
+    (error) => {
+      cb([]);
+      const code = (error as { code?: string } | null)?.code;
+      if (code === 'permission-denied') {
+        console.warn('[listenDriverActiveRides] Firestore permission denied; listener stopped.');
+        return;
+      }
+      console.warn('[listenDriverActiveRides] Firestore listener error:', error);
+    },
+  );
 }
 
 export function listenDriverCompletedRides(

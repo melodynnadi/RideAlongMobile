@@ -1,5 +1,5 @@
 // RideAlongDriverMobile - Chat Detail Screen
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -43,12 +43,7 @@ import {
 } from '@/services/messageThreadsService';
 import { showErrorToast, showSuccessToast } from '@/src/utils/showToast';
 import { legacyUnreadField, roleKey, roleUnreadField } from '@/src/utils/roleIdentity';
-
-const NAVY   = '#15233A';
-const ORANGE = '#DE5D20';
-const BG     = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED  = '#8B94A6';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 
 interface Message {
@@ -61,6 +56,7 @@ interface Message {
 }
 
 export default function ChatDetailScreen() {
+  const { colors } = useAppTheme();
   const { chatId } = useLocalSearchParams();
   const goToMessages = useCallback(() => router.replace('/(driver)/messages' as any), []);
 
@@ -79,6 +75,50 @@ export default function ChatDetailScreen() {
   const messagesUnsubRef = useRef<(() => void) | null>(null);
   const rideUnsubRef     = useRef<(() => void) | null>(null);
   const currentUser      = firebaseAuth.currentUser;
+
+  const s = useMemo(() => StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.bg },
+    safe: { flex: 1 },
+    keyboard: { flex: 1 },
+
+    loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14 },
+    loadingText: { color: colors.textSecondary, fontSize: 14, fontWeight: '500' },
+
+    header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.bg, gap: 10 },
+    backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
+    headerMid: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+    headerAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+    headerAvatarInitial: { fontSize: 16, fontWeight: '800', color: colors.textInverse },
+    headerTextWrap: { flex: 1 },
+    headerName: { color: colors.textPrimary, fontSize: 16, fontWeight: '700', letterSpacing: -0.2 },
+    headerRoute: { fontSize: 11, color: colors.textSecondary, marginTop: 1, fontWeight: '500' },
+    deleteBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.redDim, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.redBorder },
+
+    msgList: { padding: 16, paddingBottom: 8, flexGrow: 1 },
+    msgWrap: { marginBottom: 14 },
+    msgWrapSent: { alignItems: 'flex-end' },
+    msgWrapReceived: { alignItems: 'flex-start' },
+    msgBubbleSent: { maxWidth: '72%', paddingHorizontal: 16, paddingVertical: 11, borderRadius: 20, borderBottomRightRadius: 4, backgroundColor: colors.primary },
+    msgTextSent: { fontSize: 15, color: colors.textInverse, lineHeight: 21 },
+    msgBubbleReceived: { maxWidth: '72%', paddingHorizontal: 16, paddingVertical: 11, borderRadius: 20, borderBottomLeftRadius: 4, overflow: 'hidden', borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard },
+    msgTextReceived: { fontSize: 15, color: colors.textPrimary, lineHeight: 21 },
+    msgTime: { fontSize: 11, color: colors.textSecondary, marginTop: 4, marginHorizontal: 4, fontWeight: '500' },
+    alignRight: { textAlign: 'right' },
+    alignLeft: { textAlign: 'left' },
+
+    quickReplyWrap: { borderTopWidth: 1, borderTopColor: colors.border, paddingVertical: 9, backgroundColor: colors.bg },
+    quickReplyList: { paddingHorizontal: 14, gap: 8 },
+    quickReplyChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, marginRight: 8, backgroundColor: colors.primaryDim, borderColor: colors.primaryBorder },
+    quickReplyText: { fontSize: 12, fontWeight: '800', color: colors.primary },
+
+    inputBar: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 14, paddingVertical: 12, paddingBottom: 28, borderTopWidth: 1, borderTopColor: colors.border, gap: 10, backgroundColor: colors.bgCard },
+    input: { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, maxHeight: 100, backgroundColor: colors.bgSecondary, color: colors.textPrimary },
+    sendBtn: { width: 42, height: 42, borderRadius: 21, overflow: 'hidden' },
+    sendBtnInner: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+    disabledNotice: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 14, backgroundColor: colors.bgSecondary, borderRadius: 16, borderWidth: 1, borderColor: colors.border },
+    disabledNoticeText: { flex: 1, fontSize: 13, color: colors.textSecondary, textAlign: 'center', fontWeight: '500' },
+    disabledOpacity: { opacity: 0.45 },
+  }), [colors]);
 
   useEffect(() => {
     if (!currentUser || !chatId) { goToMessages(); return; }
@@ -152,7 +192,14 @@ export default function ChatDetailScreen() {
           setRideStatus(rd.status || null);
         }
         if (rideUnsubRef.current) rideUnsubRef.current();
-        rideUnsubRef.current = onSnapshot(rideRef, (snap) => { if (snap.exists()) setRideStatus(snap.data().status || null); });
+        rideUnsubRef.current = onSnapshot(
+          rideRef,
+          (snap) => { if (snap.exists()) setRideStatus(snap.data().status || null); },
+          (error) => {
+            setRideStatus(null);
+            console.warn('[DriverConversation] ride status listener error:', error);
+          },
+        );
       }
       await updateDoc(doc(firestore, 'chats', chatId as string), {
         [roleUnreadField('driver', currentUser!.uid)]: 0,
@@ -266,11 +313,11 @@ export default function ChatDetailScreen() {
   if (loading) {
     return (
       <View style={s.root}>
-        <StatusBar barStyle="dark-content" />
+        <StatusBar barStyle={colors.statusBar} />
         <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
           <Stack.Screen options={{ headerShown: false }} />
           <View style={s.loadingWrap}>
-            <ActivityIndicator size="large" color={ORANGE} />
+            <ActivityIndicator size="large" color={colors.primary} />
             <Text style={s.loadingText}>Loading conversation...</Text>
           </View>
         </SafeAreaView>
@@ -280,7 +327,7 @@ export default function ChatDetailScreen() {
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={colors.statusBar} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
         <Stack.Screen options={{ headerShown: false }} />
         <KeyboardAvoidingView style={s.keyboard} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={0}>
@@ -291,7 +338,7 @@ export default function ChatDetailScreen() {
                 {/* Header */}
           <View style={s.header}>
             <TouchableOpacity style={s.backBtn} onPress={goToMessages}>
-              <Ionicons name="chevron-back" size={22} color={NAVY} />
+              <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
             </TouchableOpacity>
 
             <View style={s.headerMid}>
@@ -307,7 +354,7 @@ export default function ChatDetailScreen() {
             </View>
 
             <TouchableOpacity style={[s.deleteBtn, deleting && s.disabledOpacity]} onPress={confirmDeleteConversation} disabled={deleting}>
-              {deleting ? <ActivityIndicator size="small" color="#DC2626" /> : <Ionicons name="trash-outline" size={19} color="#DC2626" />}
+              {deleting ? <ActivityIndicator size="small" color={colors.red} /> : <Ionicons name="trash-outline" size={19} color={colors.red} />}
             </TouchableOpacity>
           </View>
 
@@ -325,7 +372,7 @@ export default function ChatDetailScreen() {
             ListEmptyComponent={
               !loading ? (
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ color: MUTED, fontSize: 14, textAlign: 'center' }}>No messages yet. Say hello.</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 14, textAlign: 'center' }}>No messages yet. Say hello.</Text>
                 </View>
               ) : null
             }
@@ -335,7 +382,7 @@ export default function ChatDetailScreen() {
           <View style={s.inputBar}>
             {!messagingAllowed ? (
               <View style={s.disabledNotice}>
-                <Ionicons name="lock-closed-outline" size={14} color={MUTED} />
+                <Ionicons name="lock-closed-outline" size={14} color={colors.textSecondary} />
                 <Text style={s.disabledNoticeText}>{MESSAGING_DISABLED_MESSAGE}</Text>
               </View>
             ) : (
@@ -343,7 +390,7 @@ export default function ChatDetailScreen() {
                 <TextInput
                   style={s.input}
                   placeholder="Message..."
-                  placeholderTextColor={MUTED}
+                  placeholderTextColor={colors.textSecondary}
                   value={messageText}
                   onChangeText={setMessageText}
                   multiline
@@ -355,7 +402,7 @@ export default function ChatDetailScreen() {
                   disabled={!messageText.trim() || sending}
                 >
                   <View style={s.sendBtnInner}>
-                    {sending ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="send" size={18} color="#FFFFFF" />}
+                    {sending ? <ActivityIndicator size="small" color={colors.textInverse} /> : <Ionicons name="send" size={18} color={colors.textInverse} />}
                   </View>
                 </TouchableOpacity>
               </>
@@ -366,49 +413,3 @@ export default function ChatDetailScreen() {
     </View>
   );
 }
-
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: BG },
-  safe: { flex: 1 },
-  keyboard: { flex: 1 },
-
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14 },
-  loadingText: { color: MUTED, fontSize: 14, fontWeight: '500' },
-
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BORDER, backgroundColor: BG, gap: 10 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: BORDER },
-  headerMid: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  headerAvatarInitial: { fontSize: 16, fontWeight: '800', color: '#FFFFFF' },
-  headerTextWrap: { flex: 1 },
-  headerName: { color: NAVY, fontSize: 16, fontWeight: '700', letterSpacing: -0.2 },
-  headerRoute: { fontSize: 11, color: MUTED, marginTop: 1, fontWeight: '500' },
-  deleteBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FEF2F2', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#FCA5A5' },
-
-
-
-  msgList: { padding: 16, paddingBottom: 8, flexGrow: 1 },
-  msgWrap: { marginBottom: 14 },
-  msgWrapSent: { alignItems: 'flex-end' },
-  msgWrapReceived: { alignItems: 'flex-start' },
-  msgBubbleSent: { maxWidth: '72%', paddingHorizontal: 16, paddingVertical: 11, borderRadius: 20, borderBottomRightRadius: 4, backgroundColor: ORANGE },
-  msgTextSent: { fontSize: 15, color: '#FFFFFF', lineHeight: 21 },
-  msgBubbleReceived: { maxWidth: '72%', paddingHorizontal: 16, paddingVertical: 11, borderRadius: 20, borderBottomLeftRadius: 4, overflow: 'hidden', borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF' },
-  msgTextReceived: { fontSize: 15, color: NAVY, lineHeight: 21 },
-  msgTime: { fontSize: 11, color: MUTED, marginTop: 4, marginHorizontal: 4, fontWeight: '500' },
-  alignRight: { textAlign: 'right' },
-  alignLeft: { textAlign: 'left' },
-
-  quickReplyWrap: { borderTopWidth: 1, borderTopColor: BORDER, paddingVertical: 9, backgroundColor: BG },
-  quickReplyList: { paddingHorizontal: 14, gap: 8 },
-  quickReplyChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, marginRight: 8, backgroundColor: 'rgba(222,93,32,0.08)', borderColor: 'rgba(222,93,32,0.25)' },
-  quickReplyText: { fontSize: 12, fontWeight: '800', color: ORANGE },
-
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 14, paddingVertical: 12, paddingBottom: 28, borderTopWidth: 1, borderTopColor: BORDER, gap: 10, backgroundColor: '#FFFFFF' },
-  input: { flex: 1, borderWidth: 1, borderColor: BORDER, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, maxHeight: 100, backgroundColor: '#F3EFE8', color: NAVY },
-  sendBtn: { width: 42, height: 42, borderRadius: 21, overflow: 'hidden' },
-  sendBtnInner: { width: 42, height: 42, borderRadius: 21, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center' },
-  disabledNotice: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 14, backgroundColor: '#F3EFE8', borderRadius: 16, borderWidth: 1, borderColor: BORDER },
-  disabledNoticeText: { flex: 1, fontSize: 13, color: MUTED, textAlign: 'center', fontWeight: '500' },
-  disabledOpacity: { opacity: 0.45 },
-});

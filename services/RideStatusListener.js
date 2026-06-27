@@ -95,6 +95,8 @@ export const setupRidePostingListener = (ridePostingId, driverId, driverEmail, d
           break;
       }
     }
+  }, (error) => {
+    console.warn('[RideStatusListener] ride posting listener error:', error);
   });
   
   return unsubscribe;
@@ -104,11 +106,15 @@ export const setupRidePostingListener = (ridePostingId, driverId, driverEmail, d
  * Listen to all ride requests for driver's postings
  */
 export const setupRideRequestsListener = (driverId, driverEmail, driverName) => {
+  const requestUnsubscribes = [];
   // First get all driver's ride postings
   const postingsRef = collection(db, 'ridePostings');
   const postingsQuery = query(postingsRef, where('driverId', '==', driverId));
   
   const unsubscribe = onSnapshot(postingsQuery, (postingsSnapshot) => {
+    requestUnsubscribes.forEach((unsub) => unsub());
+    requestUnsubscribes.length = 0;
+
     postingsSnapshot.forEach((postingDoc) => {
       const ridePostingId = postingDoc.id;
       
@@ -120,7 +126,7 @@ export const setupRideRequestsListener = (driverId, driverEmail, driverName) => 
         where('status', '==', 'pending')
       );
       
-      onSnapshot(requestsQuery, (requestsSnapshot) => {
+      const requestUnsubscribe = onSnapshot(requestsQuery, (requestsSnapshot) => {
         requestsSnapshot.docChanges().forEach(async (change) => {
           if (change.type === 'added') {
             // New request received - HIGH PRIORITY
@@ -164,11 +170,19 @@ export const setupRideRequestsListener = (driverId, driverEmail, driverName) => 
             }
           }
         });
+      }, (error) => {
+        console.warn('[RideStatusListener] ride posting requests listener error:', error);
       });
+      requestUnsubscribes.push(requestUnsubscribe);
     });
+  }, (error) => {
+    console.warn('[RideStatusListener] ride postings listener error:', error);
   });
   
-  return unsubscribe;
+  return () => {
+    unsubscribe();
+    requestUnsubscribes.forEach((unsub) => unsub());
+  };
 };
 
 /**
@@ -255,6 +269,8 @@ export const setupPayoutListener = (driverId, driverEmail, driverName) => {
         );
       }
     }
+  }, (error) => {
+    console.warn('[RideStatusListener] payout listener error:', error);
   });
   
   return unsubscribe;

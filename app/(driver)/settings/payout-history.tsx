@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -15,18 +15,85 @@ import { Ionicons } from '@expo/vector-icons';
 import { fetchPayouts, type Payout } from '@/src/services/payouts';
 
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
-
-const NAVY   = '#15233A';
-const ORANGE = '#DE5D20';
-const BG     = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED  = '#8B94A6';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 export default function PayoutHistoryScreen() {
+  const { colors } = useAppTheme();
   const { goBack } = useReturnNavigation('/(driver)/settings');
   const [loading, setLoading]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [payouts, setPayouts]     = useState<Payout[]>([]);
+
+  const s = useMemo(() => StyleSheet.create({
+    root:    { flex: 1, backgroundColor: colors.bg },
+    safe:    { flex: 1 },
+    content: { paddingBottom: 60 },
+
+    hdr:     { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10 },
+    backBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' },
+    hdrTitle:{ color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+
+    lifetimeBanner: {
+      marginHorizontal: 20,
+      marginBottom: 28,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      padding: 20,
+      shadowColor: colors.textPrimary,
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: 0.06,
+      shadowRadius: 10,
+      elevation: 2,
+    },
+    lifetimeLabel:  { color: colors.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginBottom: 6 },
+    lifetimeAmount: { color: colors.primary, fontSize: 38, fontWeight: '300', letterSpacing: -1, marginBottom: 4 },
+    lifetimeSub:    { color: colors.textSecondary, fontSize: 13 },
+
+    loadingWrap:  { alignItems: 'center', paddingTop: 40 },
+
+    emptyCard: {
+      marginHorizontal: 20,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderStyle: 'dashed',
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      padding: 32,
+      alignItems: 'center',
+    },
+    emptyIcon:  { width: 54, height: 54, borderRadius: 27, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+    emptyTitle: { color: colors.textPrimary, fontSize: 18, fontWeight: '700', marginBottom: 6 },
+    emptyText:  { color: colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19 },
+
+    monthGroup: { marginBottom: 24 },
+    monthLabel: { marginHorizontal: 20, marginBottom: 10, color: colors.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
+    monthCard: {
+      marginHorizontal: 20,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      overflow: 'hidden',
+      shadowColor: colors.textPrimary,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 8,
+      elevation: 1,
+    },
+
+    payRow:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
+    payRowBorder:  { borderBottomWidth: 1, borderBottomColor: colors.border },
+    payIcon:       { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+    payIconDone:   { backgroundColor: colors.greenDim },
+    payIconPending:{ backgroundColor: colors.primaryDim },
+    payInfo:       { flex: 1 },
+    payDate:       { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+    payBank:       { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+    payAmount:     { color: colors.textPrimary, fontSize: 16, fontWeight: '600' },
+    payAmountPending: { color: colors.primary },
+  }), [colors]);
 
   const loadPayouts = async () => {
     try {
@@ -93,20 +160,20 @@ export default function PayoutHistoryScreen() {
   const isPending  = (status: string) => status === 'pending' || status === 'in_transit';
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={colors.statusBar} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
 
         {/* Header */}<ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={s.content}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ORANGE} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         >
 <View style={s.hdr}>
           <TouchableOpacity
             style={s.backBtn}
             onPress={goBack}
           >
-            <Ionicons name="chevron-back" size={22} color={NAVY} />
+            <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
           </TouchableOpacity>
           <Text style={s.hdrTitle}>Payouts</Text>
           <View style={{ width: 40 }} />
@@ -124,12 +191,12 @@ export default function PayoutHistoryScreen() {
 
           {loading ? (
             <View style={s.loadingWrap}>
-              <ActivityIndicator size="large" color={ORANGE} />
+              <ActivityIndicator size="large" color={colors.primary} />
             </View>
           ) : payouts.length === 0 ? (
             <View style={s.emptyCard}>
               <View style={s.emptyIcon}>
-                <Ionicons name="wallet-outline" size={26} color={ORANGE} />
+                <Ionicons name="wallet-outline" size={26} color={colors.primary} />
               </View>
               <Text style={s.emptyTitle}>No payouts yet</Text>
               <Text style={s.emptyText}>Your completed payouts will appear here.</Text>
@@ -150,7 +217,7 @@ export default function PayoutHistoryScreen() {
                           <Ionicons
                             name={pending ? 'time-outline' : 'checkmark'}
                             size={14}
-                            color={pending ? ORANGE : '#10B981'}
+                            color={pending ? colors.primary : colors.green}
                           />
                         </View>
                         <View style={s.payInfo}>
@@ -174,74 +241,3 @@ export default function PayoutHistoryScreen() {
     </View>
   );
 }
-
-const s = StyleSheet.create({
-  root:    { flex: 1, backgroundColor: BG },
-  safe:    { flex: 1 },
-  content: { paddingBottom: 60 },
-
-  hdr:     { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  hdrTitle:{ color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
-
-  lifetimeBanner: {
-    marginHorizontal: 20,
-    marginBottom: 28,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: '#FFFFFF',
-    padding: 20,
-    shadowColor: NAVY,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 2,
-  },
-  lifetimeLabel:  { color: MUTED, fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginBottom: 6 },
-  lifetimeAmount: { color: ORANGE, fontSize: 38, fontWeight: '300', letterSpacing: -1, marginBottom: 4 },
-  lifetimeSub:    { color: MUTED, fontSize: 13 },
-
-  loadingWrap:  { alignItems: 'center', paddingTop: 40 },
-
-  emptyCard: {
-    marginHorizontal: 20,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: BORDER,
-    backgroundColor: '#FFFFFF',
-    padding: 32,
-    alignItems: 'center',
-  },
-  emptyIcon:  { width: 54, height: 54, borderRadius: 27, backgroundColor: '#FEF0E8', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  emptyTitle: { color: NAVY, fontSize: 18, fontWeight: '700', marginBottom: 6 },
-  emptyText:  { color: MUTED, fontSize: 13, textAlign: 'center', lineHeight: 19 },
-
-  monthGroup: { marginBottom: 24 },
-  monthLabel: { marginHorizontal: 20, marginBottom: 10, color: MUTED, fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
-  monthCard: {
-    marginHorizontal: 20,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: '#FFFFFF',
-    overflow: 'hidden',
-    shadowColor: NAVY,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 1,
-  },
-
-  payRow:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
-  payRowBorder:  { borderBottomWidth: 1, borderBottomColor: BORDER },
-  payIcon:       { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  payIconDone:   { backgroundColor: '#ECFDF5' },
-  payIconPending:{ backgroundColor: '#FEF0E8' },
-  payInfo:       { flex: 1 },
-  payDate:       { color: NAVY, fontSize: 15, fontWeight: '600' },
-  payBank:       { color: MUTED, fontSize: 12, marginTop: 2 },
-  payAmount:     { color: NAVY, fontSize: 16, fontWeight: '600' },
-  payAmountPending: { color: ORANGE },
-});

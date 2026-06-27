@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
+import { useAppTheme } from '@/hooks/ThemeContext';
 import {
   View, ScrollView, StyleSheet, Text, TouchableOpacity, Modal,
   TextInput, Keyboard,
@@ -8,6 +9,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Marker, Circle, PROVIDER_GOOGLE } from '@/components/platform/NativeMaps';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { firestore, firebaseAuth, storage, getApiBaseUrl, GOOGLE_MAPS_API_KEY } from '@/constants/services';
@@ -39,12 +41,6 @@ import { DriverHomeUtilityBar } from '@/components/reference/DriverReferenceScre
 import { DatePickerModal, TimePickerModal, formatDateLabel } from '@/components/DateTimePickerModals';
 
 // ─── Design Tokens (rider palette) ───────────────────────────────────────────
-const NAVY   = '#15233A';
-const ORANGE = '#DE5D20';
-const SECONDARY = '#0D1B48';
-const BG     = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED  = '#8B94A6';
 const confirmationRepairs = new Set<string>();
 
 const COLORS = {
@@ -72,7 +68,32 @@ const COLORS = {
   sub: '#8B94A6',
 };
 
+const verificationSuccessAckKey = (uid: string) => `driver:verification-success-ack:${uid}`;
+
 type DriverHomeSuggestion = { description: string; place_id: string; displayText: string };
+
+function formatCurrentLocationAddress(result?: Location.LocationGeocodedAddress | null): string {
+  if (!result) return 'Current location';
+  return [result.name, result.street, result.city, result.region].filter(Boolean).join(', ') || 'Current location';
+}
+
+async function getCurrentLocationAddressAsync(): Promise<string | null> {
+  try {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') return null;
+    const pos =
+      (await Location.getLastKnownPositionAsync()) ||
+      (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+    if (!pos) return null;
+    const rev = await Location.reverseGeocodeAsync({
+      latitude: pos.coords.latitude,
+      longitude: pos.coords.longitude,
+    });
+    return formatCurrentLocationAddress(rev?.[0]);
+  } catch {
+    return null;
+  }
+}
 
 function DriverHomeAutocomplete({
   value,
@@ -85,6 +106,8 @@ function DriverHomeAutocomplete({
   placeholder: string;
   zIndex: number;
 }) {
+  const { colors } = useAppTheme();
+  const s = useDriverHomeStyles();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<DriverHomeSuggestion[]>([]);
@@ -152,7 +175,7 @@ function DriverHomeAutocomplete({
         }}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         placeholder={placeholder}
-        placeholderTextColor={MUTED}
+        placeholderTextColor={colors.textSecondary}
         returnKeyType="next"
       />
       {open && (loading || items.length > 0) ? (
@@ -160,7 +183,7 @@ function DriverHomeAutocomplete({
           {loading ? (
             <View style={s.driverHomeAutocompleteState}>
               <View style={s.driverHomeAutocompleteIcon}>
-                <Ionicons name="search-outline" size={15} color={ORANGE} />
+                <Ionicons name="search-outline" size={15} color={colors.primary} />
               </View>
               <Text style={s.driverHomeAutocompleteSubText}>Searching locations...</Text>
             </View>
@@ -177,7 +200,7 @@ function DriverHomeAutocomplete({
                 activeOpacity={0.78}
               >
                 <View style={s.driverHomeAutocompleteIcon}>
-                  <Ionicons name={index === 0 ? 'location' : 'location-outline'} size={15} color={ORANGE} />
+                  <Ionicons name={index === 0 ? 'location' : 'location-outline'} size={15} color={colors.primary} />
                 </View>
                 <View style={s.driverHomeAutocompleteCopy}>
                   <Text style={s.driverHomeAutocompleteText} numberOfLines={1}>{item.displayText.split(',')[0]}</Text>
@@ -192,25 +215,7 @@ function DriverHomeAutocomplete({
   );
 }
 
-function useDriverHomeTheme() {
-  return {
-    dark: false,
-    bg: BG,
-    bg2: '#FFFFFF',
-    bg3: '#F3EFE8',
-    card: '#FFFFFF',
-    cardStrong: '#FFFFFF',
-    input: 'rgba(21,35,58,0.045)',
-    border: BORDER,
-    text: NAVY,
-    sub: MUTED,
-    statusBar: 'dark-content' as const,
-    blurTint: 'light' as const,
-    pageGradient: [BG, BG] as unknown as readonly [string, string, ...string[]],
-  };
-}
-
-// ─── Types (UNCHANGED) ────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 function DriverUberStylePromotionCard({
   promotion,
   onPress,
@@ -222,6 +227,8 @@ function DriverUberStylePromotionCard({
   width: number;
   secondary?: boolean;
 }) {
+  const { colors } = useAppTheme();
+  const s = useDriverHomeStyles();
   const icon: keyof typeof Ionicons.glyphMap = promotion.type === 'referral'
     ? 'people-outline'
     : promotion.type === 'informational'
@@ -253,7 +260,7 @@ function DriverUberStylePromotionCard({
           <Ionicons name={icon} size={40} color="#FFFFFF" />
         </View>
         <View style={s.promoIconSmall}>
-          <Ionicons name="car-outline" size={22} color={secondary ? SECONDARY : ORANGE} />
+          <Ionicons name="car-outline" size={22} color={secondary ? colors.textPrimary : colors.primary} />
         </View>
       </View>
     </TouchableOpacity>
@@ -261,16 +268,28 @@ function DriverUberStylePromotionCard({
 }
 
 function DriverHomePostRideCard() {
+  const s = useDriverHomeStyles();
   const [pickup, setPickup] = useState('');
   const [dropoff, setDropoff] = useState('');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [dateModalOpen, setDateModalOpen] = useState(false);
   const [timeModalOpen, setTimeModalOpen] = useState(false);
+  const triedHomeLocationRef = useRef(false);
   const openPostRide = () => router.push({
     pathname: '/(driver)/book',
     params: { pickup, dropoff, ...(date.trim() ? { date } : {}), ...(time.trim() ? { time } : {}) },
   } as any);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (triedHomeLocationRef.current || pickup.trim()) return;
+    triedHomeLocationRef.current = true;
+    getCurrentLocationAddressAsync().then((address) => {
+      if (!cancelled && address && !pickup.trim()) setPickup(address);
+    });
+    return () => { cancelled = true; };
+  }, [pickup]);
 
   return (
     <View style={s.driverHomeSearchCard}>
@@ -329,6 +348,8 @@ function DriverHomePostRideCard() {
 }
 
 function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRideCard; hasOfferReceived?: boolean }) {
+  const { colors } = useAppTheme();
+  const s = useDriverHomeStyles();
   const [pickingUp,   setPickingUp]   = React.useState(false);
   const [completing,  setCompleting]  = React.useState(false);
   const [flagVisible, setFlagVisible] = React.useState(false);
@@ -345,11 +366,11 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
     : (isPosting && hasOfferReceived) ? 'REQUEST RECEIVED'
     : isOfferSent ? 'OFFER SENT'
     : prettyStatus(rawStatus).toUpperCase();
-  const statusColor = isInProgress ? ORANGE
+  const statusColor = isInProgress ? colors.primary
     : isConfirmedOnly ? '#16A34A'
     : (isPosting && hasOfferReceived) ? '#D97706'
-    : isOfferSent ? ORANGE
-    : MUTED;
+    : isOfferSent ? colors.primary
+    : colors.textSecondary;
   const statusBg    = isInProgress ? 'rgba(222,93,32,0.08)'
     : isConfirmedOnly ? '#EDFAF3'
     : (isPosting && hasOfferReceived) ? 'rgba(245,158,11,0.12)'
@@ -448,7 +469,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
           <Text style={{ color: statusColor, fontSize: 11, fontWeight: '800', letterSpacing: 0.5 }}>{statusLabel}</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          {ride.priceText ? <Text style={{ color: NAVY, fontSize: 15, fontWeight: '800' }}>{ride.priceText}</Text> : null}
+          {ride.priceText ? <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '800' }}>{ride.priceText}</Text> : null}
           {isConfirmed && ride.confirmedId ? (
             <TouchableOpacity onPress={() => setFlagVisible(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Ionicons name="flag-outline" size={18} color="#DC2626" />
@@ -461,32 +482,32 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
       <TouchableOpacity activeOpacity={0.7} onPress={isInProgress && ride.confirmedId ? () => router.push(`/(driver)/trip/${ride.confirmedId}` as any) : openRequest}>
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <View style={{ alignItems: 'center', paddingTop: 4, gap: 4 }}>
-            <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: NAVY }} />
-            <View style={{ width: 1, flex: 1, minHeight: 16, backgroundColor: BORDER }} />
-            <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: ORANGE }} />
+            <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: colors.textPrimary }} />
+            <View style={{ width: 1, flex: 1, minHeight: 16, backgroundColor: colors.border }} />
+            <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: colors.primary }} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: NAVY, fontSize: 15, fontWeight: '600', marginBottom: 4 }} numberOfLines={1}>{ride.from || 'Pickup pending'}</Text>
-            <Text style={{ color: MUTED, fontSize: 12, marginBottom: 4 }}>{dateText}</Text>
-            <Text style={{ color: NAVY, fontSize: 15, fontWeight: '600' }} numberOfLines={1}>{ride.to || 'Destination pending'}</Text>
+            <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600', marginBottom: 4 }} numberOfLines={1}>{ride.from || 'Pickup pending'}</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>{dateText}</Text>
+            <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' }} numberOfLines={1}>{ride.to || 'Destination pending'}</Text>
           </View>
         </View>
       </TouchableOpacity>
 
       {/* Actions */}
-      <View style={{ flexDirection: 'row', gap: 8, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: BORDER }}>
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
         {ride.riderId && (
           <TouchableOpacity
-            style={{ flex: 1, backgroundColor: '#F3EFE8', borderRadius: 20, paddingVertical: 10, alignItems: 'center' }}
+            style={{ flex: 1, backgroundColor: colors.bgSecondary, borderRadius: 20, paddingVertical: 10, alignItems: 'center' }}
             onPress={openChat}
             activeOpacity={0.75}
           >
-            <Text style={{ color: NAVY, fontSize: 13, fontWeight: '700' }}>Message Rider</Text>
+            <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: '700' }}>Message Rider</Text>
           </TouchableOpacity>
         )}
         {isConfirmedOnly && (
           <TouchableOpacity
-            style={{ flex: 1, backgroundColor: ORANGE, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: pickingUp ? 0.6 : 1 }}
+            style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: pickingUp ? 0.6 : 1 }}
             onPress={handlePickup}
             disabled={pickingUp}
             activeOpacity={0.8}
@@ -498,7 +519,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
         )}
         {isInProgress && (
           <TouchableOpacity
-            style={{ flex: 1, backgroundColor: NAVY, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: completing ? 0.6 : 1 }}
+            style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: completing ? 0.6 : 1 }}
             onPress={handleComplete}
             disabled={completing}
             activeOpacity={0.8}
@@ -510,7 +531,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
         )}
         {!isConfirmedOnly && !isInProgress && (
           <TouchableOpacity
-            style={{ flex: 1, backgroundColor: NAVY, borderRadius: 20, paddingVertical: 10, alignItems: 'center' }}
+            style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center' }}
             onPress={openRequest}
             activeOpacity={0.8}
           >
@@ -633,6 +654,8 @@ function zoneNameFromPickup(pickup: string) {
 }
 
 export default function HomeScreen() {
+  const { colors } = useAppTheme();
+  const s = useDriverHomeStyles();
   const insets = useSafeAreaInsets();
   const [selectedRide, setSelectedRide] = useState<UpcomingRideCard | null>(null);
   // Enriched passengers (avatars + phones) for group ride modal
@@ -742,6 +765,7 @@ export default function HomeScreen() {
   const { isVerified, verificationStatus, verificationDeadline } = useVerificationStore();
   const [bannerDismissed, setBannerDismissed] = useState<boolean>(false);
   const [showVerificationSuccess, setShowVerificationSuccess] = useState<boolean>(false);
+  const verificationInitialSnapshotRef = useRef<Record<string, boolean>>({});
 
   // Promotions state
   const { promotions, loading: promotionsLoading } = usePromotions();
@@ -921,7 +945,7 @@ export default function HomeScreen() {
 
     // Listen to user document for student verification status changes
     const userDocRef = doc(firestore, 'drivers', uid);
-    const unsubUser = onSnapshot(userDocRef, (snap) => {
+    const unsubUser = onSnapshot(userDocRef, async (snap) => {
       if (snap.exists()) {
         const data = snap.data() as any;
         const rawIsVerified = data?.isVerified === true;
@@ -944,8 +968,18 @@ export default function HomeScreen() {
           vs.setVerificationDeadline(null);
         }
         
+        const isFirstSnapshotForUser = !verificationInitialSnapshotRef.current[uid];
+        verificationInitialSnapshotRef.current[uid] = true;
+        const ackKey = verificationSuccessAckKey(uid);
+        if (isFirstSnapshotForUser && verified) {
+          await AsyncStorage.setItem(ackKey, '1').catch(() => {});
+        }
+        const alreadyAcknowledged = await AsyncStorage.getItem(ackKey).catch(() => null);
+        const shouldShowVerificationSuccess = !isFirstSnapshotForUser && !prevVerified && verified && !showVerificationSuccess && !alreadyAcknowledged;
+
         // Show success toast when verification becomes true
-        if (!prevVerified && verified && !showVerificationSuccess) {
+        if (shouldShowVerificationSuccess) {
+          await AsyncStorage.setItem(ackKey, '1').catch(() => {});
           setShowVerificationSuccess(true);
           setTimeout(() => {
             Alert.alert('✓ Verified!', 'Your student status has been verified! You can now post rides.');
@@ -3152,13 +3186,13 @@ export default function HomeScreen() {
     isOfferReceived: boolean, isOfferSent: boolean, isPosted: boolean,
     isConfirmed: boolean, isInProgress: boolean, isFlagged: boolean,
   ) => {
-    if (isFlagged)       return { bg: 'rgba(239,68,68,0.15)',   txt: COLORS.red,   label: 'Flagged' };
-    if (isOfferReceived) return { bg: 'rgba(245,158,11,0.15)',  txt: COLORS.amber, label: 'Offer Received' };
+    if (isFlagged)       return { bg: 'rgba(239,68,68,0.15)',   txt: colors.red,   label: 'Flagged' };
+    if (isOfferReceived) return { bg: 'rgba(245,158,11,0.15)',  txt: colors.amber, label: 'Offer Received' };
     if (isOfferSent)     return { bg: 'rgba(59,130,246,0.15)',  txt: COLORS.blue,  label: 'Offer Sent' };
-    if (isInProgress)    return { bg: 'rgba(16,185,129,0.15)',  txt: COLORS.green, label: 'In Progress' };
-    if (isConfirmed)     return { bg: 'rgba(16,185,129,0.15)',  txt: COLORS.green, label: 'Confirmed' };
-    if (isPosted)        return { bg: 'rgba(150,170,190,0.12)', txt: MUTED, label: 'Posted' };
-    return                      { bg: 'rgba(150,170,190,0.12)', txt: MUTED, label: prettyStatus(undefined) };
+    if (isInProgress)    return { bg: 'rgba(16,185,129,0.15)',  txt: colors.green, label: 'In Progress' };
+    if (isConfirmed)     return { bg: 'rgba(16,185,129,0.15)',  txt: colors.green, label: 'Confirmed' };
+    if (isPosted)        return { bg: 'rgba(150,170,190,0.12)', txt: colors.textSecondary, label: 'Posted' };
+    return                      { bg: 'rgba(150,170,190,0.12)', txt: colors.textSecondary, label: prettyStatus(undefined) };
   };
 
 
@@ -3188,10 +3222,10 @@ export default function HomeScreen() {
         });
 
         const heat =
-          requests.length >= 4 ? COLORS.red :
-          requests.length >= 3 ? COLORS.amber :
+          requests.length >= 4 ? colors.red :
+          requests.length >= 3 ? colors.amber :
           requests.length >= 2 ? COLORS.blue :
-          COLORS.green;
+          colors.green;
 
         const bg =
           requests.length >= 4 ? 'rgba(239,68,68,0.14)' :
@@ -3232,15 +3266,15 @@ export default function HomeScreen() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, backgroundColor: BG, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator size="large" color={COLORS.orange} />
+      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
-    <View style={[s.root, { backgroundColor: BG }]}>
-      <StatusBar barStyle="dark-content" />
+    <View style={[s.root, { backgroundColor: colors.bg }]}>
+      <StatusBar barStyle={colors.statusBar} />
 
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
 
@@ -3253,7 +3287,7 @@ export default function HomeScreen() {
           refreshControl={
             <RefreshControl
               refreshing={refreshing} onRefresh={onRefresh}
-              tintColor={COLORS.orange} colors={[COLORS.orange]}
+              tintColor={colors.primary} colors={[colors.primary]}
             />
           }
         >
@@ -3274,7 +3308,7 @@ export default function HomeScreen() {
           <View style={[s.section, s.homePrimaryBlock]}>
             {loading ? (
               <View style={s.driverHomeSearchCard}>
-                <ActivityIndicator color={ORANGE} />
+                <ActivityIndicator color={colors.primary} />
               </View>
             ) : displayUpcoming.length > 0 ? (
               <DriverHomeActivityCard
@@ -3349,8 +3383,8 @@ export default function HomeScreen() {
             </MapView>
             ) : (
               <View style={s.webMapFallback}>
-                <Ionicons name="map-outline" size={30} color={MUTED} />
-                <Text style={[s.mapFallbackText, { color: MUTED }]}>
+                <Ionicons name="map-outline" size={30} color={colors.textSecondary} />
+                <Text style={[s.mapFallbackText, { color: colors.textSecondary }]}>
                   Map preview is available on iOS and Android
                 </Text>
               </View>
@@ -3358,7 +3392,7 @@ export default function HomeScreen() {
 
             {MapView && !mapReady && (
               <View style={s.mapLoadingOverlay}>
-                <ActivityIndicator color={COLORS.orange} />
+                <ActivityIndicator color={colors.primary} />
               </View>
             )}
 
@@ -3400,7 +3434,7 @@ export default function HomeScreen() {
           ══════════════════════════════════════════════════════════ */}
           <View style={s.section}>
             {promotionsLoading && promotions.length === 0 ? (
-              <View style={s.promotionLoading}><ActivityIndicator color={COLORS.orange} /></View>
+              <View style={s.promotionLoading}><ActivityIndicator color={colors.primary} /></View>
             ) : promotions.length > 0 ? (
               <>
                 <ScrollView
@@ -3437,7 +3471,7 @@ export default function HomeScreen() {
               </>
             ) : (
               <View style={s.promotionEmptyCard}>
-                <Ionicons name="gift-outline" size={24} color={COLORS.orange} />
+                <Ionicons name="gift-outline" size={24} color={colors.primary} />
                 <View style={{ flex: 1 }}>
                   <Text style={s.promotionEmptyTitle}>No active promotions</Text>
                   <Text style={s.promotionEmptyText}>Check back soon for new driver offers.</Text>
@@ -3482,7 +3516,7 @@ export default function HomeScreen() {
               </ScrollView>
             ) : (
               <View style={s.emptyHotZones}>
-                <Ionicons name="radio-outline" size={18} color={COLORS.orange} />
+                <Ionicons name="radio-outline" size={18} color={colors.primary} />
                 <Text style={s.emptyHotZonesText}>
                   Hot zones appear when nearby riders request pickups.
                 </Text>
@@ -3505,7 +3539,7 @@ export default function HomeScreen() {
             {displayUpcoming.length === 0 && (
               <View style={s.emptyBox}>
                 <View style={s.emptyIconWrap}>
-                  <Ionicons name="car-outline" size={28} color={COLORS.orange} />
+                  <Ionicons name="car-outline" size={28} color={colors.primary} />
                 </View>
                 <Text style={s.emptyTitle}>No active rides</Text>
                 <Text style={s.emptyText}>Find nearby riders to get started</Text>
@@ -3548,10 +3582,10 @@ export default function HomeScreen() {
                 const waitingCount = passengers.filter((p) => String(p?.status || '').toUpperCase() !== 'COMPLETED').length;
                 const allCompleted = passengers.length > 0 && passengers.every((p) => String(p?.status || '').toUpperCase() === 'COMPLETED');
                 const badge = isGrpFlagged
-                  ? { bg: 'rgba(239,68,68,0.15)', txt: COLORS.red,   label: 'Flagged' }
+                  ? { bg: 'rgba(239,68,68,0.15)', txt: colors.red,   label: 'Flagged' }
                   : isGrpInProgress
-                  ? { bg: 'rgba(16,185,129,0.15)', txt: COLORS.green, label: 'In Progress' }
-                  : { bg: 'rgba(16,185,129,0.15)', txt: COLORS.green, label: 'Confirmed' };
+                  ? { bg: 'rgba(16,185,129,0.15)', txt: colors.green, label: 'In Progress' }
+                  : { bg: 'rgba(16,185,129,0.15)', txt: colors.green, label: 'Confirmed' };
 
                 return (
                   <View key={`groupRide-${postingId}`} style={s.rideCard}>
@@ -3575,7 +3609,7 @@ export default function HomeScreen() {
                           <Text style={s.rideMeta}>{(gr.seatsFilled ?? 0)}/{gr.seatCount ?? 2} seats</Text>
                           <TouchableOpacity onPress={() => { setSelectedRide({ ...(r as any), passengers }); setModalVisible(true); }} style={s.detailsBtn}>
                             <Text style={s.detailsBtnText}>Details</Text>
-                            <Ionicons name="chevron-forward" size={14} color={COLORS.orange} />
+                            <Ionicons name="chevron-forward" size={14} color={colors.primary} />
                           </TouchableOpacity>
                         </View>
                       </View>
@@ -3587,7 +3621,7 @@ export default function HomeScreen() {
                               setFlagModalVisible(true);
                             }
                           }} style={s.iconBtn}>
-                            <Ionicons name="flag" size={16} color={COLORS.red} />
+                            <Ionicons name="flag" size={16} color={colors.red} />
                           </TouchableOpacity>
                         )}
                         {aggStatus === 'CONFIRMED' && !waitingGroupAfterComplete[postingId] && (
@@ -3669,20 +3703,20 @@ export default function HomeScreen() {
                             const url = `https://ridealongapp.com/ride/${r.id}${p.toString() ? '?' + p.toString() : ''}`;
                             Share.share({ message: `I'm offering a ride on RideAlong!\n${url}`, url }).catch(() => {});
                           }}>
-                            <Ionicons name="share-outline" size={16} color={COLORS.orange} />
+                            <Ionicons name="share-outline" size={16} color={colors.primary} />
                           </TouchableOpacity>
                         )}
                         <TouchableOpacity style={s.detailsBtn} onPress={() => openRideDetails(r)}>
                           <Text style={s.detailsBtnText}>Details</Text>
-                          <Ionicons name="chevron-forward" size={14} color={COLORS.orange} />
+                          <Ionicons name="chevron-forward" size={14} color={colors.primary} />
                         </TouchableOpacity>
                       </View>
                     </View>
 
                     {hasConfirmedRide && confirmedStatusKey === 'CONFIRMED' && !isIncomingPendingOffer && !isOfferReceivedForPosting && !isOwnPendingOffer && !waitingAfterPickup[cardKey] && !waitingAfterComplete[cardKey] && (
                       <View style={s.actionRow}>
-                        <TouchableOpacity onPress={() => { setFlaggingRideRef(r); setFlagModalVisible(true); }} style={s.iconBtn}><Ionicons name="flag-outline" size={16} color={COLORS.red}/></TouchableOpacity>
-                        <TouchableOpacity onPress={() => openChatForRide(r)} style={s.iconBtn}><Ionicons name="chatbubble-outline" size={16} color={COLORS.orange}/></TouchableOpacity>
+                        <TouchableOpacity onPress={() => { setFlaggingRideRef(r); setFlagModalVisible(true); }} style={s.iconBtn}><Ionicons name="flag-outline" size={16} color={colors.red}/></TouchableOpacity>
+                        <TouchableOpacity onPress={() => openChatForRide(r)} style={s.iconBtn}><Ionicons name="chatbubble-outline" size={16} color={colors.primary}/></TouchableOpacity>
                         <Button size="sm" variant="primary"
                           loading={!!rideActionLoading[`pickup-${r.type}-${r.id}`]}
                           disabled={!!rideActionLoading[`pickup-${r.type}-${r.id}`]}
@@ -3703,8 +3737,8 @@ export default function HomeScreen() {
 
                     {hasConfirmedRide && isInProgress && !isIncomingPendingOffer && !isOfferReceivedForPosting && !isOwnPendingOffer && !isWaiting && (
                       <View style={s.actionRow}>
-                        <TouchableOpacity onPress={() => { setFlaggingRideRef(r); setFlagModalVisible(true); }} style={s.iconBtn}><Ionicons name="flag-outline" size={16} color={COLORS.red}/></TouchableOpacity>
-                        <TouchableOpacity onPress={() => openChatForRide(r)} style={s.iconBtn}><Ionicons name="chatbubble-outline" size={16} color={COLORS.orange}/></TouchableOpacity>
+                        <TouchableOpacity onPress={() => { setFlaggingRideRef(r); setFlagModalVisible(true); }} style={s.iconBtn}><Ionicons name="flag-outline" size={16} color={colors.red}/></TouchableOpacity>
+                        <TouchableOpacity onPress={() => openChatForRide(r)} style={s.iconBtn}><Ionicons name="chatbubble-outline" size={16} color={colors.primary}/></TouchableOpacity>
                         <Button size="sm" variant="primary"
                           loading={!!rideActionLoading[`complete-${r.type}-${r.id}`]}
                           disabled={!!rideActionLoading[`complete-${r.type}-${r.id}`]}
@@ -3775,7 +3809,7 @@ export default function HomeScreen() {
               <View style={s.monthStatRow}>
                 <View style={s.monthStat}>
                   <View style={s.monthStatIconWrap}>
-                    <Ionicons name="car-outline" size={18} color={ORANGE} />
+                    <Ionicons name="car-outline" size={18} color={colors.primary} />
                   </View>
                   <Text style={s.monthStatValue}>
                     {monthlyStats.loaded ? String(monthlyStats.rides) : '—'}
@@ -3785,7 +3819,7 @@ export default function HomeScreen() {
                 <View style={s.monthDivider} />
                 <View style={s.monthStat}>
                   <View style={s.monthStatIconWrap}>
-                    <Ionicons name="cash-outline" size={18} color={ORANGE} />
+                    <Ionicons name="cash-outline" size={18} color={colors.primary} />
                   </View>
                   <Text style={s.monthStatValue}>
                     {monthlyStats.loaded ? `$${Math.round(monthlyStats.earnings)}` : '—'}
@@ -3795,7 +3829,7 @@ export default function HomeScreen() {
                 <View style={s.monthDivider} />
                 <View style={s.monthStat}>
                   <View style={s.monthStatIconWrap}>
-                    <Ionicons name="star-outline" size={18} color={ORANGE} />
+                    <Ionicons name="star-outline" size={18} color={colors.primary} />
                   </View>
                   <Text style={s.monthStatValue}>
                     {monthlyStats.loaded ? (monthlyStats.rating != null ? monthlyStats.rating.toFixed(1) : '—') : '—'}
@@ -3848,7 +3882,7 @@ export default function HomeScreen() {
                           <Text style={s.ridePrice}>{price}{seatCount > 1 ? ` · ${seatCount} seats` : ''}</Text>
                           <TouchableOpacity style={s.detailsBtn} onPress={() => router.push('/(driver)/settings/driver-ride-history')}>
                             <Text style={s.detailsBtnText}>History</Text>
-                            <Ionicons name="chevron-forward" size={14} color={COLORS.orange} />
+                            <Ionicons name="chevron-forward" size={14} color={colors.primary} />
                           </TouchableOpacity>
                         </View>
                       </View>
@@ -3873,7 +3907,7 @@ export default function HomeScreen() {
               <View style={s.modalHdr}>
                 <Text style={s.modalTitle}>Ride Details</Text>
                 <TouchableOpacity onPress={closeModal} style={s.modalCloseBtn}>
-                  <Ionicons name="close" size={20} color={NAVY} />
+                  <Ionicons name="close" size={20} color={colors.textPrimary} />
                 </TouchableOpacity>
               </View>
               {selectedRide && (
@@ -3907,17 +3941,17 @@ export default function HomeScreen() {
                             <View key={String(p?.riderId || idx)} style={s.passengerRow}>
                               {p?.avatarUrl
                                 ? <Image source={{ uri: p.avatarUrl }} style={s.passengerAvatar} />
-                                : <View style={[s.passengerAvatar, { backgroundColor: COLORS.orangeGlow, alignItems: 'center', justifyContent: 'center' }]}><Ionicons name="person" size={20} color={COLORS.orange}/></View>
+                                : <View style={[s.passengerAvatar, { backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }]}><Ionicons name="person" size={20} color={colors.primary}/></View>
                               }
                               <View style={{ flex: 1, marginLeft: 10 }}>
                                 <Text style={s.passengerName}>{p?.name || 'Passenger'}</Text>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                                  <Ionicons name="star" size={12} color={COLORS.amber} />
+                                  <Ionicons name="star" size={12} color={colors.amber} />
                                   <Text style={s.passengerRating}>{typeof p?.rating === 'number' ? p.rating.toFixed(1) : '—'}</Text>
                                 </View>
                               </View>
                               <TouchableOpacity
-                                style={[s.callBtn, { backgroundColor: p?.phone ? COLORS.orange : '#F3EFE8' }]}
+                                style={[s.callBtn, { backgroundColor: p?.phone ? colors.primary : colors.bgSecondary }]}
                                 disabled={!p?.phone}
                                 onPress={() => p?.phone && Linking.openURL(`tel:${String(p.phone).replace(/[^0-9+]/g, '')}`).catch(() => {})}
                               >
@@ -3939,18 +3973,18 @@ export default function HomeScreen() {
                               onPress={() => riderId && router.push({ pathname: '/(driver)/rider/[id]', params: { id: String(riderId), returnTo: '/(driver)' } } as any)}>
                               {modalRider?.avatarUrl
                                 ? <Image source={{ uri: modalRider.avatarUrl }} style={s.passengerAvatar} />
-                                : <View style={[s.passengerAvatar, { backgroundColor: COLORS.orangeGlow, alignItems: 'center', justifyContent: 'center' }]}><Ionicons name="person" size={20} color={COLORS.orange}/></View>
+                                : <View style={[s.passengerAvatar, { backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }]}><Ionicons name="person" size={20} color={colors.primary}/></View>
                               }
                               <View style={{ flex: 1, marginLeft: 10 }}>
                                 <Text style={s.passengerName}>{modalRider?.name ?? 'Loading…'}</Text>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                                  <Ionicons name="star" size={12} color={COLORS.amber} />
+                                  <Ionicons name="star" size={12} color={colors.amber} />
                                   <Text style={s.passengerRating}>{typeof modalRider?.rating === 'number' ? modalRider.rating.toFixed(1) : '—'}</Text>
                                 </View>
                               </View>
                             </TouchableOpacity>
                             <TouchableOpacity
-                              style={[s.callBtn, { backgroundColor: phone ? COLORS.orange : '#F3EFE8' }]}
+                              style={[s.callBtn, { backgroundColor: phone ? colors.primary : colors.bgSecondary }]}
                               disabled={!phone}
                               onPress={() => phone && Linking.openURL(`tel:${String(phone).replace(/[^0-9+]/g, '')}`).catch(() => {})}
                             >
@@ -3978,10 +4012,10 @@ export default function HomeScreen() {
                     <Text style={s.modalSectionTitle}>Trip Info</Text>
                     <View style={s.infoGrid}>
                       {[
-                        { label: 'Price',    value: selectedRide.priceText ?? '—',   color: COLORS.green },
-                        { label: 'Date',     value: selectedRide.dateTime ? selectedRide.dateTime.toLocaleDateString() : '—', color: NAVY },
-                        { label: 'Time',     value: selectedRide.dateTime ? formatTime(selectedRide.dateTime) : '—', color: NAVY },
-                        { label: 'Distance', value: (selectedRide as any).__modalDistanceText ?? selectedRide.distanceText ?? '—', color: NAVY },
+                        { label: 'Price',    value: selectedRide.priceText ?? '—',   color: colors.green },
+                        { label: 'Date',     value: selectedRide.dateTime ? selectedRide.dateTime.toLocaleDateString() : '—', color: colors.textPrimary },
+                        { label: 'Time',     value: selectedRide.dateTime ? formatTime(selectedRide.dateTime) : '—', color: colors.textPrimary },
+                        { label: 'Distance', value: (selectedRide as any).__modalDistanceText ?? selectedRide.distanceText ?? '—', color: colors.textPrimary },
                       ].map(({ label, value, color }) => (
                         <View key={label} style={s.infoCell}>
                           <Text style={s.infoCellLabel}>{label}</Text>
@@ -4596,72 +4630,74 @@ function isGenericName(v: any): boolean {
 
 
 
-const s = StyleSheet.create({
+function useDriverHomeStyles() {
+  const { colors } = useAppTheme();
+  return useMemo(() => StyleSheet.create({
 
   // ── Header ────────────────────────────────────────────────────────────────
   hdr:              { flexDirection:'row', alignItems:'center', paddingHorizontal:16, paddingTop:8, paddingBottom:14 },
   avatarWrap:       { width:48, height:48, alignItems:'center', justifyContent:'center' },
-  avatarGlowRing:   { position:'absolute', width:58, height:58, borderRadius:29, borderWidth:2, borderColor:COLORS.orange },
+  avatarGlowRing:   { position:'absolute', width:58, height:58, borderRadius:29, borderWidth:2, borderColor:colors.primary },
   avatarImg:        { width:46, height:46, borderRadius:23, alignItems:'center', justifyContent:'center' },
   avatarInitial:    { fontSize:20, fontWeight:'800', color:'white' },
-  verifiedDot:      { position:'absolute', bottom:0, right:0, width:14, height:14, borderRadius:7, backgroundColor:COLORS.green, borderWidth:2, borderColor:BG, alignItems:'center', justifyContent:'center' },
-  hdrSub:           { fontSize:13, color:MUTED, fontWeight:'500' },
-  hdrName:          { fontSize:24, fontWeight:'800', color:NAVY, letterSpacing:-0.5, lineHeight:28 },
-  hdrAccent:        { fontSize:24, fontWeight:'800', color:COLORS.orange, letterSpacing:-0.5 },
-  streakBadge:      { backgroundColor:COLORS.orangeGlow, borderRadius:20, paddingHorizontal:10, paddingVertical:4, borderWidth:1, borderColor:COLORS.orangeBorder },
-  streakText:       { color:COLORS.orange, fontSize:11, fontWeight:'700' },
+  verifiedDot:      { position:'absolute', bottom:0, right:0, width:14, height:14, borderRadius:7, backgroundColor:colors.green, borderWidth:2, borderColor:colors.bg, alignItems:'center', justifyContent:'center' },
+  hdrSub:           { fontSize:13, color:colors.textSecondary, fontWeight:'500' },
+  hdrName:          { fontSize:24, fontWeight:'800', color:colors.textPrimary, letterSpacing:-0.5, lineHeight:28 },
+  hdrAccent:        { fontSize:24, fontWeight:'800', color:colors.primary, letterSpacing:-0.5 },
+  streakBadge:      { backgroundColor:colors.primaryDim, borderRadius:20, paddingHorizontal:10, paddingVertical:4, borderWidth:1, borderColor:colors.primaryBorder },
+  streakText:       { color:colors.primary, fontSize:11, fontWeight:'700' },
   notifBtn:         { width:40, height:40, borderRadius:20, backgroundColor:'rgba(21,35,58,0.06)', alignItems:'center', justifyContent:'center' },
-  notifBadge:       { position:'absolute', top:-2, right:-2, backgroundColor:COLORS.red, minWidth:16, height:16, borderRadius:8, alignItems:'center', justifyContent:'center', paddingHorizontal:3 },
+  notifBadge:       { position:'absolute', top:-2, right:-2, backgroundColor:colors.red, minWidth:16, height:16, borderRadius:8, alignItems:'center', justifyContent:'center', paddingHorizontal:3 },
   notifBadgeText:   { color:'white', fontSize:10, fontWeight:'700' },
 
   // ── Hero Map ──────────────────────────────────────────────────────────────
-  mapWrap:          { marginHorizontal:16, marginBottom:20, height:250, borderRadius:28, overflow:'hidden', borderWidth:1, borderColor:BORDER },
+  mapWrap:          { marginHorizontal:16, marginBottom:20, height:250, borderRadius:28, overflow:'hidden', borderWidth:1, borderColor:colors.border },
   mapBase:          { ...StyleSheet.absoluteFillObject as any },
   gridH:            { position:'absolute', left:0, right:0, height:1, backgroundColor:'rgba(59,130,246,0.07)' },
   gridV:            { position:'absolute', top:0, bottom:0, width:1, backgroundColor:'rgba(59,130,246,0.07)' },
   road:             { position:'absolute', height:3, backgroundColor:'rgba(30,60,120,0.5)' },
   roadV:            { position:'absolute', width:3, backgroundColor:'rgba(30,60,120,0.5)' },
   dotWrap:          { position:'absolute', width:20, height:20, alignItems:'center', justifyContent:'center' },
-  dotPulseRing:     { position:'absolute', width:20, height:20, borderRadius:10, backgroundColor:COLORS.orange },
-  dotCore:          { width:10, height:10, borderRadius:5, backgroundColor:COLORS.orange, shadowColor:COLORS.orange, shadowOpacity:1, shadowRadius:8, shadowOffset:{width:0,height:0} },
+  dotPulseRing:     { position:'absolute', width:20, height:20, borderRadius:10, backgroundColor:colors.primary },
+  dotCore:          { width:10, height:10, borderRadius:5, backgroundColor:colors.primary, shadowColor:colors.primary, shadowOpacity:1, shadowRadius:8, shadowOffset:{width:0,height:0} },
   myLocWrap:        { position:'absolute', width:24, height:24, alignItems:'center', justifyContent:'center' },
   myLocRing:        { position:'absolute', width:28, height:28, borderRadius:14, borderWidth:2, borderColor:'#3B82F6' },
   myLocCore:        { width:14, height:14, borderRadius:7, backgroundColor:'#3B82F6', borderWidth:3, borderColor:'white', shadowColor:'#3B82F6', shadowOpacity:1, shadowRadius:10, shadowOffset:{width:0,height:0} },
   routeLine2:       { position:'absolute', height:2.5, backgroundColor:'rgba(244,98,31,0.5)', borderRadius:2 },
   liveBadge:        { position:'absolute', top:14, left:14, flexDirection:'row', alignItems:'center', gap:6, backgroundColor:'rgba(16,185,129,0.18)', paddingHorizontal:10, paddingVertical:5, borderRadius:20, borderWidth:1, borderColor:'rgba(16,185,129,0.3)' },
-  liveDot:          { width:7, height:7, borderRadius:3.5, backgroundColor:COLORS.green },
-  liveText:         { color:COLORS.green, fontSize:10, fontWeight:'800', letterSpacing:1.5 },
+  liveDot:          { width:7, height:7, borderRadius:3.5, backgroundColor:colors.green },
+  liveText:         { color:colors.green, fontSize:10, fontWeight:'800', letterSpacing:1.5 },
   heroCopy:         { paddingHorizontal:20, marginBottom:18 },
-  heroTitle:        { color:NAVY, fontSize:30, lineHeight:36, fontWeight:'600' },
-  heroAccent:       { color:COLORS.orange, fontStyle:'italic', fontWeight:'600' },
-  heroSub:          { color:MUTED, fontSize:15, lineHeight:21, marginTop:5 },
-  mapOverlay:       { position:'absolute', bottom:0, left:0, right:0, flexDirection:'row', alignItems:'center', padding:16, borderTopWidth:1, borderTopColor:BORDER, backgroundColor:'rgba(255,255,255,0.96)' },
-  mapOverlayHeadline: { color:NAVY, fontSize:16, fontWeight:'800', letterSpacing:-0.3 },
-  mapOverlaySub:    { color:MUTED, fontSize:12, marginTop:2 },
+  heroTitle:        { color:colors.textPrimary, fontSize:30, lineHeight:36, fontWeight:'600' },
+  heroAccent:       { color:colors.primary, fontStyle:'italic', fontWeight:'600' },
+  heroSub:          { color:colors.textSecondary, fontSize:15, lineHeight:21, marginTop:5 },
+  mapOverlay:       { position:'absolute', bottom:0, left:0, right:0, flexDirection:'row', alignItems:'center', padding:16, borderTopWidth:1, borderTopColor:colors.border, backgroundColor:colors.bgCard },
+  mapOverlayHeadline: { color:colors.textPrimary, fontSize:16, fontWeight:'800', letterSpacing:-0.3 },
+  mapOverlaySub:    { color:colors.textSecondary, fontSize:12, marginTop:2 },
   goBtn:            { marginLeft:12 },
-  goBtnInner:       { flexDirection:'row', alignItems:'center', gap:6, paddingHorizontal:18, paddingVertical:10, borderRadius:20, backgroundColor:COLORS.orange },
+  goBtnInner:       { flexDirection:'row', alignItems:'center', gap:6, paddingHorizontal:18, paddingVertical:10, borderRadius:20, backgroundColor:colors.primary },
   goBtnText:        { color:'white', fontSize:15, fontWeight:'800' },
 
   // ── Sections ──────────────────────────────────────────────────────────────
   section:          { paddingHorizontal:16, marginBottom:24 },
   homePrimaryBlock: { marginBottom: 34, zIndex: 20, elevation: 20 },
   sectionHdrRow:    { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:14 },
-  sectionTitle:     { fontSize:18, fontWeight:'800', color:NAVY, letterSpacing:-0.3 },
-  sectionSub:       { fontSize:12, color:MUTED, fontWeight:'500' },
-  viewAll:          { fontSize:13, color:COLORS.orange, fontWeight:'600' },
-  livePillSmall:    { flexDirection:'row', alignItems:'center', gap:5, backgroundColor:'#F9E8DB', paddingHorizontal:9, paddingVertical:4, borderRadius:12 },
-  livePillText:     { color:ORANGE, fontSize:11, fontWeight:'700' },
+  sectionTitle:     { fontSize:18, fontWeight:'800', color:colors.textPrimary, letterSpacing:-0.3 },
+  sectionSub:       { fontSize:12, color:colors.textSecondary, fontWeight:'500' },
+  viewAll:          { fontSize:13, color:colors.primary, fontWeight:'600' },
+  livePillSmall:    { flexDirection:'row', alignItems:'center', gap:5, backgroundColor:colors.primaryDim, paddingHorizontal:9, paddingVertical:4, borderRadius:12 },
+  livePillText:     { color:colors.primary, fontSize:11, fontWeight:'700' },
 
-  driverHomeSearchCard: { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1, borderColor: BORDER, padding: 14, shadowColor: NAVY, shadowOpacity: 0.06, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 20, zIndex: 20 },
+  driverHomeSearchCard: { backgroundColor: colors.bgCard, borderRadius: 20, borderWidth: 1, borderColor: colors.border, padding: 14, shadowColor: colors.textPrimary, shadowOpacity: 0.06, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 20, zIndex: 20 },
   driverHomeRouteRow: { flexDirection: 'row' },
   driverHomeRouteRail: { width: 28, alignItems: 'center', paddingTop: 16, paddingBottom: 16 },
-  driverHomeNavyDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: NAVY },
-  driverHomeOrangeDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: ORANGE },
-  driverHomeDashedLine: { flex: 1, width: 1, borderLeftWidth: 1, borderStyle: 'dashed', borderColor: '#CBD5E1', marginVertical: 7 },
+  driverHomeNavyDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.textPrimary },
+  driverHomeOrangeDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary },
+  driverHomeDashedLine: { flex: 1, width: 1, borderLeftWidth: 1, borderStyle: 'dashed', borderColor: colors.border, marginVertical: 7 },
   driverHomeRouteInputs: { flex: 1, gap: 9 },
   driverHomeAutocompleteWrap: { position: 'relative' },
-  driverHomeInputPill: { height: 48, borderRadius: 13, borderWidth: 1, borderColor: '#D7DCE3', backgroundColor: '#FFFFFF', paddingHorizontal: 14, justifyContent: 'center' },
-  driverHomeInputText: { color: NAVY, fontSize: 15, fontWeight: '500' },
+  driverHomeInputPill: { height: 48, borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, paddingHorizontal: 14, justifyContent: 'center' },
+  driverHomeInputText: { color: colors.textPrimary, fontSize: 15, fontWeight: '500' },
   driverHomeAutocompletePanel: {
     position: 'absolute',
     top: 52,
@@ -4669,33 +4705,33 @@ const s = StyleSheet.create({
     right: 0,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E5E0D8',
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.border,
+    backgroundColor: colors.bgCard,
     overflow: 'hidden',
-    shadowColor: NAVY,
+    shadowColor: colors.textPrimary,
     shadowOpacity: 0.12,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
     elevation: 12,
   },
-  driverHomeAutocompleteItem: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F1EEE8' },
+  driverHomeAutocompleteItem: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
   driverHomeAutocompleteState: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 12 },
-  driverHomeAutocompleteIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#FEF0E8', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  driverHomeAutocompleteIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   driverHomeAutocompleteCopy: { flex: 1, minWidth: 0 },
-  driverHomeAutocompleteText: { color: NAVY, fontSize: 14, lineHeight: 18, fontWeight: '700' },
-  driverHomeAutocompleteSubText: { flex: 1, color: MUTED, fontSize: 12, lineHeight: 16, fontWeight: '500' },
+  driverHomeAutocompleteText: { color: colors.textPrimary, fontSize: 14, lineHeight: 18, fontWeight: '700' },
+  driverHomeAutocompleteSubText: { flex: 1, color: colors.textSecondary, fontSize: 12, lineHeight: 16, fontWeight: '500' },
   driverHomeMetaRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  driverHomeMetaPill: { flex: 1, height: 44, borderRadius: 13, borderWidth: 1, borderColor: '#D7DCE3', justifyContent: 'center', paddingHorizontal: 13 },
-  driverHomeMetaText: { color: NAVY, fontSize: 13, fontWeight: '500' },
-  driverHomePlaceholderText: { color: MUTED },
-  driverHomePrimaryBtn: { height: 48, borderRadius: 24, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
-  driverHomePrimaryText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
-  driverActivityCard: { borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 18, minHeight: 150, shadowColor: NAVY, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 14, elevation: 2 },
-  driverActivityRoute: { color: NAVY, fontSize: 18, lineHeight: 24, fontWeight: '800', marginBottom: 16 },
-  activityBadge: { alignSelf: 'flex-start', backgroundColor: COLORS.orangeGlow, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: COLORS.orangeBorder },
-  activityBadgeText: { color: COLORS.orange, fontSize: 11, fontWeight: '800', textTransform: 'capitalize' },
+  driverHomeMetaPill: { flex: 1, height: 44, borderRadius: 13, borderWidth: 1, borderColor: colors.border, justifyContent: 'center', paddingHorizontal: 13 },
+  driverHomeMetaText: { color: colors.textPrimary, fontSize: 13, fontWeight: '500' },
+  driverHomePlaceholderText: { color: colors.textSecondary },
+  driverHomePrimaryBtn: { height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
+  driverHomePrimaryText: { color: colors.textInverse, fontSize: 17, fontWeight: '700' },
+  driverActivityCard: { borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 18, minHeight: 150, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 14, elevation: 2 },
+  driverActivityRoute: { color: colors.textPrimary, fontSize: 18, lineHeight: 24, fontWeight: '800', marginBottom: 16 },
+  activityBadge: { alignSelf: 'flex-start', backgroundColor: colors.primaryDim, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: colors.primaryBorder },
+  activityBadgeText: { color: colors.primary, fontSize: 11, fontWeight: '800', textTransform: 'capitalize' },
 
-  
+
   driverSnapshotRow: {
       flexDirection: 'row',
       gap: 10,
@@ -4711,7 +4747,7 @@ const s = StyleSheet.create({
     },
 
   // ── CTA ───────────────────────────────────────────────────────────────────
-  ctaBtn:           { borderRadius:22, paddingVertical:18, paddingHorizontal:20, flexDirection:'row', alignItems:'center', shadowColor:COLORS.orange, shadowOffset:{width:0,height:8}, shadowOpacity:0.4, shadowRadius:20, elevation:12 },
+  ctaBtn:           { borderRadius:22, paddingVertical:18, paddingHorizontal:20, flexDirection:'row', alignItems:'center', shadowColor:colors.primary, shadowOffset:{width:0,height:8}, shadowOpacity:0.4, shadowRadius:20, elevation:12 },
   ctaIconWrap:      { width:44, height:44, borderRadius:13, backgroundColor:'rgba(255,255,255,0.2)', alignItems:'center', justifyContent:'center' },
   ctaTitle:         { fontSize:17, fontWeight:'800', color:'white', letterSpacing:-0.3 },
   ctaSub:           { fontSize:12, color:'rgba(255,255,255,0.8)', marginTop:2 },
@@ -4719,108 +4755,108 @@ const s = StyleSheet.create({
 
   // ── Dots ──────────────────────────────────────────────────────────────────
   dotsRow:          { flexDirection:'row', justifyContent:'center', marginTop:12, gap:6 },
-  dot:              { width:6, height:6, borderRadius:3, backgroundColor:'#D6D0C7' },
-  dotActive:        { backgroundColor:SECONDARY, width:20, borderRadius:3 },
+  dot:              { width:6, height:6, borderRadius:3, backgroundColor:colors.border },
+  dotActive:        { backgroundColor:colors.textPrimary, width:20, borderRadius:3 },
 
   // ── Hot Zones ─────────────────────────────────────────────────────────────
   promotionList: { paddingBottom: 12, paddingRight: 8 },
   promotionLoading: { minHeight: 120, alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
-  promotionEmptyCard: { minHeight: 92, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: '#FFFFFF', padding: 18 },
-  promotionEmptyTitle: { color: NAVY, fontSize: 15, fontWeight: '700' },
-  promotionEmptyText: { color: MUTED, fontSize: 13, lineHeight: 18, marginTop: 3 },
-  uberPromoCard: { height: 174, marginRight: 12, flexDirection: 'row', overflow: 'hidden', borderRadius: 20, borderWidth: 1, borderColor: '#E3DED6', backgroundColor: '#FFFFFF', shadowColor: NAVY, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 12, elevation: 2 },
+  promotionEmptyCard: { minHeight: 92, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 18 },
+  promotionEmptyTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  promotionEmptyText: { color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginTop: 3 },
+  uberPromoCard: { height: 174, marginRight: 12, flexDirection: 'row', overflow: 'hidden', borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 12, elevation: 2 },
   uberPromoCopy: { width: '62%', paddingHorizontal: 18, paddingVertical: 17, justifyContent: 'space-between' },
-  uberPromoTitle: { color: NAVY, fontSize: 21, lineHeight: 25, fontWeight: '800', letterSpacing: -0.35 },
-  uberPromoDescription: { color: MUTED, fontSize: 12, lineHeight: 17, marginTop: 6 },
-  uberPromoCta: { alignSelf: 'flex-start', minHeight: 34, borderRadius: 17, backgroundColor: '#F3EFE8', paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  uberPromoCtaText: { color: NAVY, fontSize: 13, fontWeight: '700' },
+  uberPromoTitle: { color: colors.textPrimary, fontSize: 21, lineHeight: 25, fontWeight: '800', letterSpacing: -0.35 },
+  uberPromoDescription: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 6 },
+  uberPromoCta: { alignSelf: 'flex-start', minHeight: 34, borderRadius: 17, backgroundColor: colors.bgSecondary, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  uberPromoCtaText: { color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
   uberPromoVisual: { flex: 1, backgroundColor: '#F6D8C6', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   uberPromoVisualSecondary: { backgroundColor: '#DDE5F2' },
   promoBubble: { position: 'absolute', borderRadius: 999, backgroundColor: '#F2B994' },
   promoBubbleSecondary: { backgroundColor: '#B8C6DE' },
   promoBubbleTop: { width: 108, height: 108, top: -45, right: -32 },
   promoBubbleBottom: { width: 92, height: 92, bottom: -32, left: -26 },
-  promoIconLarge: { width: 76, height: 76, borderRadius: 24, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-6deg' }], shadowColor: ORANGE, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.22, shadowRadius: 12, elevation: 4 },
-  promoIconLargeSecondary: { backgroundColor: SECONDARY, shadowColor: SECONDARY },
-  promoIconSmall: { position: 'absolute', right: 13, bottom: 14, width: 42, height: 42, borderRadius: 21, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '8deg' }] },
+  promoIconLarge: { width: 76, height: 76, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-6deg' }], shadowColor: colors.primary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.22, shadowRadius: 12, elevation: 4 },
+  promoIconLargeSecondary: { backgroundColor: colors.textPrimary, shadowColor: colors.textPrimary },
+  promoIconSmall: { position: 'absolute', right: 13, bottom: 14, width: 42, height: 42, borderRadius: 21, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '8deg' }] },
 
-  heatCard:         { width:145, borderRadius:20, borderWidth:1, overflow:'hidden', padding:14, marginRight:12, justifyContent:'flex-start', backgroundColor:'#FFFFFF' },
+  heatCard:         { width:145, borderRadius:20, borderWidth:1, overflow:'hidden', padding:14, marginRight:12, justifyContent:'flex-start', backgroundColor:colors.bgCard },
   heatEmoji:        { fontSize:26, marginBottom:10 },
   heatPill:         { flexDirection:'row', alignItems:'center', gap:5, paddingHorizontal:8, paddingVertical:3, borderRadius:12, alignSelf:'flex-start', marginBottom:8 },
   heatDot:          { width:5, height:5, borderRadius:2.5 },
   heatRiders:       { fontSize:11, fontWeight:'700' },
-  heatName:         { fontSize:13, fontWeight:'700', color:NAVY, marginBottom:2 },
-  heatDist:         { fontSize:11, color:MUTED, marginBottom:6 },
-  emptyHotZones:    { marginTop:12, flexDirection:'row', alignItems:'center', gap:8, borderRadius:16, borderWidth:1, borderColor:BORDER, backgroundColor:'#FFFFFF', padding:14 },
-  emptyHotZonesText:{ flex:1, color:MUTED, fontSize:12, fontWeight:'500' },
+  heatName:         { fontSize:13, fontWeight:'700', color:colors.textPrimary, marginBottom:2 },
+  heatDist:         { fontSize:11, color:colors.textSecondary, marginBottom:6 },
+  emptyHotZones:    { marginTop:12, flexDirection:'row', alignItems:'center', gap:8, borderRadius:16, borderWidth:1, borderColor:colors.border, backgroundColor:colors.bgCard, padding:14 },
+  emptyHotZonesText:{ flex:1, color:colors.textSecondary, fontSize:12, fontWeight:'500' },
   heatEarnRow:      { flexDirection:'row', alignItems:'center', gap:4 },
   heatEarn:         { fontSize:11, fontWeight:'600' },
 
   // ── Ride Cards ────────────────────────────────────────────────────────────
-  rideCard:         { borderRadius:20, borderWidth:1, borderColor:BORDER, overflow:'hidden', marginBottom:12, backgroundColor:'#FFFFFF', shadowColor:NAVY, shadowOffset:{width:0,height:2}, shadowOpacity:0.06, shadowRadius:12, elevation:2 },
+  rideCard:         { borderRadius:20, borderWidth:1, borderColor:colors.border, overflow:'hidden', marginBottom:12, backgroundColor:colors.bgCard, shadowColor:colors.textPrimary, shadowOffset:{width:0,height:2}, shadowOpacity:0.06, shadowRadius:12, elevation:2 },
   rideCardInner:    { padding:16 },
   rideCardTop:      { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:12 },
-  rideDateText:     { fontSize:12, color:MUTED, fontWeight:'500' },
+  rideDateText:     { fontSize:12, color:colors.textSecondary, fontWeight:'500' },
   statusBadge:      { paddingHorizontal:10, paddingVertical:4, borderRadius:50 },
   statusBadgeText:  { fontSize:12, fontWeight:'600' },
   routeWrap:        { marginBottom:12 },
   routeRow:         { flexDirection:'row', alignItems:'center', marginBottom:5 },
-  routeConnector:   { width:2, height:10, backgroundColor:BORDER, marginLeft:3, marginBottom:5 },
-  dotOrange:        { width:8, height:8, borderRadius:4, backgroundColor:COLORS.orange, marginRight:10, flexShrink:0 },
-  dotGray:          { width:8, height:8, borderRadius:4, backgroundColor:MUTED, marginRight:10, flexShrink:0 },
-  routeFrom:        { fontSize:14, fontWeight:'600', flex:1, color:NAVY },
-  routeTo:          { fontSize:14, fontWeight:'400', flex:1, color:MUTED },
+  routeConnector:   { width:2, height:10, backgroundColor:colors.border, marginLeft:3, marginBottom:5 },
+  dotOrange:        { width:8, height:8, borderRadius:4, backgroundColor:colors.primary, marginRight:10, flexShrink:0 },
+  dotGray:          { width:8, height:8, borderRadius:4, backgroundColor:colors.textSecondary, marginRight:10, flexShrink:0 },
+  routeFrom:        { fontSize:14, fontWeight:'600', flex:1, color:colors.textPrimary },
+  routeTo:          { fontSize:14, fontWeight:'400', flex:1, color:colors.textSecondary },
   rideFooter:       { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
-  ridePrice:        { fontSize:15, fontWeight:'700', color:COLORS.orange },
-  rideMeta:         { fontSize:12, color:MUTED },
-  detailsBtn:       { flexDirection:'row', alignItems:'center', gap:2 },
-  detailsBtnText:   { fontSize:13, color:COLORS.orange, fontWeight:'600' },
+  ridePrice:        { fontSize:15, fontWeight:'700', color:colors.primary },
+  rideMeta:         { fontSize:12, color:colors.textSecondary },
+  detailsBtn:       { flexDirection:'row', alignItems:'center', gap:4, minHeight:32, borderRadius:16, borderWidth:1, borderColor:colors.primaryBorder, backgroundColor:colors.primaryDim, paddingHorizontal:10 },
+  detailsBtnText:   { fontSize:13, color:colors.primary, fontWeight:'700' },
   actionRow:        { flexDirection:'row', justifyContent:'flex-end', alignItems:'center', gap:8, marginTop:12, flexWrap:'wrap' },
-  iconBtn:          { width:36, height:36, borderRadius:18, alignItems:'center', justifyContent:'center', backgroundColor:'#F3EFE8' },
-  waitingText:      { fontSize:12, color:MUTED, textAlign:'right', marginTop:8, fontStyle:'italic' },
+  iconBtn:          { width:36, height:36, borderRadius:18, alignItems:'center', justifyContent:'center', backgroundColor:colors.bgSecondary },
+  waitingText:      { fontSize:12, color:colors.textSecondary, textAlign:'right', marginTop:8, fontStyle:'italic' },
 
   // ── Campus Activity ───────────────────────────────────────────────────────
-  activityCard:     { borderRadius:18, borderWidth:1, borderColor:BORDER, overflow:'hidden', marginTop:2, backgroundColor:'#FFFFFF' },
+  activityCard:     { borderRadius:18, borderWidth:1, borderColor:colors.border, overflow:'hidden', marginTop:2, backgroundColor:colors.bgCard },
   activityRow:      { flexDirection:'row', alignItems:'center', paddingHorizontal:14, paddingVertical:13, gap:12 },
-  activityIconWrap: { width:34, height:34, borderRadius:17, backgroundColor:'#F9E8DB', alignItems:'center', justifyContent:'center', flexShrink:0 },
-  activityText:     { flex:1, fontSize:13, color:NAVY, lineHeight:18, fontWeight:'500' },
-  activityTime:     { fontSize:11, color:MUTED, fontWeight:'700', minWidth:42, textAlign:'right' },
-  monthCard:        { borderRadius:18, borderWidth:1, borderColor:BORDER, backgroundColor:'#FFFFFF', overflow:'hidden', marginTop:2 },
+  activityIconWrap: { width:34, height:34, borderRadius:17, backgroundColor:colors.primaryDim, alignItems:'center', justifyContent:'center', flexShrink:0 },
+  activityText:     { flex:1, fontSize:13, color:colors.textPrimary, lineHeight:18, fontWeight:'500' },
+  activityTime:     { fontSize:11, color:colors.textSecondary, fontWeight:'700', minWidth:42, textAlign:'right' },
+  monthCard:        { borderRadius:18, borderWidth:1, borderColor:colors.border, backgroundColor:colors.bgCard, overflow:'hidden', marginTop:2 },
   monthStatRow:     { flexDirection:'row', alignItems:'stretch', paddingVertical:4 },
   monthStat:        { flex:1, alignItems:'center', justifyContent:'center', paddingVertical:18, paddingHorizontal:8, gap:6 },
-  monthStatIconWrap:{ width:38, height:38, borderRadius:19, backgroundColor:'#FFF2E9', alignItems:'center', justifyContent:'center' },
-  monthStatValue:   { fontSize:22, fontWeight:'800', color:NAVY, letterSpacing:-0.5 },
-  monthStatLabel:   { fontSize:11, color:MUTED, fontWeight:'600', textTransform:'uppercase', letterSpacing:0.5 },
-  monthDivider:     { width:1, backgroundColor:BORDER, marginVertical:16 },
-  monthEmptyRow:    { borderTopWidth:1, borderTopColor:BORDER, paddingHorizontal:16, paddingVertical:14 },
-  monthEmptyText:   { fontSize:13, color:MUTED, lineHeight:18, textAlign:'center' },
+  monthStatIconWrap:{ width:38, height:38, borderRadius:19, backgroundColor:colors.primaryDim, alignItems:'center', justifyContent:'center' },
+  monthStatValue:   { fontSize:22, fontWeight:'800', color:colors.textPrimary, letterSpacing:-0.5 },
+  monthStatLabel:   { fontSize:11, color:colors.textSecondary, fontWeight:'600', textTransform:'uppercase', letterSpacing:0.5 },
+  monthDivider:     { width:1, backgroundColor:colors.border, marginVertical:16 },
+  monthEmptyRow:    { borderTopWidth:1, borderTopColor:colors.border, paddingHorizontal:16, paddingVertical:14 },
+  monthEmptyText:   { fontSize:13, color:colors.textSecondary, lineHeight:18, textAlign:'center' },
 
   // ── Challenge ─────────────────────────────────────────────────────────────
 
   // ── Empty State ───────────────────────────────────────────────────────────
   emptyBox:         { alignItems:'center', paddingVertical:32, gap:8 },
-  emptyIconWrap:    { width:56, height:56, borderRadius:18, backgroundColor:COLORS.orangeGlow, alignItems:'center', justifyContent:'center', marginBottom:4 },
-  emptyTitle:       { fontSize:15, fontWeight:'700', color:NAVY },
-  emptyText:        { fontSize:13, color:MUTED, textAlign:'center' },
+  emptyIconWrap:    { width:56, height:56, borderRadius:18, backgroundColor:colors.primaryDim, alignItems:'center', justifyContent:'center', marginBottom:4 },
+  emptyTitle:       { fontSize:15, fontWeight:'700', color:colors.textPrimary },
+  emptyText:        { fontSize:13, color:colors.textSecondary, textAlign:'center' },
 
   // ── Modal ─────────────────────────────────────────────────────────────────
   modalOverlay:     { flex:1, backgroundColor:'rgba(0,0,0,0.45)', justifyContent:'flex-end' },
-  modalSheet:       { borderTopLeftRadius:28, borderTopRightRadius:28, maxHeight:'92%', overflow:'hidden', paddingBottom:40, backgroundColor:BG, borderTopWidth:1, borderColor:BORDER },
-  modalHandle:      { width:40, height:4, borderRadius:2, backgroundColor:BORDER, alignSelf:'center', marginTop:12, marginBottom:4 },
+  modalSheet:       { borderTopLeftRadius:28, borderTopRightRadius:28, maxHeight:'92%', overflow:'hidden', paddingBottom:40, backgroundColor:colors.bg, borderTopWidth:1, borderColor:colors.border },
+  modalHandle:      { width:40, height:4, borderRadius:2, backgroundColor:colors.border, alignSelf:'center', marginTop:12, marginBottom:4 },
   modalHdr:         { flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingHorizontal:24, paddingVertical:16 },
-  modalTitle:       { fontSize:18, fontWeight:'800', color:NAVY, letterSpacing:-0.3 },
-  modalCloseBtn:    { width:34, height:34, borderRadius:17, backgroundColor:'#F3EFE8', alignItems:'center', justifyContent:'center' },
+  modalTitle:       { fontSize:18, fontWeight:'800', color:colors.textPrimary, letterSpacing:-0.3 },
+  modalCloseBtn:    { width:34, height:34, borderRadius:17, backgroundColor:colors.bgSecondary, alignItems:'center', justifyContent:'center' },
   modalSection:     { marginBottom:20, marginTop:4 },
-  modalSectionTitle:{ fontSize:11, fontWeight:'700', letterSpacing:1, textTransform:'uppercase', color:MUTED, marginBottom:10 },
-  passengerRow:     { flexDirection:'row', alignItems:'center', backgroundColor:'#F3EFE8', borderRadius:14, padding:12, marginBottom:8 },
+  modalSectionTitle:{ fontSize:11, fontWeight:'700', letterSpacing:1, textTransform:'uppercase', color:colors.textSecondary, marginBottom:10 },
+  passengerRow:     { flexDirection:'row', alignItems:'center', backgroundColor:colors.bgSecondary, borderRadius:14, padding:12, marginBottom:8 },
   passengerAvatar:  { width:44, height:44, borderRadius:22 },
-  passengerName:    { fontSize:15, fontWeight:'700', color:NAVY, marginBottom:2 },
-  passengerRating:  { fontSize:13, color:MUTED, fontWeight:'500' },
+  passengerName:    { fontSize:15, fontWeight:'700', color:colors.textPrimary, marginBottom:2 },
+  passengerRating:  { fontSize:13, color:colors.textSecondary, fontWeight:'500' },
   callBtn:          { width:40, height:40, borderRadius:20, alignItems:'center', justifyContent:'center' },
-  routeCard:        { borderRadius:14, borderWidth:1, borderColor:BORDER, padding:16, backgroundColor:'#FFFFFF' },
+  routeCard:        { borderRadius:14, borderWidth:1, borderColor:colors.border, padding:16, backgroundColor:colors.bgCard },
   infoGrid:         { flexDirection:'row', flexWrap:'wrap', gap:10 },
-  infoCell:         { flex:1, minWidth:'44%', borderRadius:12, borderWidth:1, borderColor:BORDER, padding:12, alignItems:'center', backgroundColor:'#F3EFE8' },
-  infoCellLabel:    { fontSize:10, fontWeight:'700', letterSpacing:0.5, textTransform:'uppercase', color:MUTED, marginBottom:4 },
+  infoCell:         { flex:1, minWidth:'44%', borderRadius:12, borderWidth:1, borderColor:colors.border, padding:12, alignItems:'center', backgroundColor:colors.bgSecondary },
+  infoCellLabel:    { fontSize:10, fontWeight:'700', letterSpacing:0.5, textTransform:'uppercase', color:colors.textSecondary, marginBottom:4 },
   infoCellValue:    { fontSize:15, fontWeight:'700' },
     root: {
     flex: 1,
@@ -4841,11 +4877,11 @@ const s = StyleSheet.create({
     flex: 1,
     minHeight: 50,
     borderRadius: 16,
-    backgroundColor: COLORS.orange,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
-    shadowColor: COLORS.orange,
+    shadowColor: colors.primary,
     shadowOpacity: 0.28,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
@@ -4853,7 +4889,7 @@ const s = StyleSheet.create({
   },
 
   quickActionPrimaryText: {
-    color: '#FFFFFF',
+    color: colors.textInverse,
     fontSize: 12,
     fontWeight: '800',
   },
@@ -4867,19 +4903,15 @@ const s = StyleSheet.create({
   flexDirection: 'row',
   alignItems: 'center',
   gap: 5,
-  backgroundColor: COLORS.orange,
+  backgroundColor: colors.primary,
   borderWidth: 2,
   borderColor: '#FFFFFF',
-  shadowColor: COLORS.orange,
+  shadowColor: colors.primary,
   shadowOpacity: 0.35,
   shadowRadius: 10,
   shadowOffset: { width: 0, height: 4 },
   elevation: 6,
-}
-
-
-
-,
+},
 
   liveRequestMarkerDot: {
     width: 6,
@@ -4906,7 +4938,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#F3EFE8',
+    backgroundColor: colors.bgSecondary,
   },
 
   mapFallbackText: {
@@ -4914,4 +4946,5 @@ const s = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-});
+}), [colors]);
+}

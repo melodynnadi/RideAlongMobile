@@ -1,4 +1,4 @@
-import { collection, doc, documentId, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
+import { collection, doc, documentId, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { firestore } from '@/constants/services';
 
 export async function hasUserRatedRide(rideId: string, userId: string): Promise<boolean> {
@@ -9,6 +9,50 @@ export async function hasUserRatedRide(rideId: string, userId: string): Promise<
   } catch {
     return false;
   }
+}
+
+export async function findPendingRatingRide(
+  userId: string,
+  role: 'rider' | 'driver',
+): Promise<string | null> {
+  if (!userId) return null;
+
+  const roleField = role === 'rider' ? 'riderId' : 'driverId';
+  const ratedField = role === 'rider' ? 'riderRated' : 'driverRated';
+
+  const load = async (useOrder: boolean) => {
+    const parts = [
+      collection(firestore, 'confirmedRides'),
+      where(roleField, '==', userId),
+      where('status', 'in', ['COMPLETED', 'completed']),
+    ] as any[];
+    if (useOrder) parts.push(orderBy('completedAt', 'desc'));
+    parts.push(limit(25));
+    return getDocs(query.apply(null, parts as any));
+  };
+
+  let snapshot;
+  try {
+    snapshot = await load(true);
+  } catch {
+    snapshot = await load(false);
+  }
+
+  const rides = snapshot.docs
+    .map((ride) => ({ id: ride.id, data: ride.data() as any }))
+    .sort((a, b) => {
+      const at = a.data?.completedAt?.toMillis?.() ?? a.data?.updatedAt?.toMillis?.() ?? a.data?.createdAt?.toMillis?.() ?? 0;
+      const bt = b.data?.completedAt?.toMillis?.() ?? b.data?.updatedAt?.toMillis?.() ?? b.data?.createdAt?.toMillis?.() ?? 0;
+      return bt - at;
+    });
+
+  for (const ride of rides) {
+    if (ride.data?.[ratedField] === true) continue;
+    const alreadyRated = await hasUserRatedRide(ride.id, userId);
+    if (!alreadyRated) return ride.id;
+  }
+
+  return null;
 }
 
 /**

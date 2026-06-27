@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import type { AppColors } from '@/constants/theme';
 
 export type RiderRoutePayload = {
   pickup: string;
@@ -16,6 +18,8 @@ export function RiderRouteSearchCard({
 }: {
   onContinue: (route: RiderRoutePayload) => void;
 }) {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const continueWithDemoRoute = () =>
     onContinue({
       pickup: 'Austin, TX',
@@ -65,16 +69,17 @@ export function RiderRouteSearchCard({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: AppColors) {
+  return StyleSheet.create({
   card: {
     marginHorizontal: 18,
     marginBottom: 18,
     padding: 12,
     borderRadius: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.bgCard,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    shadowColor: '#0D1B48',
+    borderColor: colors.border,
+    shadowColor: colors.textPrimary,
     shadowOffset: { width: 0, height: 5 },
     shadowOpacity: 0.06,
     shadowRadius: 16,
@@ -94,7 +99,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#0D1B48',
+    backgroundColor: colors.textPrimary,
   },
   dropoffDot: {
     width: 8,
@@ -108,7 +113,7 @@ const styles = StyleSheet.create({
     marginVertical: 7,
     borderLeftWidth: 1,
     borderStyle: 'dashed',
-    borderColor: '#CBD5E1',
+    borderColor: colors.border,
   },
   fields: {
     flex: 1,
@@ -117,14 +122,14 @@ const styles = StyleSheet.create({
   field: {
     minHeight: 34,
     borderWidth: 1,
-    borderColor: '#D7DDE5',
+    borderColor: colors.border,
     borderRadius: 9,
     justifyContent: 'center',
     paddingHorizontal: 13,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.bgCard,
   },
   fieldText: {
-    color: '#17233C',
+    color: colors.textPrimary,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -138,27 +143,28 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 34,
     borderWidth: 1,
-    borderColor: '#D7DDE5',
+    borderColor: colors.border,
     borderRadius: 9,
     justifyContent: 'center',
     paddingHorizontal: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.bgCard,
   },
   metaText: {
-    color: '#17233C',
+    color: colors.textPrimary,
     fontSize: 12,
     fontWeight: '600',
   },
   button: {
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#DE5D20',
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   buttonText: {
-    color: '#FFFFFF',
+    color: colors.textInverse,
     fontSize: 14,
     fontWeight: '800',
   },
-});
+  });
+}

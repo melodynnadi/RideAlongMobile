@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, ScrollView, TouchableOpacity,
   Alert, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform,
@@ -9,15 +9,79 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { firestore } from '@/constants/services';
-
-const NAVY = '#15233A';
-const ORANGE = '#DE5D20';
-const BG = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED = '#8B94A6';
-const FIELD_BG = '#FFFFFF';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 export default function EditPostingScreen() {
+  const { colors } = useAppTheme();
+  const s = useMemo(() => StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.bg },
+    safe: { flex: 1 },
+    scroll: { flex: 1 },
+    content: { paddingHorizontal: 20, paddingBottom: 24 },
+    loadingScreen: {
+      flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center',
+    },
+    header: {
+      minHeight: 64, flexDirection: 'row', alignItems: 'center',
+      paddingTop: 8, paddingBottom: 10,
+    },
+    backBtn: {
+      width: 40, height: 40, borderRadius: 20,
+      alignItems: 'center', justifyContent: 'center',
+      backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border,
+    },
+    headerTitle: {
+      flex: 1, marginLeft: 12, color: colors.textPrimary,
+      fontSize: 24, lineHeight: 30, fontWeight: '700',
+    },
+    intro: {
+      marginTop: 2, marginBottom: 18, color: colors.textSecondary,
+      fontSize: 14, lineHeight: 20,
+    },
+    section: {
+      width: '100%', marginBottom: 14, padding: 16, gap: 14,
+      backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border,
+      borderRadius: 18, shadowColor: colors.textPrimary, shadowOpacity: 0.04,
+      shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 1,
+    },
+    sectionHeading: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+    sectionHeadingText: { flex: 1, minWidth: 0, justifyContent: 'center' },
+    sectionIcon: {
+      width: 38, height: 38, borderRadius: 19,
+      alignItems: 'center', justifyContent: 'center',
+      backgroundColor: colors.primaryDim,
+    },
+    sectionTitle: { color: colors.textPrimary, fontSize: 16, lineHeight: 21, fontWeight: '700' },
+    sectionSubtitle: { marginTop: 1, color: colors.textSecondary, fontSize: 12, lineHeight: 17 },
+    field: { gap: 7 },
+    fieldLabel: { color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
+    inputShell: {
+      minHeight: 50, flexDirection: 'row', alignItems: 'center',
+      backgroundColor: colors.bgCard, borderRadius: 12,
+      borderWidth: 1, borderColor: colors.border,
+    },
+    inputShellMultiline: { minHeight: 106, alignItems: 'flex-start' },
+    inputIcon: { marginLeft: 13 },
+    inputIconMultiline: { marginTop: 15 },
+    prefix: { marginLeft: 9, color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+    input: {
+      flex: 1, minWidth: 0, paddingHorizontal: 11, paddingVertical: 12,
+      color: colors.textPrimary, fontSize: 15, lineHeight: 20,
+    },
+    inputMultiline: {
+      minHeight: 104, paddingTop: 13, paddingBottom: 13, textAlignVertical: 'top',
+    },
+    footer: {
+      paddingHorizontal: 20, paddingTop: 10,
+      backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border,
+    },
+    saveBtn: {
+      minHeight: 52, flexDirection: 'row', alignItems: 'center',
+      justifyContent: 'center', gap: 8, backgroundColor: colors.primary, borderRadius: 26,
+    },
+    saveBtnText: { color: colors.textInverse, fontSize: 16, fontWeight: '700' },
+    buttonDisabled: { opacity: 0.65 },
+  }), [colors]);
   const { postingId } = useLocalSearchParams<{ postingId: string }>();
   const handleBack = () => router.replace('/(driver)/my-postings');
   const [saving, setSaving] = useState(false);
@@ -92,8 +156,8 @@ export default function EditPostingScreen() {
   if (fetching) {
     return (
       <SafeAreaView style={s.loadingScreen} edges={['top', 'left', 'right']}>
-        <StatusBar style="dark" />
-        <ActivityIndicator color={ORANGE} size="large" />
+        <StatusBar style={colors.statusBar === 'dark-content' ? 'dark' : 'light'} />
+        <ActivityIndicator color={colors.primary} size="large" />
       </SafeAreaView>
     );
   }
@@ -103,7 +167,7 @@ export default function EditPostingScreen() {
       style={s.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <StatusBar style="dark" />
+      <StatusBar style={colors.statusBar === 'dark-content' ? 'dark' : 'light'} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
         <ScrollView
           style={s.scroll}
@@ -119,7 +183,7 @@ export default function EditPostingScreen() {
               accessibilityRole="button"
               accessibilityLabel="Go back"
             >
-              <Ionicons name="arrow-back" size={20} color={NAVY} />
+              <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
             </TouchableOpacity>
             <Text style={s.headerTitle}>Edit Ride</Text>
           </View>
@@ -131,7 +195,7 @@ export default function EditPostingScreen() {
           <View style={s.section}>
             <View style={s.sectionHeading}>
               <View style={s.sectionIcon}>
-                <Ionicons name="calendar-outline" size={18} color={ORANGE} />
+                <Ionicons name="calendar-outline" size={18} color={colors.primary} />
               </View>
               <View style={s.sectionHeadingText}>
                 <Text style={s.sectionTitle}>Schedule</Text>
@@ -157,7 +221,7 @@ export default function EditPostingScreen() {
           <View style={s.section}>
             <View style={s.sectionHeading}>
               <View style={s.sectionIcon}>
-                <Ionicons name="people-outline" size={18} color={ORANGE} />
+                <Ionicons name="people-outline" size={18} color={colors.primary} />
               </View>
               <View style={s.sectionHeadingText}>
                 <Text style={s.sectionTitle}>Seats and price</Text>
@@ -186,7 +250,7 @@ export default function EditPostingScreen() {
           <View style={s.section}>
             <View style={s.sectionHeading}>
               <View style={s.sectionIcon}>
-                <Ionicons name="document-text-outline" size={18} color={ORANGE} />
+                <Ionicons name="document-text-outline" size={18} color={colors.primary} />
               </View>
               <View style={s.sectionHeadingText}>
                 <Text style={s.sectionTitle}>Ride notes</Text>
@@ -212,10 +276,10 @@ export default function EditPostingScreen() {
             activeOpacity={0.85}
           >
             {saving ? (
-              <ActivityIndicator color="#FFF" />
+              <ActivityIndicator color={colors.textInverse} />
             ) : (
               <>
-                <Ionicons name="checkmark" size={20} color="#FFF" />
+                <Ionicons name="checkmark" size={20} color={colors.textInverse} />
                 <Text style={s.saveBtnText}>Save Changes</Text>
               </>
             )}
@@ -245,26 +309,47 @@ function Field({
   multiline?: boolean;
   prefix?: string;
 }) {
+  const { colors } = useAppTheme();
+  const fs = useMemo(() => StyleSheet.create({
+    field: { gap: 7 },
+    fieldLabel: { color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
+    inputShell: {
+      minHeight: 50, flexDirection: 'row', alignItems: 'center',
+      backgroundColor: colors.bgCard, borderRadius: 12,
+      borderWidth: 1, borderColor: colors.border,
+    },
+    inputShellMultiline: { minHeight: 106, alignItems: 'flex-start' },
+    inputIcon: { marginLeft: 13 },
+    inputIconMultiline: { marginTop: 15 },
+    prefix: { marginLeft: 9, color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+    input: {
+      flex: 1, minWidth: 0, paddingHorizontal: 11, paddingVertical: 12,
+      color: colors.textPrimary, fontSize: 15, lineHeight: 20,
+    },
+    inputMultiline: {
+      minHeight: 104, paddingTop: 13, paddingBottom: 13, textAlignVertical: 'top',
+    },
+  }), [colors]);
   return (
-    <View style={s.field}>
-      <Text style={s.fieldLabel}>{label}</Text>
-      <View style={[s.inputShell, multiline && s.inputShellMultiline]}>
+    <View style={fs.field}>
+      <Text style={fs.fieldLabel}>{label}</Text>
+      <View style={[fs.inputShell, multiline && fs.inputShellMultiline]}>
         <Ionicons
           name={icon}
           size={18}
-          color={MUTED}
-          style={[s.inputIcon, multiline && s.inputIconMultiline]}
+          color={colors.textSecondary}
+          style={[fs.inputIcon, multiline && fs.inputIconMultiline]}
         />
-        {prefix ? <Text style={s.prefix}>{prefix}</Text> : null}
+        {prefix ? <Text style={fs.prefix}>{prefix}</Text> : null}
         <TextInput
-          style={[s.input, multiline && s.inputMultiline]}
+          style={[fs.input, multiline && fs.inputMultiline]}
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
-          placeholderTextColor={MUTED}
+          placeholderTextColor={colors.textSecondary}
           keyboardType={keyboardType}
           multiline={multiline}
-          selectionColor={ORANGE}
+          selectionColor={colors.primary}
           autoCapitalize={keyboardType ? 'none' : 'sentences'}
         />
       </View>
@@ -272,75 +357,6 @@ function Field({
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: BG },
-  safe: { flex: 1 },
-  scroll: { flex: 1 },
-  content: { paddingHorizontal: 20, paddingBottom: 24 },
-  loadingScreen: {
-    flex: 1, backgroundColor: BG, alignItems: 'center', justifyContent: 'center',
-  },
-  header: {
-    minHeight: 64, flexDirection: 'row', alignItems: 'center',
-    paddingTop: 8, paddingBottom: 10,
-  },
-  backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#FFF', borderWidth: 1, borderColor: BORDER,
-  },
-  headerTitle: {
-    flex: 1, marginLeft: 12, color: NAVY,
-    fontSize: 24, lineHeight: 30, fontWeight: '700',
-  },
-  intro: {
-    marginTop: 2, marginBottom: 18, color: MUTED,
-    fontSize: 14, lineHeight: 20,
-  },
-  section: {
-    width: '100%', marginBottom: 14, padding: 16, gap: 14,
-    backgroundColor: '#FFF', borderWidth: 1, borderColor: BORDER,
-    borderRadius: 18, shadowColor: NAVY, shadowOpacity: 0.04,
-    shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 1,
-  },
-  sectionHeading: { flexDirection: 'row', alignItems: 'center', gap: 11 },
-  sectionHeadingText: { flex: 1, minWidth: 0, justifyContent: 'center' },
-  sectionIcon: {
-    width: 38, height: 38, borderRadius: 19,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(222,93,32,0.1)',
-  },
-  sectionTitle: { color: NAVY, fontSize: 16, lineHeight: 21, fontWeight: '700' },
-  sectionSubtitle: { marginTop: 1, color: MUTED, fontSize: 12, lineHeight: 17 },
-  field: { gap: 7 },
-  fieldLabel: { color: NAVY, fontSize: 13, fontWeight: '700' },
-  inputShell: {
-    minHeight: 50, flexDirection: 'row', alignItems: 'center',
-    backgroundColor: FIELD_BG, borderRadius: 12,
-    borderWidth: 1, borderColor: BORDER,
-  },
-  inputShellMultiline: { minHeight: 106, alignItems: 'flex-start' },
-  inputIcon: { marginLeft: 13 },
-  inputIconMultiline: { marginTop: 15 },
-  prefix: { marginLeft: 9, color: NAVY, fontSize: 15, fontWeight: '600' },
-  input: {
-    flex: 1, minWidth: 0, paddingHorizontal: 11, paddingVertical: 12,
-    color: NAVY, fontSize: 15, lineHeight: 20,
-  },
-  inputMultiline: {
-    minHeight: 104, paddingTop: 13, paddingBottom: 13, textAlignVertical: 'top',
-  },
-  footer: {
-    paddingHorizontal: 20, paddingTop: 10,
-    backgroundColor: BG, borderTopWidth: 1, borderTopColor: BORDER,
-  },
-  saveBtn: {
-    minHeight: 52, flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'center', gap: 8, backgroundColor: ORANGE, borderRadius: 26,
-  },
-  saveBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
-  buttonDisabled: { opacity: 0.65 },
-});
 
 
 

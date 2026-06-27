@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { Image } from 'expo-image';
 import {
   View,
@@ -40,11 +40,7 @@ import {
 } from '@/services/messageThreadsService';
 import { showErrorToast, showSuccessToast } from '@/src/utils/showToast';
 import { chatBelongsToRole, legacyUnreadField, roleKey, roleUnreadField } from '@/src/utils/roleIdentity';
-
-const NAVY = '#15233A';
-const ORANGE = '#DE5D20';
-const BORDER = '#E5E0D8';
-const MUTED = '#8B94A6';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 interface Chat {
   id: string;
@@ -65,6 +61,7 @@ const warnedUserIds = new Set<string>();
 const warnedRideIds = new Set<string>();
 
 export default function MessagesScreen() {
+  const { colors } = useAppTheme();
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -75,6 +72,162 @@ export default function MessagesScreen() {
   const chatsUnsubscribeRef = useRef<(() => void) | null>(null);
   const hiddenThreadIdsRef = useRef<Set<string>>(new Set());
   const currentUser = firebaseAuth.currentUser;
+
+  const s = useMemo(() => StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.bg,
+    },
+    safe: {
+      flex: 1,
+    },
+    scroll: {
+      flex: 1,
+    },
+    scrollContent: {
+      paddingHorizontal: 20,
+      paddingTop: 24,
+      paddingBottom: 102,
+      flexGrow: 1,
+    },
+    pageHeader: {
+      marginBottom: 4,
+    },
+    pageTitle: {
+      color: colors.textPrimary,
+      fontSize: 24,
+      lineHeight: 30,
+      fontWeight: '700',
+      letterSpacing: -0.25,
+    },
+    loadingWrap: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 14,
+      minHeight: 320,
+    },
+    loadingText: {
+      color: colors.textSecondary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      paddingVertical: 18,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      backgroundColor: colors.bg,
+    },
+    avatar: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: colors.primaryDim,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    avatarText: {
+      color: colors.primary,
+      fontSize: 18,
+      fontWeight: '600',
+    },
+    rowContent: {
+      flex: 1,
+      minWidth: 0,
+    },
+    rowTop: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: 3,
+    },
+    name: {
+      flex: 1,
+      color: colors.textPrimary,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    newBadge: {
+      color: colors.primary,
+      backgroundColor: colors.primaryDim,
+      overflow: 'hidden',
+      borderRadius: 10,
+      paddingHorizontal: 7,
+      paddingVertical: 3,
+      fontSize: 9,
+      fontWeight: '700',
+    },
+    preview: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '600',
+    },
+    rowMeta: {
+      alignItems: 'flex-end',
+      gap: 4,
+      flexShrink: 0,
+    },
+    time: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    swipeDelete: {
+      width: 80,
+      alignSelf: 'stretch',
+      backgroundColor: colors.red,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 5,
+    },
+    swipeDeleteText: {
+      color: colors.textInverse,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    emptyCard: {
+      marginTop: 40,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderStyle: 'dashed',
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      padding: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 180,
+    },
+    emptyIcon: {
+      width: 54,
+      height: 54,
+      borderRadius: 27,
+      backgroundColor: colors.primaryDim,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 16,
+    },
+    emptyTitle: {
+      color: colors.textPrimary,
+      fontSize: 19,
+      lineHeight: 25,
+      fontWeight: '700',
+      textAlign: 'center',
+      letterSpacing: -0.2,
+    },
+    emptyText: {
+      maxWidth: 280,
+      color: colors.textSecondary,
+      fontSize: 13,
+      lineHeight: 19,
+      textAlign: 'center',
+      marginTop: 6,
+    },
+  }), [colors]);
 
   useEffect(() => {
     if (!currentUser?.uid) {
@@ -358,9 +511,9 @@ export default function MessagesScreen() {
             accessibilityLabel={`Delete conversation with ${item.recipientName}`}
           >
             {isDeleting ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color={colors.textInverse} />
             ) : (
-              <Ionicons name="trash-outline" size={20} color="#FFFFFF" />
+              <Ionicons name="trash-outline" size={20} color={colors.textInverse} />
             )}
             <Text style={s.swipeDeleteText}>Delete</Text>
           </TouchableOpacity>
@@ -403,7 +556,7 @@ export default function MessagesScreen() {
   if (loading || !hydratedHiddenIds) {
     return (
       <View style={s.root}>
-        <StatusBar barStyle="dark-content" />
+        <StatusBar barStyle={colors.statusBar} />
         <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
           <ScrollView
             style={s.scroll}
@@ -414,7 +567,7 @@ export default function MessagesScreen() {
               <Text style={s.pageTitle}>Messages</Text>
             </View>
             <View style={s.loadingWrap}>
-              <ActivityIndicator size="large" color={ORANGE} />
+              <ActivityIndicator size="large" color={colors.primary} />
               <Text style={s.loadingText}>Loading conversations...</Text>
             </View>
           </ScrollView>
@@ -425,7 +578,7 @@ export default function MessagesScreen() {
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={colors.statusBar} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
         <FlatList
           data={chats}
@@ -437,15 +590,15 @@ export default function MessagesScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor={ORANGE}
-              colors={[ORANGE]}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
             />
           }
           ListHeaderComponent={Header}
           ListEmptyComponent={
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 60 }}>
               <View style={s.emptyIcon}>
-                <Ionicons name="chatbubbles-outline" size={25} color={ORANGE} />
+                <Ionicons name="chatbubbles-outline" size={25} color={colors.primary} />
               </View>
               <Text style={s.emptyTitle}>No conversations yet</Text>
               <Text style={s.emptyText}>
@@ -460,159 +613,3 @@ export default function MessagesScreen() {
     </View>
   );
 }
-
-const s = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: '#FBFAF7',
-  },
-  safe: {
-    flex: 1,
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    paddingBottom: 102,
-    flexGrow: 1,
-  },
-  pageHeader: {
-    marginBottom: 4,
-  },
-  pageTitle: {
-    color: NAVY,
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: '700',
-    letterSpacing: -0.25,
-  },
-  loadingWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 14,
-    minHeight: 320,
-  },
-  loadingText: {
-    color: MUTED,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingVertical: 18,
-    borderBottomWidth: 1,
-    borderBottomColor: BORDER,
-    backgroundColor: '#FBFAF7',
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#F9E8DB',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  avatarText: {
-    color: ORANGE,
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  rowContent: {
-    flex: 1,
-    minWidth: 0,
-  },
-  rowTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 3,
-  },
-  name: {
-    flex: 1,
-    color: NAVY,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  newBadge: {
-    color: ORANGE,
-    backgroundColor: '#F9E8DB',
-    overflow: 'hidden',
-    borderRadius: 10,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    fontSize: 9,
-    fontWeight: '700',
-  },
-  preview: {
-    color: MUTED,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '600',
-  },
-  rowMeta: {
-    alignItems: 'flex-end',
-    gap: 4,
-    flexShrink: 0,
-  },
-  time: {
-    color: MUTED,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  swipeDelete: {
-    width: 80,
-    alignSelf: 'stretch',
-    backgroundColor: '#C94747',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-  },
-  swipeDeleteText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  emptyCard: {
-    marginTop: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: BORDER,
-    backgroundColor: '#FFFFFF',
-    padding: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 180,
-  },
-  emptyIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: '#F9E8DB',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    color: NAVY,
-    fontSize: 19,
-    lineHeight: 25,
-    fontWeight: '700',
-    textAlign: 'center',
-    letterSpacing: -0.2,
-  },
-  emptyText: {
-    maxWidth: 280,
-    color: MUTED,
-    fontSize: 13,
-    lineHeight: 19,
-    textAlign: 'center',
-    marginTop: 6,
-  },
-});

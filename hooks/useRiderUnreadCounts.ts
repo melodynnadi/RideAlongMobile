@@ -36,6 +36,15 @@ function teardown() {
   cachedCounts = { messageCount: 0, notificationCount: 0 };
 }
 
+function handleUnreadListenerError(scope: string, error: unknown) {
+  const code = (error as { code?: string } | null)?.code;
+  if (code === 'permission-denied') {
+    console.warn(`[${scope}] Firestore permission denied; unread listener stopped.`);
+    return;
+  }
+  console.warn(`[${scope}] Firestore unread listener error:`, error);
+}
+
 export function useRiderUnreadCounts(): UnreadCounts {
   const uid = firebaseAuth.currentUser?.uid;
   const [counts, setCounts] = useState<UnreadCounts>(cachedCounts);
@@ -70,20 +79,27 @@ export function useDriverUnreadCounts(): UnreadCounts {
       return;
     }
 
-    const chatUnsub = onSnapshot(query(collection(firestore, 'chats'), where('driverId', '==', uid)), (snapshot) => {
-      const messageCount = snapshot.docs.reduce((total, item) => {
-        const data = item.data();
-        if (!chatBelongsToRole(data, uid, 'driver')) return total;
-        const unreadCounts = data.unreadCounts || {};
-        return total + Number(
-          data[roleUnreadField('driver', uid)]
-          ?? unreadCounts[roleKey('driver', uid)]
-          ?? data[legacyUnreadField(uid)]
-          ?? 0,
-        );
-      }, 0);
-      setCounts((current) => ({ ...current, messageCount }));
-    });
+    const chatUnsub = onSnapshot(
+      query(collection(firestore, 'chats'), where('driverId', '==', uid)),
+      (snapshot) => {
+        const messageCount = snapshot.docs.reduce((total, item) => {
+          const data = item.data();
+          if (!chatBelongsToRole(data, uid, 'driver')) return total;
+          const unreadCounts = data.unreadCounts || {};
+          return total + Number(
+            data[roleUnreadField('driver', uid)]
+            ?? unreadCounts[roleKey('driver', uid)]
+            ?? data[legacyUnreadField(uid)]
+            ?? 0,
+          );
+        }, 0);
+        setCounts((current) => ({ ...current, messageCount }));
+      },
+      (error) => {
+        setCounts((current) => ({ ...current, messageCount: 0 }));
+        handleUnreadListenerError('useDriverUnreadCounts:chats', error);
+      },
+    );
 
     const base = collection(firestore, 'notifications');
     const notificationBuckets = new Map<number, string[]>();
@@ -97,14 +113,22 @@ export function useDriverUnreadCounts(): UnreadCounts {
       query(base, where('recipientId', '==', uid)),
       query(base, where('recipients', 'array-contains', uid)),
     ];
-    const notificationUnsubs = notificationQueries.map((qy, index) => onSnapshot(qy, (snapshot) => {
-      notificationBuckets.set(index, snapshot.docs.flatMap((item) => {
-        const data = item.data();
-        if (!notificationBelongsToRole(data, uid, 'driver') || isReadForRole(data, uid, 'driver')) return [];
-        return [item.id];
-      }));
-      flushNotifications();
-    }));
+    const notificationUnsubs = notificationQueries.map((qy, index) => onSnapshot(
+      qy,
+      (snapshot) => {
+        notificationBuckets.set(index, snapshot.docs.flatMap((item) => {
+          const data = item.data();
+          if (!notificationBelongsToRole(data, uid, 'driver') || isReadForRole(data, uid, 'driver')) return [];
+          return [item.id];
+        }));
+        flushNotifications();
+      },
+      (error) => {
+        notificationBuckets.set(index, []);
+        flushNotifications();
+        handleUnreadListenerError(`useDriverUnreadCounts:notifications:${index}`, error);
+      },
+    ));
 
     return () => {
       chatUnsub();

@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Keyboard, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import { getApiBaseUrl, firebaseAuth } from '@/constants/services';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import type { AppColors } from '@/constants/theme';
 
 type Suggestion = { description: string; place_id: string; displayText: string };
 
@@ -28,6 +30,8 @@ export function CityAutocomplete({
   dropdownStyle,
   zIndex = 20,
 }: CityAutocompleteProps) {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<Suggestion[]>([]);
@@ -111,7 +115,7 @@ export function CityAutocomplete({
       <TextInput
         style={[styles.input, inputStyle]}
         placeholder={placeholder}
-        placeholderTextColor="#94A3B8"
+        placeholderTextColor={colors.textSecondary}
         value={value}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
@@ -129,12 +133,12 @@ export function CityAutocomplete({
         <View style={[styles.dropdown, dropdownStyle]}>
           {loading ? (
             <View style={styles.stateRow}>
-              <View style={styles.iconWrap}><Ionicons name="search-outline" size={15} color="#DE5D20" /></View>
+              <View style={styles.iconWrap}><Ionicons name="search-outline" size={15} color={colors.primary} /></View>
               <Text style={styles.stateText}>Searching locations...</Text>
             </View>
           ) : hasError ? (
             <View style={styles.stateRow}>
-              <View style={styles.iconWrap}><Ionicons name="alert-circle-outline" size={15} color="#8B94A6" /></View>
+              <View style={styles.iconWrap}><Ionicons name="alert-circle-outline" size={15} color={colors.textSecondary} /></View>
               <Text style={styles.stateText}>
                 Could not load suggestions. You can still type manually.
               </Text>
@@ -152,7 +156,7 @@ export function CityAutocomplete({
                 }}
               >
                 <View style={styles.iconWrap}>
-                  <Ionicons name={idx === 0 ? 'location' : 'location-outline'} size={15} color="#DE5D20" />
+                  <Ionicons name={idx === 0 ? 'location' : 'location-outline'} size={15} color={colors.primary} />
                 </View>
                 <View style={styles.itemCopy}>
                   <Text style={styles.itemText} numberOfLines={1}>{s.displayText.split(',')[0]}</Text>
@@ -167,31 +171,33 @@ export function CityAutocomplete({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: AppColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     position: 'relative',
   },
   input: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.bgCard,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     fontSize: 14,
+    color: colors.textPrimary,
   },
   dropdown: {
     position: 'absolute',
     top: 52,
     left: 0,
     right: 0,
-    backgroundColor: 'white',
+    backgroundColor: colors.bgCard,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#E5E0D8',
+    borderColor: colors.border,
     maxHeight: 268,
-    shadowColor: '#15233A',
+    shadowColor: colors.textPrimary,
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.12,
     shadowRadius: 18,
@@ -204,7 +210,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#F1EEE8',
+    borderBottomColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
@@ -213,7 +219,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#FEF0E8',
+    backgroundColor: colors.primaryDim,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
@@ -225,14 +231,14 @@ const styles = StyleSheet.create({
   itemText: {
     fontSize: 14,
     lineHeight: 18,
-    color: '#15233A',
+    color: colors.textPrimary,
     fontWeight: '700',
   },
   itemSubText: {
     marginTop: 2,
     fontSize: 12,
     lineHeight: 16,
-    color: '#8B94A6',
+    color: colors.textSecondary,
     fontWeight: '500',
   },
   stateRow: {
@@ -245,9 +251,10 @@ const styles = StyleSheet.create({
   },
   stateText: {
     flex: 1,
-    color: '#8B94A6',
+    color: colors.textSecondary,
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '600',
   },
-});
+  });
+}

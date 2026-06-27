@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -27,12 +27,7 @@ import { firebaseAuth, firestore } from '@/constants/services';
 
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 import { isReadForRole, notificationBelongsToRole, roleKey } from '@/src/utils/roleIdentity';
-
-const NAVY   = '#15233A';
-const ORANGE = '#DE5D20';
-const BG     = '#FBFAF7';
-const BORDER = '#E5E0D8';
-const MUTED  = '#8B94A6';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
 type NotificationType = 'ride' | 'payment' | 'driver' | 'system';
 
@@ -95,6 +90,7 @@ function toDate(value: any): Date | undefined {
 }
 
 export default function NotificationsScreen() {
+  const { colors } = useAppTheme();
   const { goBack } = useReturnNavigation('/(driver)');
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,6 +99,54 @@ export default function NotificationsScreen() {
   const pendingMapRef = useRef<Map<string, RawNotification>>(new Map());
   const flushScheduledRef = useRef(false);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const s = useMemo(() => StyleSheet.create({
+    root:          { flex: 1, backgroundColor: colors.bg },
+    safe:          { flex: 1 },
+    scroll:        { flex: 1 },
+    scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 60 },
+    pageHeader:    { minHeight: 64, position: 'relative', flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 0 },
+    backBtn:       { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border },
+    pageTitle:     { color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 18,
+      gap: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      backgroundColor: colors.bg,
+    },
+    firstRow: { paddingTop: 6 },
+    iconWrap:  { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+    iconWrapUnread: { backgroundColor: colors.primaryDim },
+    rowBody:   { flex: 1, minWidth: 0, color: colors.textPrimary, fontSize: 14, lineHeight: 21 },
+    rowTime:   { color: colors.textSecondary, fontSize: 11, fontWeight: '600', flexShrink: 0 },
+    swipeDelete: {
+      backgroundColor: colors.red,
+      justifyContent: 'center',
+      alignItems: 'center',
+      width: 80,
+      alignSelf: 'stretch',
+      gap: 5,
+    },
+    swipeDeleteText: { color: colors.textInverse, fontSize: 12, fontWeight: '700' },
+    loadingWrap: { alignItems: 'center', paddingTop: 24, gap: 14 },
+    loadingText: { color: colors.textSecondary, fontSize: 14, fontWeight: '500' },
+    emptyCard: {
+      minHeight: 420,
+      paddingHorizontal: 24,
+      paddingVertical: 28,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    emptyIcon: {
+      width: 54, height: 54, borderRadius: 27, backgroundColor: colors.primaryDim,
+      alignItems: 'center', justifyContent: 'center', marginBottom: 14,
+    },
+    emptyTitle: { color: colors.textPrimary, fontSize: 19, lineHeight: 25, fontWeight: '700', textAlign: 'center', letterSpacing: -0.2 },
+    emptyText:  { color: colors.textSecondary, fontSize: 13, lineHeight: 19, textAlign: 'center', maxWidth: 278, marginTop: 6, fontWeight: '500' },
+  }), [colors]);
 
   useEffect(() => {
     const user = firebaseAuth.currentUser;
@@ -238,7 +282,7 @@ export default function NotificationsScreen() {
       overshootRight={false}
       renderRightActions={() => (
         <TouchableOpacity style={s.swipeDelete} onPress={() => deleteNotification(n.id)}>
-          <Ionicons name="trash-outline" size={20} color="#FFFFFF" />
+          <Ionicons name="trash-outline" size={20} color={colors.textInverse} />
           <Text style={s.swipeDeleteText}>Delete</Text>
         </TouchableOpacity>
       )}
@@ -252,7 +296,7 @@ export default function NotificationsScreen() {
         accessibilityLabel={n.read ? 'Read notification' : 'Mark notification as read'}
       >
         <View style={[s.iconWrap, !n.read && s.iconWrapUnread]}>
-          <Ionicons name={n.iconName as any} size={16} color={!n.read ? ORANGE : NAVY} />
+          <Ionicons name={n.iconName as any} size={16} color={!n.read ? colors.primary : colors.textPrimary} />
         </View>
         <Text style={s.rowBody} numberOfLines={2}>{n.message || n.title}</Text>
         <Text style={s.rowTime}>{n.time}</Text>
@@ -262,7 +306,7 @@ export default function NotificationsScreen() {
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={colors.statusBar} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
         <ScrollView
           style={s.scroll}
@@ -276,20 +320,20 @@ export default function NotificationsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Go back"
             >
-              <Ionicons name="chevron-back" size={20} color={NAVY} />
+              <Ionicons name="chevron-back" size={20} color={colors.textPrimary} />
             </TouchableOpacity>
             <Text style={s.pageTitle}>Notifications</Text>
           </View>
 
           {loading ? (
             <View style={s.loadingWrap}>
-              <ActivityIndicator size="large" color={ORANGE} />
+              <ActivityIndicator size="large" color={colors.primary} />
               <Text style={s.loadingText}>Loading notifications...</Text>
             </View>
           ) : notifications.length === 0 ? (
             <View style={s.emptyCard}>
               <View style={s.emptyIcon}>
-                <Ionicons name="notifications-outline" size={24} color={ORANGE} />
+                <Ionicons name="notifications-outline" size={24} color={colors.primary} />
               </View>
               <Text style={s.emptyTitle}>You are all caught up</Text>
               <Text style={s.emptyText}>Ride updates, messages, and account alerts will appear here.</Text>
@@ -302,51 +346,3 @@ export default function NotificationsScreen() {
     </View>
   );
 }
-
-const s = StyleSheet.create({
-  root:          { flex: 1, backgroundColor: BG },
-  safe:          { flex: 1 },
-  scroll:        { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 60 },
-  pageHeader:    { minHeight: 64, position: 'relative', flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 0 },
-  backBtn:       { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: BORDER },
-  pageTitle:     { color: NAVY, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 18,
-    gap: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: BORDER,
-    backgroundColor: BG,
-  },
-  firstRow: { paddingTop: 6 },
-  iconWrap:  { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F3EFE8', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  iconWrapUnread: { backgroundColor: '#F9E8DB' },
-  rowBody:   { flex: 1, minWidth: 0, color: NAVY, fontSize: 14, lineHeight: 21 },
-  rowTime:   { color: MUTED, fontSize: 11, fontWeight: '600', flexShrink: 0 },
-  swipeDelete: {
-    backgroundColor: '#C94747',
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 80,
-    alignSelf: 'stretch',
-    gap: 5,
-  },
-  swipeDeleteText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
-  loadingWrap: { alignItems: 'center', paddingTop: 24, gap: 14 },
-  loadingText: { color: MUTED, fontSize: 14, fontWeight: '500' },
-  emptyCard: {
-    minHeight: 420,
-    paddingHorizontal: 24,
-    paddingVertical: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyIcon: {
-    width: 54, height: 54, borderRadius: 27, backgroundColor: '#FEF0E8',
-    alignItems: 'center', justifyContent: 'center', marginBottom: 14,
-  },
-  emptyTitle: { color: NAVY, fontSize: 19, lineHeight: 25, fontWeight: '700', textAlign: 'center', letterSpacing: -0.2 },
-  emptyText:  { color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center', maxWidth: 278, marginTop: 6, fontWeight: '500' },
-});
