@@ -368,7 +368,8 @@ export function subscribeRiderProfile(uid: string, onData: (profile: RiderProfil
       lastName,
       displayName: textValue(data.displayName, data.name, data.fullName, sharedData?.displayName, sharedData?.name, sharedData?.fullName, `${firstName} ${lastName}`) || firebaseAuth.currentUser?.displayName || 'Rider',
       email: textValue(data.email, sharedData?.email, firebaseAuth.currentUser?.email),
-      avatarUrl: textValue(data.avatarUrl, data.photoURL, data.profilePicture, sharedData?.avatarUrl, sharedData?.photoURL, sharedData?.profilePicture, firebaseAuth.currentUser?.photoURL) || undefined,
+      // Do NOT fall back to firebaseAuth.currentUser?.photoURL — it could hold the driver's photo
+      avatarUrl: textValue(data.avatarUrl, data.photoURL, data.profilePicture, sharedData?.avatarUrl, sharedData?.photoURL, sharedData?.profilePicture) || undefined,
       university: textValue(data.university, data.school, data.college, sharedData?.university, sharedData?.school, sharedData?.college) || undefined,
       rating: Number(data.rating ?? sharedData?.rating) || undefined,
       about: textValue(data.about, data.bio, data.description, sharedData?.about, sharedData?.bio, sharedData?.description) || undefined,

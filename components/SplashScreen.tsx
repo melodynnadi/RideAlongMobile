@@ -13,22 +13,19 @@ type SplashScreenProps = {
 export default function SplashScreen({ animated = true }: SplashScreenProps) {
   const { isDark: dark } = useAppTheme();
 
-  const opacity  = useRef(new Animated.Value(animated ? 0 : 1)).current;
-  const scale    = useRef(new Animated.Value(animated ? 0.1 : 1)).current;
-  const breathe  = useRef(new Animated.Value(1)).current;
+  const opacity = useRef(new Animated.Value(animated ? 0 : 1)).current;
+  const scale   = useRef(new Animated.Value(animated ? 0.1 : 1)).current;
 
   useEffect(() => {
     if (!animated) return;
 
     const entrance = Animated.parallel([
-      // Snap in fast
       Animated.timing(opacity, {
         toValue: 1,
         duration: 220,
         easing: Easing.out(Easing.ease),
         useNativeDriver: true,
       }),
-      // Multi-step scale: blast in → overshoot → bounce → settle
       Animated.sequence([
         Animated.timing(scale, {
           toValue: 1.22,
@@ -57,33 +54,9 @@ export default function SplashScreen({ animated = true }: SplashScreenProps) {
       ]),
     ]);
 
-    // Noticeable breathe once settled
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(breathe, {
-          toValue: 1.08,
-          duration: 1500,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(breathe, {
-          toValue: 1,
-          duration: 1500,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-
-    entrance.start(() => pulse.start());
-
-    return () => {
-      entrance.stop();
-      pulse.stop();
-    };
-  }, [animated, breathe, opacity, scale]);
-
-  const combinedScale = Animated.multiply(scale, breathe);
+    entrance.start();
+    return () => entrance.stop();
+  }, [animated, opacity, scale]);
 
   return (
     <View style={[styles.container, dark ? styles.containerDark : styles.containerLight]}>
@@ -91,7 +64,7 @@ export default function SplashScreen({ animated = true }: SplashScreenProps) {
       <Animated.View
         style={{
           opacity,
-          transform: [{ scale: combinedScale }],
+          transform: [{ scale }],
           alignItems: 'center',
         }}
       >

@@ -86,19 +86,36 @@ export default function AccountSettingsScreen() {
     try {
       const user = firebaseAuth.currentUser;
       if (!user) { router.replace('/(auth)/sign-in'); return; }
-      let userDoc = await getDoc(doc(firestore, 'drivers', user.uid));
-      if (!userDoc.exists()) userDoc = await getDoc(doc(firestore, 'drivers', user.uid));
-      if (userDoc.exists()) {
-        const data = userDoc.data();
+
+      const [driverDoc, riderDoc] = await Promise.all([
+        getDoc(doc(firestore, 'drivers', user.uid)),
+        getDoc(doc(firestore, 'riders', user.uid)),
+      ]);
+
+      const data = driverDoc.exists() ? driverDoc.data() : null;
+      const riderData = riderDoc.exists() ? riderDoc.data() : null;
+
+      if (data) {
         setFullName(data.fullName || data.name || '');
-        setAvatarUrl(data.avatarUrl || data.photoURL || data.personalInfo?.avatarUrl || user.photoURL || null);
+        // Do NOT fall back to user.photoURL — that bleeds the rider photo into the driver account
+        setAvatarUrl(data.avatarUrl || data.photoURL || data.personalInfo?.avatarUrl || null);
         setEmail(data.email || user.email || '');
         const phone = data.phoneNumber || data.phone || data.personalInfo?.phone || '';
         setPhoneNumber(phone);
         setOriginalPhone(phone);
-        setDateOfBirth(data.dateOfBirth || data.DOB || data.personalInfo?.dateOfBirth || data.personalInfo?.dob || '');
-        setUniversity(data.university || data.personalInfo?.university || '');
-        setMajor(data.major || data.personalInfo?.major || '');
+        // Shared fields: fall back to rider doc if driver doc doesn't have them yet (new upgrade)
+        setDateOfBirth(
+          data.dateOfBirth || data.DOB || data.personalInfo?.dateOfBirth || data.personalInfo?.dob ||
+          riderData?.dateOfBirth || riderData?.DOB || riderData?.personalInfo?.dateOfBirth || ''
+        );
+        setUniversity(
+          data.university || data.personalInfo?.university ||
+          riderData?.university || riderData?.personalInfo?.university || ''
+        );
+        setMajor(
+          data.major || data.personalInfo?.major ||
+          riderData?.major || riderData?.personalInfo?.major || ''
+        );
         setAbout(data.about || data.bio || data.description || data.personalInfo?.about || data.personalInfo?.bio || '');
       }
     } catch { Alert.alert('Error', 'Failed to load your account information'); }
@@ -191,11 +208,16 @@ export default function AccountSettingsScreen() {
       if (!driverDoc.exists()) { Alert.alert('Error', 'Your driver profile could not be found. Please contact support.'); return; }
       const existingPersonalInfo = driverDoc.data()?.personalInfo || {};
       const aboutText = about.trim();
-      await updateDoc(driverDocRef, {
-        fullName: fullName.trim(), name: fullName.trim(),
-        phoneNumber: phoneNumber.trim(), phone: phoneNumber.trim(),
+
+      const sharedFields = {
         dateOfBirth: dateOfBirth.trim(), DOB: dateOfBirth.trim(),
         university: university.trim(), major: major.trim(),
+      };
+
+      const driverUpdate = {
+        fullName: fullName.trim(), name: fullName.trim(),
+        phoneNumber: phoneNumber.trim(), phone: phoneNumber.trim(),
+        ...sharedFields,
         about: aboutText, bio: aboutText, description: aboutText,
         personalInfo: {
           ...existingPersonalInfo,
@@ -204,7 +226,18 @@ export default function AccountSettingsScreen() {
           about: aboutText, bio: aboutText,
         },
         updatedAt: serverTimestamp(),
-      });
+      };
+
+      const riderDocRef = doc(firestore, 'riders', user.uid);
+      const riderDoc = await getDoc(riderDocRef);
+
+      const writes: Promise<void>[] = [updateDoc(driverDocRef, driverUpdate)];
+      // Sync shared academic fields back to rider doc so both accounts stay consistent
+      if (riderDoc.exists()) {
+        writes.push(updateDoc(riderDocRef, { ...sharedFields, updatedAt: serverTimestamp() }));
+      }
+      await Promise.all(writes);
+
       setOriginalPhone(phoneNumber);
       Alert.alert('Account updated', 'Your profile information has been saved.');
 

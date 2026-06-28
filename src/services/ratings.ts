@@ -116,7 +116,8 @@ async function computeRatingFromScratch(
         );
         snap.forEach((docu) => {
           const data: any = docu.data() || {};
-          if (String(data.status || '').toUpperCase() === 'COMPLETED') valid.add(docu.id);
+          // Only count rides where this user was the driver, not rides where they were the rider
+          if (String(data.status || '').toUpperCase() === 'COMPLETED' && String(data.driverId) === userId) valid.add(docu.id);
         });
       } catch {
         // ignore chunk errors and continue

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,16 +11,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 
 import { UniversitySearch } from '@/components/ui/UniversitySearch';
-import { firestore, storage, getApiBaseUrl } from '@/constants/services';
+import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import { type SignupUniversity } from '@/services/authSignup';
 import { hitSlop } from '@/theme/designSystem';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { useAuthStore } from '@/stores/authStore';
 import type { AppColors } from '@/constants/theme';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -36,6 +37,21 @@ const STEPS = [
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Auto-inserts slashes as the user types: MM/DD/YYYY
+function formatDobInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
+// Auto-inserts slash as the user types: MM/YYYY
+function formatMonthYearInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 6);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+}
 
 function validateEduEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.edu$/i.test(email.trim());
@@ -321,6 +337,9 @@ function makeStyles(colors: AppColors) {
 export function DriverSignUpScreen() {
   const { colors } = useAppTheme();
   const s = useMemo(() => makeStyles(colors), [colors]);
+  const { upgrade } = useLocalSearchParams<{ upgrade?: string }>();
+  const isUpgrade = upgrade === '1';
+  const { riderProfile, refreshProfiles, switchRole } = useAuthStore();
 
   const [step, setStep] = useState(1);
   const [error, setError] = useState('');
@@ -340,6 +359,19 @@ export function DriverSignUpScreen() {
   const [phone, setPhone] = useState('');
   const [university, setUniversity] = useState<SignupUniversity | null>(null);
   const [dob, setDob] = useState('');
+
+  // Pre-fill from rider profile when upgrading
+  useEffect(() => {
+    if (!isUpgrade) return;
+    const user = firebaseAuth.currentUser;
+    if (user?.email) setEmail(user.email);
+    if (riderProfile) {
+      if (riderProfile.firstName) setFirstName(riderProfile.firstName);
+      if (riderProfile.lastName) setLastName(riderProfile.lastName);
+      if (riderProfile.phone) setPhone(riderProfile.phone);
+      if (riderProfile.university) setUniversity({ name: riderProfile.university, custom: true });
+    }
+  }, [isUpgrade, riderProfile]);
 
   // Step 2 – License
   const [licenseNumber, setLicenseNumber] = useState('');
@@ -473,8 +505,15 @@ export function DriverSignUpScreen() {
       form.append('licenseBack', fileField(licenseBack!, `license_back.${(licenseBack!.mimeType ?? 'image/jpeg').split('/')[1]}`) as any);
       form.append('insurance', fileField(insuranceDoc!, `insurance.${(insuranceDoc!.mimeType ?? 'application/pdf').split('/')[1]}`) as any);
 
+      const submitHeaders: Record<string, string> = {};
+      if (isUpgrade) {
+        const idToken = await firebaseAuth.currentUser?.getIdToken();
+        if (idToken) submitHeaders['Authorization'] = `Bearer ${idToken}`;
+      }
+
       const submitRes = await fetch(`${base}/api/driver-applications/submit`, {
         method: 'POST',
+        headers: submitHeaders,
         body: form,
       });
 
@@ -560,9 +599,13 @@ export function DriverSignUpScreen() {
       ? 'Application not approved'
       : 'Under review';
     const body = isApproved
-      ? `Congrats! Check your email at ${email} for a link to set up your password and start driving.`
+      ? isUpgrade
+        ? `You're now approved as a RideAlong driver! Tap below to switch to driver mode and start earning.`
+        : `Congrats! Check your email at ${email} for a link to set up your password and start driving.`
       : isRejected
       ? `Your application didn't pass our verification check. You can fix the issues below and reapply.`
+      : isUpgrade
+      ? `Your application is being reviewed by our team. We'll email you at ${email} within 24 hours.`
       : `Your application is being reviewed by our team. We'll email you at ${email} within 24 hours.`;
 
     const FLAG_LABELS: Record<string, string> = {
@@ -605,17 +648,49 @@ export function DriverSignUpScreen() {
             </View>
           )}
 
-          <TouchableOpacity style={s.submittedBtn} onPress={() => router.replace('/(auth)/sign-in')}>
-            <Text style={s.submittedBtnText}>
-              {isApproved ? 'Go to sign in →' : isRejected ? 'Back to sign in' : 'Got it'}
-            </Text>
+          <TouchableOpacity
+            style={[s.submittedBtn, loading && { opacity: 0.6 }]}
+            disabled={loading}
+            onPress={async () => {
+              if (isUpgrade && isApproved) {
+                setLoading(true);
+                try {
+                  await refreshProfiles();
+                  await switchRole('driver');
+                  router.replace('/(driver)' as any);
+                } catch {
+                  router.replace('/(rider)' as any);
+                } finally {
+                  setLoading(false);
+                }
+              } else if (isUpgrade) {
+                router.replace('/(rider)' as any);
+              } else {
+                router.replace('/(auth)/sign-in');
+              }
+            }}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={s.submittedBtnText}>
+                {isApproved
+                  ? isUpgrade ? 'Start driving →' : 'Go to sign in →'
+                  : isRejected
+                  ? isUpgrade ? 'Back to my profile' : 'Back to sign in'
+                  : 'Got it'}
+              </Text>
+            )}
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
     );
   }
 
-  const { title, accent, subtitle } = STEPS[step - 1];
+  const { title, accent } = STEPS[step - 1];
+  const subtitle = isUpgrade && step === 1
+    ? 'Your info is pre-filled from your rider account. Add your date of birth to continue.'
+    : STEPS[step - 1].subtitle;
   const isLastStep = step === 5;
 
   // ── Form ─────────────────────────────────────────────────────────────────────
@@ -658,14 +733,14 @@ export function DriverSignUpScreen() {
                 <Input label="LAST NAME" value={lastName} onChangeText={setLastName} placeholder="Adeyemi" autoCapitalize="words" textContentType="familyName" s={s} colors={colors} />
               </View>
             </View>
-            <Input label="SCHOOL EMAIL" value={email} onChangeText={setEmail} placeholder="yourname@school.edu" keyboardType="email-address" textContentType="emailAddress" autoCapitalize="none" s={s} colors={colors} />
+            <Input label="SCHOOL EMAIL" value={email} onChangeText={isUpgrade ? undefined : setEmail} placeholder="yourname@school.edu" keyboardType="email-address" textContentType="emailAddress" autoCapitalize="none" editable={!isUpgrade} s={s} colors={colors} />
             <Input label="PHONE NUMBER" value={phone} onChangeText={setPhone} placeholder="(512) 555-0123" keyboardType="phone-pad" textContentType="telephoneNumber" s={s} colors={colors} />
             <Field label="UNIVERSITY" s={s}>
               <View style={s.universityWrap}>
                 <UniversitySearch value={university?.name ?? ''} onSelect={setUniversity} placeholder="Search your university" allowCustom />
               </View>
             </Field>
-            <Input label="DATE OF BIRTH" value={dob} onChangeText={setDob} placeholder="MM/DD/YYYY" keyboardType="numbers-and-punctuation" s={s} colors={colors} />
+            <Input label="DATE OF BIRTH" value={dob} onChangeText={(v) => setDob(formatDobInput(v))} placeholder="MM/DD/YYYY" keyboardType="number-pad" s={s} colors={colors} />
           </>
         )}
 
@@ -678,7 +753,7 @@ export function DriverSignUpScreen() {
                 <Input label="STATE ISSUED" value={licenseState} onChangeText={(v) => setLicenseState(v.toUpperCase())} placeholder="TX" autoCapitalize="characters" maxLength={2} s={s} colors={colors} />
               </View>
               <View style={[s.nameField, { flex: 2 }]}>
-                <Input label="EXPIRY DATE" value={licenseExpiry} onChangeText={setLicenseExpiry} placeholder="MM/YYYY" keyboardType="numbers-and-punctuation" s={s} colors={colors} />
+                <Input label="EXPIRY DATE" value={licenseExpiry} onChangeText={(v) => setLicenseExpiry(formatMonthYearInput(v))} placeholder="MM/YYYY" keyboardType="number-pad" s={s} colors={colors} />
               </View>
             </View>
             <ImageUploadField label="FRONT OF LICENSE" asset={licenseFront} onPick={() => pickImage(setLicenseFront)} s={s} colors={colors} />
@@ -723,7 +798,7 @@ export function DriverSignUpScreen() {
           <>
             <Input label="INSURANCE COMPANY" value={insuranceCompany} onChangeText={setInsuranceCompany} placeholder="State Farm" autoCapitalize="words" s={s} colors={colors} />
             <Input label="POLICY NUMBER" value={policyNumber} onChangeText={setPolicyNumber} placeholder="POL-123456789" autoCapitalize="characters" s={s} colors={colors} />
-            <Input label="POLICY EXPIRY" value={insuranceExpiry} onChangeText={setInsuranceExpiry} placeholder="MM/YYYY" keyboardType="numbers-and-punctuation" s={s} colors={colors} />
+            <Input label="POLICY EXPIRY" value={insuranceExpiry} onChangeText={(v) => setInsuranceExpiry(formatMonthYearInput(v))} placeholder="MM/YYYY" keyboardType="number-pad" s={s} colors={colors} />
             <DocumentUploadField label="INSURANCE DOCUMENT" asset={insuranceDoc} onPick={() => pickDocument(setInsuranceDoc)} s={s} colors={colors} />
           </>
         )}

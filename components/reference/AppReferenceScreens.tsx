@@ -1896,7 +1896,7 @@ function RiderProfileReferenceInner() {
         setRoleActionLoading(false);
       }
     } else {
-      router.push('/(auth)/driver-signup' as any);
+      router.push({ pathname: '/(auth)/driver-signup', params: { upgrade: '1' } } as any);
     }
   };
 

@@ -115,7 +115,17 @@ export function notificationBelongsToRole(data: Record<string, any>, uid: string
   if (role === 'driver' && looksRiderOnlyNotification(data)) return false;
 
   const recipients = asStringArray(data.recipients);
-  return data.userId === uid || data.recipientId === uid || recipients.includes(uid);
+  const uidMatch = data.userId === uid || data.recipientId === uid || recipients.includes(uid);
+  if (!uidMatch) return false;
+
+  // When a notification has no role-scoping at all (just userId==uid), show it on the
+  // role the user was in when the notification was created. If we still can't determine
+  // that, default to showing it only on rider side to avoid double-showing on driver home.
+  const createdForRole = data.userRole || data.senderRole || data.createdForRole;
+  if (createdForRole) return String(createdForRole).toLowerCase() === role;
+
+  // Truly ambiguous: show only on rider side so dual-role users don't see duplicates.
+  return role === 'rider';
 }
 
 export function isReadForRole(data: Record<string, any>, uid: string, role: RideAlongRole): boolean {

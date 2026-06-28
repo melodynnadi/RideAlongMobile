@@ -943,13 +943,27 @@ export default function HomeScreen() {
   setUnreadCount(0);
     const unsubs: Array<() => void> = [];
 
-    // Listen to user document for student verification status changes
+    // Listen to driver document for student verification status changes.
+    // Falls back to riders/{uid} so dual-role users don't need to re-verify.
     const userDocRef = doc(firestore, 'drivers', uid);
     const unsubUser = onSnapshot(userDocRef, async (snap) => {
       if (snap.exists()) {
         const data = snap.data() as any;
-        const rawIsVerified = data?.isVerified === true;
-        const vs_status = data?.verificationStatus || null;
+        let rawIsVerified = data?.isVerified === true;
+        let vs_status = data?.verificationStatus || null;
+
+        // Fallback: if not verified in driver doc, check rider doc (same-email upgrade case)
+        if (!rawIsVerified && vs_status !== 'approved' && vs_status !== 'auto-approved') {
+          try {
+            const riderSnap = await getDoc(doc(firestore, 'riders', uid));
+            if (riderSnap.exists()) {
+              const rd = riderSnap.data() as any;
+              if (rd?.isVerified === true) rawIsVerified = true;
+              if (!vs_status && rd?.verificationStatus) vs_status = rd.verificationStatus;
+            }
+          } catch {}
+        }
+
         const verified = rawIsVerified || vs_status === 'approved' || vs_status === 'auto-approved';
         const prevVerified = useVerificationStore.getState().isVerified;
         const vs = useVerificationStore.getState();
@@ -1025,7 +1039,9 @@ export default function HomeScreen() {
       try {
         const userDoc = await getDoc(doc(firestore, 'drivers', uid));
         const data = userDoc.exists() ? (userDoc.data() as any) : null;
-        const rating = typeof data?.rating === 'number' ? (data.rating as number) : null;
+        // Only use cached rating if ratingCount > 0 — prevents rider ratings bleeding in on new driver accounts
+        const ratingCount = data?.ratingCount || data?.ratingsCount || data?.totalRatings || 0;
+        const rating = (typeof data?.rating === 'number' && ratingCount > 0) ? (data.rating as number) : null;
         // Try multiple keys for first name, then auth displayName, then email prefix
         let firstName: string | undefined = getFirstNameFromProfile(data);
         let profilePhoto: string | undefined;
@@ -1051,14 +1067,10 @@ export default function HomeScreen() {
           firstName = dn ? dn.split(' ')[0] : undefined;
         }
         
-        // Also check Firebase Auth profile photo if not found in Firestore
-        if (!profilePhoto) {
-          const authPhotoURL = firebaseAuth.currentUser?.photoURL;
-          if (authPhotoURL) {
-            profilePhoto = authPhotoURL;
-          }
-        }
-        
+        // Do NOT fall back to firebaseAuth.currentUser?.photoURL — that reflects
+        // whichever role last called updateProfile and would bleed the rider photo
+        // into the driver account. Driver photo must come from drivers/{uid} only.
+
         // Set the profile photo state
         if (profilePhoto && typeof profilePhoto === 'string') {
           setUserPhoto(profilePhoto);
@@ -1066,15 +1078,26 @@ export default function HomeScreen() {
           setUserPhoto(null);
         }
         
-        // Also fetch from drivers collection for driver-specific avatar
+        // Fetch driver-specific data (avatar, university). Fall back to rider doc for
+        // university so upgraded accounts show the correct campus immediately.
         try {
-          const driverDoc = await getDoc(doc(firestore, 'drivers', uid));
+          const [driverDoc, riderDoc] = await Promise.all([
+            getDoc(doc(firestore, 'drivers', uid)),
+            getDoc(doc(firestore, 'riders', uid)),
+          ]);
           if (driverDoc.exists()) {
             const driverData = driverDoc.data() as any;
             const pi = driverData?.personalInfo || driverData?.profile || {};
             const drvAvatar = driverData?.avatarUrl || pi?.avatarUrl || null;
             setDriverAvatarUrl(typeof drvAvatar === 'string' && drvAvatar ? drvAvatar : null);
-            setDriverUniversity(driverData?.university || pi?.university || undefined);
+            const driverUniversity = driverData?.university || pi?.university;
+            const riderData = riderDoc.exists() ? (riderDoc.data() as any) : null;
+            const resolvedUniversity = driverUniversity || riderData?.university || riderData?.personalInfo?.university || undefined;
+            setDriverUniversity(resolvedUniversity);
+            // Backfill university into driver doc if it was missing (upgrade from rider)
+            if (!driverUniversity && resolvedUniversity) {
+              updateDoc(doc(firestore, 'drivers', uid), { university: resolvedUniversity, updatedAt: serverTimestamp() }).catch(() => undefined);
+            }
           } else {
             setDriverAvatarUrl(null);
           }
@@ -1139,44 +1162,10 @@ export default function HomeScreen() {
     });
     unsubs.push(unsubReq);
 
-    // Ride requests by userId (alternate field some backends use)
-    const reqUserIdQ = query(
-      collection(firestore, 'rideRequests'),
-      where('userId', '==', uid)
-    );
-    const unsubReqUserId = onSnapshot(reqUserIdQ, (snap) => {
-      const items: UpcomingRideCard[] = [];
-      snap.forEach((d) => {
-        const r = d.data() as any;
-        const requestedTime: Date | null = getRideDateTime(r);
-  const from = extractAddress(r, 'pickup');
-  const to = extractAddress(r, 'dropoff');
-        // Prefer rider-entered contribution fields over estimated fare
-        const price = (
-          (typeof r?.contributionAmount === 'number' ? r.contributionAmount : parseCurrency(r?.contributionAmount))
-          ?? (typeof r?.contribution === 'number' ? r.contribution : parseCurrency(r?.contribution))
-          ?? (typeof r?.requestedContribution === 'number' ? r.requestedContribution : parseCurrency(r?.requestedContribution))
-          ?? (typeof r?.price === 'number' ? r.price : parseCurrency(r?.price))
-          ?? (typeof r?.estimatedFare === 'number' ? r.estimatedFare : parseCurrency(r?.estimatedFare))
-        );
-        items.push({
-          id: d.id,
-          type: 'rideRequest',
-          status: normalizeStatusForDisplay(r?.status),
-          from,
-          to,
-          dateTime: requestedTime,
-          durationText: getDurationText(r),
-          priceText: typeof price === 'number' ? `$${price.toFixed(2)}` : (typeof price === 'string' ? price : undefined),
-          distanceText: extractDistance(r),
-        });
-      });
-  const next: Record<string, UpcomingRideCard> = {};
-  items.forEach((it) => { next[it.id] = it; });
-  setUpcReqUserId(next);
-  setCombinedUpcoming({ reqUserId: next });
-    }, (err) => console.warn('rideRequests(userId) listener error', err));
-    unsubs.push(unsubReqUserId);
+    // NOTE: intentionally NOT querying rideRequests by userId==uid here.
+    // userId on rideRequests identifies the RIDER, not the driver.
+    // A dual-role user's own rider requests must not appear on the driver home.
+    setUpcReqUserId({});
 
   // Fallback: ride requests by email (web app might store driverEmail)
   if (email) {
@@ -2164,7 +2153,7 @@ export default function HomeScreen() {
           const userDoc = await getDoc(doc(firestore, 'drivers', uid));
           const data = userDoc.exists() ? (userDoc.data() as any) : null;
           const firstName = getFirstNameFromProfile(data);
-          const profilePhoto = data?.avatarUrl || data?.photoURL || data?.photoUrl || firebaseAuth.currentUser?.photoURL;
+          const profilePhoto = data?.avatarUrl || data?.photoURL || data?.photoUrl;
           
           if (profilePhoto && typeof profilePhoto === 'string') {
             setUserPhoto(profilePhoto);
@@ -2194,7 +2183,7 @@ export default function HomeScreen() {
               const userDoc = await getDoc(doc(firestore, 'drivers', uid));
               const data = userDoc.exists() ? (userDoc.data() as any) : null;
               const firstName = getFirstNameFromProfile(data);
-              const profilePhoto = data?.avatarUrl || data?.photoURL || data?.photoUrl || firebaseAuth.currentUser?.photoURL;
+              const profilePhoto = data?.avatarUrl || data?.photoURL || data?.photoUrl;
               
               if (profilePhoto && typeof profilePhoto === 'string') {
                 setUserPhoto(profilePhoto);

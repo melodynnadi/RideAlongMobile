@@ -44,6 +44,11 @@ export async function debugFirebaseConnection(): Promise<{ user: any; canAccessF
 /**
  * Get emergency contacts for the current driver
  */
+// Emergency contacts are stored on users/{uid} so they're shared across rider and driver roles.
+function getUserRef(uid: string) {
+  return doc(firestore, 'users', uid);
+}
+
 export async function getEmergencyContacts(): Promise<EmergencyContact[]> {
   const user = firebaseAuth.currentUser;
   if (!user) {
@@ -51,15 +56,10 @@ export async function getEmergencyContacts(): Promise<EmergencyContact[]> {
   }
 
   try {
-    const driverRef = doc(firestore, 'drivers', user.uid);
-    const driverSnap = await getDoc(driverRef);
-    
-    if (!driverSnap.exists()) {
-      return [];
-    }
-    
-    const driverData = driverSnap.data();
-    const contacts = Array.isArray(driverData.emergencyContacts) ? driverData.emergencyContacts : [];
+    const snap = await getDoc(getUserRef(user.uid));
+    if (!snap.exists()) return [];
+    const data = snap.data();
+    const contacts = Array.isArray(data.emergencyContacts) ? data.emergencyContacts : [];
     return contacts.map((contact: Partial<EmergencyContact>, index: number) => ({
       id: contact.id || `legacy-${index}`,
       name: String(contact.name || ''),
@@ -89,34 +89,9 @@ export async function addEmergencyContact(contact: Omit<EmergencyContact, 'id' |
       addedAt: new Date(), // Use regular Date instead of serverTimestamp() for arrayUnion
     };
 
-    const driverRef = doc(firestore, 'drivers', user.uid);
-    
-    // Check if driver exists
-    const driverSnap = await getDoc(driverRef);
-    if (!driverSnap.exists()) {
-      console.error('Driver document not found for user:', user.uid);
-      console.log('Attempting to create driver document...');
-      
-      // Try to create a basic driver document if it doesn't exist
-      try {
-        await setDoc(driverRef, {
-          userUid: user.uid,
-          email: user.email || '',
-          emergencyContacts: [],
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
-        console.log('Created basic driver document');
-      } catch (createError) {
-        console.error('Failed to create driver document:', createError);
-        throw new Error('Driver profile not found and could not be created');
-      }
-    }
-
-    console.log('Adding emergency contact:', newContact);
-    
-    // Add the new contact to the array
-    await updateDoc(driverRef, {
+    const userRef = getUserRef(user.uid);
+    await setDoc(userRef, { updatedAt: serverTimestamp() }, { merge: true });
+    await updateDoc(userRef, {
       emergencyContacts: arrayUnion(newContact),
       updatedAt: serverTimestamp(),
     });
@@ -161,24 +136,15 @@ export async function updateEmergencyContact(contactId: string, updates: Partial
   }
 
   try {
-    const driverRef = doc(firestore, 'drivers', user.uid);
-    const driverSnap = await getDoc(driverRef);
-    
-    if (!driverSnap.exists()) {
-      throw new Error('Driver profile not found');
-    }
+    const userRef = getUserRef(user.uid);
+    const snap = await getDoc(userRef);
+    const emergencyContacts = (snap.exists() ? snap.data()?.emergencyContacts : null) || [];
 
-    const driverData = driverSnap.data();
-    const emergencyContacts = driverData.emergencyContacts || [];
-    
-    // Find and update the contact
-    const updatedContacts = emergencyContacts.map((contact: EmergencyContact, index: number) => 
-      (contact.id || `legacy-${index}`) === contactId 
-        ? { ...contact, ...updates }
-        : contact
+    const updatedContacts = emergencyContacts.map((contact: EmergencyContact, index: number) =>
+      (contact.id || `legacy-${index}`) === contactId ? { ...contact, ...updates } : contact
     );
 
-    await updateDoc(driverRef, {
+    await updateDoc(userRef, {
       emergencyContacts: updatedContacts,
       updatedAt: serverTimestamp(),
     });
@@ -209,26 +175,16 @@ export async function removeEmergencyContact(contactId: string): Promise<void> {
   }
 
   try {
-    const driverRef = doc(firestore, 'drivers', user.uid);
-    const driverSnap = await getDoc(driverRef);
-    
-    if (!driverSnap.exists()) {
-      throw new Error('Driver profile not found');
-    }
+    const userRef = getUserRef(user.uid);
+    const snap = await getDoc(userRef);
+    const emergencyContacts = (snap.exists() ? snap.data()?.emergencyContacts : null) || [];
 
-    const driverData = driverSnap.data();
-    const emergencyContacts = driverData.emergencyContacts || [];
-    
-    // Find the contact to remove
-    const contactToRemove = emergencyContacts.find((contact: EmergencyContact, index: number) => (contact.id || `legacy-${index}`) === contactId);
-    if (!contactToRemove) {
-      throw new Error('Contact not found');
-    }
+    const contactToRemove = emergencyContacts.find((c: EmergencyContact, i: number) => (c.id || `legacy-${i}`) === contactId);
+    if (!contactToRemove) throw new Error('Contact not found');
 
-    // Remove the contact from the array
-    const updatedContacts = emergencyContacts.filter((contact: EmergencyContact, index: number) => (contact.id || `legacy-${index}`) !== contactId);
+    const updatedContacts = emergencyContacts.filter((c: EmergencyContact, i: number) => (c.id || `legacy-${i}`) !== contactId);
 
-    await updateDoc(driverRef, {
+    await updateDoc(userRef, {
       emergencyContacts: updatedContacts,
       updatedAt: serverTimestamp(),
     });

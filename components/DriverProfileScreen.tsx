@@ -34,9 +34,9 @@ function RatingPill({ rating }: { rating: number }) {
   const { colors } = useAppTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
-    <View style={[styles.pill, styles.ratingPill]}>
+    <View style={styles.ratingPillWrap}>
       <Ionicons name="star" size={11} color={colors.primary} />
-      <RNText style={styles.ratingPillText}>{rating.toFixed(2)}</RNText>
+      <RNText style={styles.ratingPillText}>{rating.toFixed(1)}</RNText>
     </View>
   );
 }
@@ -97,7 +97,8 @@ export default function DriverProfileScreen() {
         const pi = driverData?.personalInfo || driverData?.profile || {};
         const combined = `${pi?.firstName || ''} ${pi?.lastName || ''}`.trim();
         setDisplayName(driverData?.fullName || combined || u.displayName || u.email?.split('@')[0] || 'Driver');
-        setAvatarUrl(driverData?.avatarUrl || pi?.avatarUrl || u.photoURL || null);
+        // Do NOT fall back to u.photoURL — auth.currentUser.photoURL could be the rider's photo
+        setAvatarUrl(driverData?.avatarUrl || pi?.avatarUrl || driverData?.photoURL || null);
 
         const vehicle = driverData?.vehicleInfo;
         if (vehicle?.year && vehicle?.make && vehicle?.model) {
@@ -205,8 +206,10 @@ export default function DriverProfileScreen() {
           </View>
 
           <View style={styles.profileTopRow}>
-            <TouchableOpacity style={styles.bigAvatar} onPress={onChangeAvatar} accessibilityRole="button" accessibilityLabel="Change profile photo">
-              {avatarUrl ? <Image source={{ uri: avatarUrl }} style={styles.bigAvatarImage} /> : <Text style={styles.bigAvatarText}>{initials}</Text>}
+            <TouchableOpacity style={styles.bigAvatarWrap} onPress={onChangeAvatar} accessibilityRole="button" accessibilityLabel="Change profile photo">
+              <View style={styles.bigAvatar}>
+                {avatarUrl ? <Image source={{ uri: avatarUrl }} style={styles.bigAvatarImage} /> : <Text style={styles.bigAvatarText}>{initials}</Text>}
+              </View>
               <View style={styles.cameraBadge}><Ionicons name="camera" size={12} color="#FFFFFF" /></View>
             </TouchableOpacity>
             <View style={{ flex: 1 }}>
@@ -235,7 +238,7 @@ export default function DriverProfileScreen() {
             <View style={styles.profileActivityDivider} />
             <View style={styles.profileActivityItem}><Text style={[styles.profileActivityValue, { color: colors.primary }]}>${Math.round(stats.totalEarnings)}</Text><Text style={styles.profileActivityLabel}>Earned</Text></View>
             <View style={styles.profileActivityDivider} />
-            <View style={styles.profileActivityItem}><Text style={styles.profileActivityValue}>{stats.avgRating ? stats.avgRating.toFixed(1) : 'â€”'}</Text><Text style={styles.profileActivityLabel}>Rating</Text></View>
+            <View style={styles.profileActivityItem}><Text style={styles.profileActivityValue}>{stats.avgRating ? stats.avgRating.toFixed(1) : '--'}</Text><Text style={styles.profileActivityLabel}>Rating</Text></View>
           </View>
 
           {aboutText ? (
@@ -290,6 +293,7 @@ function makeStyles(colors: AppColors) {
   profileTopRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
   profileIdentityHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   editProfileButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
+  bigAvatarWrap: { width: 88, height: 88, alignItems: 'center', justifyContent: 'center' },
   bigAvatar: { width: 82, height: 82, borderRadius: 41, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   bigAvatarImage: { width: '100%', height: '100%' },
   bigAvatarText: { color: colors.primary, fontSize: 26, fontWeight: '600' },
@@ -301,7 +305,8 @@ function makeStyles(colors: AppColors) {
   pill: { fontFamily: FONT_MONO, borderRadius: 18, borderWidth: 1, borderColor: colors.border, color: colors.textSecondary, fontSize: 11, paddingHorizontal: 12, paddingVertical: 7, overflow: 'hidden' },
   pillActive: { backgroundColor: colors.textPrimary, borderColor: colors.textPrimary, color: colors.textInverse },
   ratingPill: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  ratingPillText: { fontFamily: FONT_MONO, color: colors.textSecondary, fontSize: 11 },
+  ratingPillWrap: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 18, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 10, paddingVertical: 6 },
+  ratingPillText: { color: colors.textSecondary, fontSize: 11, fontWeight: '600' },
   profileActivity: { minHeight: 72, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', marginBottom: 18, paddingHorizontal: 8 },
   profileActivityItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
   profileActivityDivider: { width: 1, height: 32, backgroundColor: colors.border },

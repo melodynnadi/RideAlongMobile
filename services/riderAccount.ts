@@ -1,5 +1,5 @@
 import { updateProfile } from 'firebase/auth';
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 
 import { firebaseAuth, firestore } from '@/constants/services';
 
@@ -46,7 +46,9 @@ export async function loadRiderAccount(): Promise<RiderAccountProfile> {
     university: value(rider.university, rider.universityData?.name, shared.university, shared.universityData?.name),
     major: value(rider.major, rider.personalInfo?.major, shared.major, shared.personalInfo?.major),
     about: value(rider.about, rider.bio, rider.description, shared.about, shared.bio, shared.description),
-    avatarUrl: value(rider.avatarUrl, rider.photoURL, rider.profilePicture, shared.avatarUrl, user.photoURL) || undefined,
+    // Do NOT fall back to user.photoURL — auth.currentUser.photoURL is shared across roles
+    // and could return the driver's photo. Each role's photo lives only in its own collection.
+    avatarUrl: value(rider.avatarUrl, rider.photoURL, rider.profilePicture, shared.avatarUrl) || undefined,
   };
 }
 
@@ -79,8 +81,19 @@ export async function saveRiderAccount(profile: Omit<RiderAccountProfile, 'email
   };
 
   await updateProfile(user, { displayName: fullName });
-  await Promise.all([
+
+  const writes: Promise<unknown>[] = [
     setDoc(doc(firestore, 'riders', user.uid), common, { merge: true }),
     setDoc(doc(firestore, 'users', user.uid), common, { merge: true }),
-  ]);
+  ];
+
+  // Sync shared academic fields to driver doc if it exists (dual-role user)
+  const driverSnap = await getDoc(doc(firestore, 'drivers', user.uid));
+  if (driverSnap.exists()) {
+    writes.push(updateDoc(doc(firestore, 'drivers', user.uid), {
+      university, major, updatedAt: serverTimestamp(),
+    }));
+  }
+
+  await Promise.all(writes);
 }

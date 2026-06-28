@@ -93,6 +93,7 @@ export default function RiderTabLayout() {
       <Tabs.Screen name="ride/[id]" options={{ href: null }} />
       <Tabs.Screen name="trip/[confirmedRideId]" options={{ href: null }} />
       <Tabs.Screen name="driver/[driverId]" options={{ href: null }} />
+      <Tabs.Screen name="become-driver" options={{ href: null }} />
     </Tabs>
   );
 }

@@ -2,7 +2,6 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { updateProfile } from 'firebase/auth';
 
 export type AvatarUploadResult = { canceled: true } | { canceled: false; avatarUrl: string; photoPath: string };
 
@@ -45,18 +44,16 @@ export async function pickAndUploadAvatar(): Promise<AvatarUploadResult> {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${idToken}`,
     },
-    body: JSON.stringify({ base64: manipulated.base64, oldPhotoPath }),
+    body: JSON.stringify({ base64: manipulated.base64, oldPhotoPath, role: 'rider' }),
   });
   const json = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(json.error || `Upload failed: ${resp.status}`);
   if (!json.success) throw new Error(json.error || 'Upload failed');
 
+  // Only write to riders/{uid} — do NOT write to users/{uid} or call updateProfile,
+  // which would bleed the rider photo into the driver account via auth.currentUser.photoURL.
   const avatarUpdate = { avatarUrl: json.photoURL, photoURL: json.photoURL, photoPath: json.photoPath, updatedAt: serverTimestamp() };
-  await Promise.all([
-    setDoc(userRef, avatarUpdate, { merge: true }),
-    setDoc(doc(firestore, 'users', user.uid), avatarUpdate, { merge: true }),
-    updateProfile(user, { photoURL: json.photoURL }).catch(() => undefined),
-  ]);
+  await setDoc(userRef, avatarUpdate, { merge: true });
 
   return { canceled: false, avatarUrl: json.photoURL, photoPath: json.photoPath };
 }
