@@ -538,14 +538,23 @@ export function DriverSignUpScreen() {
         try {
           const pollRes = await fetch(`${base}/api/driver-applications/${applicationId}`);
           if (pollRes.ok) {
-            const pollData = await pollRes.json() as { application?: { processingStatus?: string; verification?: { decision: string; flags: string[]; reasoning: string; score: number } } };
+            const pollData = await pollRes.json() as { application?: { status?: string; processingStatus?: string; rejectionReason?: string; verification?: { decision: string; flags: string[]; reasoning: string; score: number } } };
             const app = pollData.application;
-            if (app?.processingStatus === 'complete' && app.verification) {
+            const isDone = app?.processingStatus === 'complete'
+              || app?.status === 'approved'
+              || app?.status === 'rejected';
+            if (isDone) {
+              // Prefer the verification sub-object if present, otherwise derive from status field
+              const decision: 'approved' | 'rejected' | 'requires_manual_review' =
+                app?.verification?.decision as any
+                ?? (app?.status === 'approved' ? 'approved'
+                  : app?.status === 'rejected' ? 'rejected'
+                  : 'requires_manual_review');
               setVerificationResult({
-                decision: app.verification.decision as 'approved' | 'rejected' | 'requires_manual_review',
-                flags: app.verification.flags ?? [],
-                reasoning: app.verification.reasoning ?? '',
-                score: app.verification.score ?? 0,
+                decision,
+                flags: app?.verification?.flags ?? (app?.rejectionReason ? [app.rejectionReason] : []),
+                reasoning: app?.verification?.reasoning ?? app?.rejectionReason ?? '',
+                score: app?.verification?.score ?? 0,
               });
               setProcessingStatus('done');
               return;

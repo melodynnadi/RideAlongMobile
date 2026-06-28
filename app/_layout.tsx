@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Toast from 'react-native-toast-message';
 import * as NativeSplashScreen from 'expo-splash-screen';
+import * as Notifications from 'expo-notifications';
 import '../global.css';
 
 import { useAuthStore } from '@/stores/authStore';
@@ -13,6 +14,7 @@ import { ThemeProvider } from '@/hooks/ThemeContext';
 import DismissKeyboardView from '@/components/DismissKeyboardView';
 import SplashScreen from '@/components/SplashScreen';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { notificationService } from '@/src/services/notificationService';
 
 // Keep native splash up until we explicitly hide it on first React frame.
 NativeSplashScreen.preventAutoHideAsync();
@@ -90,19 +92,35 @@ export default function RootLayout() {
 
   useEffect(() => {
     // Dismiss the native splash on the very first frame.
-    // Our React SplashScreen is already rendered underneath — no gap.
     if (!nativeHiddenRef.current) {
       nativeHiddenRef.current = true;
       NativeSplashScreen.hideAsync();
     }
-
-    if (!splashAlreadyShown) {
-      splashAlreadyShown = true;
-    }
+    if (!splashAlreadyShown) splashAlreadyShown = true;
 
     const unsubscribe = initializeAuth();
     return unsubscribe;
   }, [initializeAuth]);
+
+  // Wire up push notification listeners once on mount.
+  useEffect(() => {
+    notificationService.setupNotificationListeners();
+
+    // Handle taps from killed-state: the response listener doesn't fire in that case,
+    // so we must manually check the last response when the app launches.
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (response?.notification?.request?.content?.data) {
+        // Small delay to let the router and auth state settle before navigating.
+        setTimeout(() => {
+          (notificationService as any).handleNotificationTap(
+            response.notification.request.content.data
+          );
+        }, 1500);
+      }
+    }).catch(() => undefined);
+
+    return () => notificationService.cleanup();
+  }, []);
 
   useEffect(() => {
     if (!splashVisible) return;

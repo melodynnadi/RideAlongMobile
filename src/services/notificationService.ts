@@ -8,9 +8,11 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform, AppState } from 'react-native';
 import Constants from 'expo-constants';
+import { router } from 'expo-router';
 import { showToast, rideToasts } from '../utils/showToast';
 import { buildToastKey, shouldShowToastEvent } from '../utils/toastDeduper';
 import { settingsService } from './settingsService';
+import { useAuthStore } from '@/stores/authStore';
 
 // ============================================================================
 // NOTIFICATION DEDUPLICATION
@@ -341,8 +343,18 @@ class NotificationService {
       case 'payment_received':
         rideToasts.paymentReceived(notificationData.amount || '0.00');
         break;
+      // Backend sends 'ride_status_change' with a status sub-field
+      case 'ride_status_change': {
+        const status = String(notificationData.status || '').toUpperCase();
+        if (status === 'IN_PROGRESS') rideToasts.rideStarted('');
+        else if (status === 'COMPLETED') rideToasts.rideCompleted();
+        else showToast('info', title || 'Ride update', body || undefined);
+        break;
+      }
+      case 'new_message':
+        showToast('info', title || 'New message', body || undefined);
+        break;
       default:
-        // Generic notification
         showToast('info', title || 'Notification', body || undefined);
     }
   }
@@ -350,41 +362,53 @@ class NotificationService {
   /**
    * Handle notification tap - navigate to appropriate screen
    */
-  private handleNotificationTap(data: NotificationData): void {
-    console.log('Handling notification tap with data:', data);
-    
-    // You can implement navigation logic here based on notification type
-    // For example, using expo-router:
-    // import { router } from 'expo-router';
-    
-    switch (data.type) {
-      case 'new_ride_request':
-        // Navigate to ride request screen
-        if (data.rideId) {
-          console.log(`Navigate to ride request: ${data.rideId}`);
-          // router.push(`/(tabs)/dashboard`); // or specific ride screen
+  handleNotificationTap(data: NotificationData): void {
+    const activeRole = useAuthStore.getState().activeRole;
+    const isDriver = activeRole === 'driver';
+
+    try {
+      switch (data.type) {
+        case 'new_ride_request':
+          router.replace(isDriver ? '/(driver)' : '/(rider)');
+          break;
+
+        case 'ride_accepted':
+        case 'ride_started':
+        case 'ride_status_change':
+          router.replace(isDriver ? '/(driver)' : '/(rider)');
+          break;
+
+        case 'ride_completed':
+          router.replace(isDriver ? '/(driver)/earnings' : '/(rider)');
+          break;
+
+        case 'ride_cancelled':
+        case 'rider_cancelled':
+          router.replace(isDriver ? '/(driver)' : '/(rider)');
+          break;
+
+        case 'payment_received':
+          router.replace('/(driver)/earnings');
+          break;
+
+        case 'new_message': {
+          const chatId = (data as any).chatId;
+          if (chatId) {
+            router.replace(isDriver
+              ? { pathname: '/(driver)/messages/[chatId]', params: { chatId } } as any
+              : { pathname: '/(rider)/messages/[chatId]', params: { chatId } } as any
+            );
+          } else {
+            router.replace(isDriver ? '/(driver)/messages' : '/(rider)/messages');
+          }
+          break;
         }
-        break;
-      case 'ride_accepted':
-      case 'ride_started':
-      case 'ride_completed':
-      case 'ride_cancelled':
-      case 'rider_cancelled':
-        // Navigate to ride details if rideId is provided
-        if (data.rideId) {
-          console.log(`Navigate to ride details: ${data.rideId}`);
-          // router.push(`/ride/${data.rideId}`);
-        }
-        break;
-      case 'payment_received':
-        // Navigate to earnings screen
-        console.log('Navigate to earnings');
-        // router.push('/(tabs)/earnings');
-        break;
-      default:
-        // Navigate to home or dashboard
-        console.log('Navigate to dashboard');
-        // router.push('/(tabs)/dashboard');
+
+        default:
+          router.replace(isDriver ? '/(driver)' : '/(rider)');
+      }
+    } catch (e) {
+      console.warn('[handleNotificationTap] Navigation error:', e);
     }
   }
 
