@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useUnreadMessages } from '@/hooks/useUnreadMessages';
+import { useDriverUnreadCounts } from '@/hooks/useRiderUnreadCounts';
 import { hitSlop } from '@/theme/designSystem';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import type { AppColors } from '@/constants/theme';
@@ -16,7 +16,7 @@ function badgeLabel(n: number) {
 export function DriverBottomNav({ activeTab }: { activeTab: DriverTab }) {
   const { colors } = useAppTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const totalUnread = useUnreadMessages();
+  const { messageCount: totalUnread } = useDriverUnreadCounts();
 
   const tabs: { key: DriverTab; label: string; icon: keyof typeof Ionicons.glyphMap; href: string }[] = [
     { key: 'home', label: 'Home', icon: 'home', href: '/(driver)' },

@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import {
   onAuthStateChanged,
-  sendEmailVerification,
   signOut as firebaseSignOut,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -21,6 +20,7 @@ import { Alert } from 'react-native';
 import { firebaseAuth, firestore } from '@/services/firebase';
 import { registerRiderPushToken, registerDriverPushToken } from '@/utils/registerPushToken';
 import { SignupUniversity, validateSignupUniversity } from '@/services/authSignup';
+import { sendVerificationEmailWithFallback } from '@/src/services/emailVerification';
 
 type ActiveRole = 'rider' | 'driver';
 type UserRole = ActiveRole | 'both';
@@ -460,7 +460,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           emailVerified: false,
           create: true,
         });
-        await sendEmailVerification(user);
+        await sendVerificationEmailWithFallback(user);
 
         const profiles = await fetchProfiles(user.uid);
         set({
@@ -550,7 +550,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const currentUser = firebaseAuth.currentUser;
     if (!currentUser) throw new Error('No user logged in');
 
-    await sendEmailVerification(currentUser);
+    await sendVerificationEmailWithFallback(currentUser);
   },
 
   checkEmailVerification: async () => {

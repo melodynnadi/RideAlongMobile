@@ -8,14 +8,15 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import {
-  collection, query, where, onSnapshot, doc,
-  updateDoc, serverTimestamp, Timestamp, addDoc,
+  collection, query, where, onSnapshot, doc, getDoc,
+  updateDoc, serverTimestamp, Timestamp,
 } from 'firebase/firestore';
-import { firebaseAuth, firestore } from '@/constants/services';
+import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 import { FlagRideModal } from '@/components/FlagRideModal';
-import { roleKey } from '@/src/utils/roleIdentity';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { getOrCreateRideChat } from '@/src/services/chatAvailability';
+import { createRoleNotification } from '@/src/services/notificationRecords';
 
 type BookingRequest = {
   id: string;
@@ -28,6 +29,7 @@ type BookingRequest = {
   contributionAmount: number | null;
   status: string;
   ridePostingId: string;
+  confirmedRideId?: string;
   createdAtMs: number;
 };
 
@@ -131,7 +133,9 @@ function toPosting(id: string, r: any): Posting {
     date: r.date || '',
     time: r.time || '',
     scheduledAt: postingScheduledAt(r),
-    seats: Number(r.availableSeats ?? r.seats ?? r.seatsAvailable ?? 1),
+    // seatsAvailable is the TOTAL seat count; availableSeats gets overwritten to mean
+    // REMAINING seats once requests are accepted, so it must be checked last.
+    seats: Number(r.seatsAvailable ?? r.seats ?? r.availableSeats ?? 1),
     price: r.pricePerSeat != null ? Number(r.pricePerSeat) : r.contributionAmount != null ? Number(r.contributionAmount) : null,
     status: String(r.status || 'active').toLowerCase(),
     notes: r.notes || '',
@@ -148,10 +152,17 @@ const ACTIVE_STATUSES = new Set([
   'driver_completed', 'driver completed', 'rider_completed', 'rider completed',
 ]);
 const INACTIVE_STATUSES = new Set(['cancelled', 'canceled', 'completed', 'complete', 'finished', 'expired']);
+const ACTIVE_REQUEST_STATUSES = new Set(['pending', 'open', 'requested', 'request_sent', 'submitted']);
 
-function isPostingOutdated(p: Posting, now = Date.now()): boolean {
+function isPendingBookingRequest(req: BookingRequest): boolean {
+  const status = String(req.status || 'pending').replace(/[-\s]/g, '_').toLowerCase();
+  return !req.confirmedRideId && ACTIVE_REQUEST_STATUSES.has(status);
+}
+
+function isPostingOutdated(p: Posting, now = Date.now(), hasActivity = false): boolean {
   const status = p.status.toLowerCase();
   if (INACTIVE_STATUSES.has(status)) return true;
+  if (hasActivity) return false;
   if (!p.scheduledAt) return false;
   return p.scheduledAt.getTime() < now;
 }
@@ -217,6 +228,8 @@ export default function MyPostingsScreen() {
   const [requestsByPostingId, setRequestsByPostingId] = useState<Record<string, BookingRequest[]>>({});
   const [actingOnRequest, setActingOnRequest] = useState<string | null>(null);
   const [confirmedIdByPostingId, setConfirmedIdByPostingId] = useState<Record<string, string>>({});
+  const [confirmedRequestIds, setConfirmedRequestIds] = useState<Set<string>>(new Set());
+  const [postingFullyCompleted, setPostingFullyCompleted] = useState<Set<string>>(new Set());
 
   // Subscribe to incoming rider booking requests for this driver's postings
   useEffect(() => {
@@ -224,7 +237,6 @@ export default function MyPostingsScreen() {
     const email = firebaseAuth.currentUser?.email;
     if (!uid) return;
 
-    const inactive = new Set(['cancelled', 'canceled', 'rejected', 'declined', 'completed']);
     const snapA: Map<string, BookingRequest> = new Map();
     const snapB: Map<string, BookingRequest> = new Map();
 
@@ -237,6 +249,7 @@ export default function MyPostingsScreen() {
 
       const byPosting: Record<string, BookingRequest[]> = {};
       seen.forEach((r) => {
+        if (!isPendingBookingRequest(r)) return;
         if (!byPosting[r.ridePostingId]) byPosting[r.ridePostingId] = [];
         const existing = byPosting[r.ridePostingId].findIndex((x) => x.riderId === r.riderId);
         if (existing === -1) {
@@ -259,6 +272,7 @@ export default function MyPostingsScreen() {
       contributionAmount: d.contributionAmount != null ? Number(d.contributionAmount) : (d.price != null ? Number(d.price) : null),
       status: String(d.status || 'pending'),
       ridePostingId: d.ridePostingId || d.rideId || '',
+      confirmedRideId: d.confirmedRideId || d.rideIdConfirmed || '',
       createdAtMs: d.createdAt?.toMillis?.() ?? d._localCreatedMs ?? 0,
     });
 
@@ -267,7 +281,7 @@ export default function MyPostingsScreen() {
       snapA.clear();
       snap.forEach((d) => {
         const r = toReq(d.id, d.data());
-        if (!inactive.has(r.status.toLowerCase())) snapA.set(d.id, r);
+        if (isPendingBookingRequest(r)) snapA.set(d.id, r);
       });
       flush();
     }, (error) => {
@@ -283,7 +297,7 @@ export default function MyPostingsScreen() {
         snapB.clear();
         snap.forEach((d) => {
           const r = toReq(d.id, d.data());
-          if (!inactive.has(r.status.toLowerCase())) snapB.set(d.id, r);
+          if (isPendingBookingRequest(r)) snapB.set(d.id, r);
         });
         flush();
       }, (error) => {
@@ -303,13 +317,32 @@ export default function MyPostingsScreen() {
     const q = query(collection(firestore, 'confirmedRides'), where('driverId', '==', uid));
     return onSnapshot(q, (snap) => {
       const map: Record<string, string> = {};
+      const requestIds = new Set<string>();
+      const byPosting: Record<string, string[]> = {};
       snap.forEach((d) => {
-        const postingId = d.data().ridePostingId;
-        if (postingId) map[String(postingId)] = d.id;
+        const data = d.data() as any;
+        const postingId = data.ridePostingId;
+        if (postingId) {
+          map[String(postingId)] = d.id;
+          (byPosting[String(postingId)] = byPosting[String(postingId)] || []).push(String(data.status || '').toUpperCase());
+        }
+        const requestId = data.ridePostingRequestId || data.bookingRequestId || data.requestId;
+        if (requestId) requestIds.add(String(requestId));
+      });
+      // A posting's own `status` field never transitions past 'confirmed' once the
+      // trip actually finishes — that only happens on the individual confirmedRides
+      // docs. Derive true completion here so it doesn't show as active forever.
+      const fullyCompleted = new Set<string>();
+      Object.entries(byPosting).forEach(([pid, statuses]) => {
+        if (statuses.length > 0 && statuses.every((s) => s === 'COMPLETED')) fullyCompleted.add(pid);
       });
       setConfirmedIdByPostingId(map);
+      setConfirmedRequestIds(requestIds);
+      setPostingFullyCompleted(fullyCompleted);
     }, (error) => {
       setConfirmedIdByPostingId({});
+      setConfirmedRequestIds(new Set());
+      setPostingFullyCompleted(new Set());
       console.warn('[MyPostings] confirmedRides listener error:', error);
     });
   }, []);
@@ -317,12 +350,51 @@ export default function MyPostingsScreen() {
   const acceptRequest = useCallback(async (req: BookingRequest) => {
     setActingOnRequest(req.id);
     try {
-      await updateDoc(doc(firestore, 'ridePostingRequests', req.id), {
-        status: 'accepted',
-        updatedAt: serverTimestamp(),
+      const uid = firebaseAuth.currentUser?.uid;
+      if (!uid) throw new Error('Driver is not signed in');
+
+      const driverSnap = await getDoc(doc(firestore, 'drivers', uid));
+      const driver = driverSnap.exists() ? (driverSnap.data() as any) : {};
+      const driverName = [driver.firstName, driver.lastName].filter(Boolean).join(' ').trim()
+        || driver.personalInfo?.fullName || driver.displayName || driver.name || 'Driver';
+      const driverEmail = driver.personalInfo?.email || driver.email || firebaseAuth.currentUser?.email || '';
+
+      // Accept via the backend — it owns seat allocation, auto-rejection of
+      // surplus requests, and creating/updating the canonical confirmedRides doc.
+      const base = getApiBaseUrl();
+      const token = await firebaseAuth.currentUser?.getIdToken();
+      const resp = await fetch(`${base}/api/ride-postings/${encodeURIComponent(req.ridePostingId)}/requests/${encodeURIComponent(req.id)}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ driverId: uid, driverName, driverEmail }),
       });
-    } catch {
-      Alert.alert('Error', 'Could not accept the request. Please try again.');
+      if (!resp.ok) {
+        const j = await resp.json().catch(() => ({} as any));
+        throw new Error(j?.error || 'Failed to accept request');
+      }
+
+      setRequestsByPostingId((prev) => {
+        const next: Record<string, BookingRequest[]> = {};
+        Object.entries(prev).forEach(([postingId, requests]) => {
+          const remaining = requests.filter((item) => item.id !== req.id);
+          if (remaining.length) next[postingId] = remaining;
+        });
+        return next;
+      });
+      await createRoleNotification({
+        recipientId: req.riderId,
+        recipientRole: 'rider',
+        type: 'ride_accepted',
+        title: 'Your ride is confirmed',
+        message: 'Your request for this posted ride was accepted.',
+        driverId: uid,
+        riderId: req.riderId,
+        ridePostingId: req.ridePostingId,
+        ridePostingRequestId: req.id,
+        dedupeId: `posting-request-${req.id}-accepted-rider`,
+      }).catch(() => {});
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not accept the request. Please try again.');
     } finally {
       setActingOnRequest(null);
     }
@@ -355,21 +427,15 @@ export default function MyPostingsScreen() {
     const uid = firebaseAuth.currentUser?.uid;
     if (!uid || !req.riderId) return;
     try {
-      // Always create a fresh thread for this specific booking request
-      const chatRef = await addDoc(collection(firestore, 'chats'), {
-        participants: [uid, req.riderId],
-        participantKeys: [roleKey('driver', uid), roleKey('rider', req.riderId)],
-        participantRoles: { [uid]: 'driver', [req.riderId]: 'rider' },
+      const chatId = await getOrCreateRideChat({
+        context: 'booking-request',
+        rideId: req.ridePostingId || req.id,
         driverId: uid,
         riderId: req.riderId,
         ridePostingId: req.ridePostingId || null,
         ridePostingRequestId: req.id,
-        context: 'booking-request',
-        createdAt: serverTimestamp(),
-        lastMessage: null,
-        lastMessageTimestamp: null,
       });
-      router.push(`/(driver)/messages/${chatRef.id}` as any);
+      router.push(`/(driver)/messages/${chatId}` as any);
     } catch {
       Alert.alert('Error', 'Could not open the chat. Please try again.');
     }
@@ -456,8 +522,12 @@ export default function MyPostingsScreen() {
   }, []);
 
   const now = Date.now();
-  const active = postings.filter((p) => ACTIVE_STATUSES.has(p.status) && !isPostingOutdated(p, now));
-  const past = postings.filter((p) => INACTIVE_STATUSES.has(p.status) || isPostingOutdated(p, now));
+  const hasPostingActivity = (p: Posting) => {
+    const incoming = (requestsByPostingId[p.id] || []).filter((req) => isPendingBookingRequest(req) && !confirmedRequestIds.has(req.id));
+    return incoming.length > 0 || Boolean(confirmedIdByPostingId[p.id]);
+  };
+  const active = postings.filter((p) => !postingFullyCompleted.has(p.id) && ACTIVE_STATUSES.has(p.status) && !isPostingOutdated(p, now, hasPostingActivity(p)));
+  const past = postings.filter((p) => postingFullyCompleted.has(p.id) || INACTIVE_STATUSES.has(p.status) || isPostingOutdated(p, now, hasPostingActivity(p)));
   const shown  = tab === 'active' ? active : past;
 
   return (
@@ -542,7 +612,7 @@ export default function MyPostingsScreen() {
               cancelling={cancelling === p.id}
               onCancel={() => cancelPosting(p)}
               onEdit={() => editPosting(p)}
-              incomingRequests={requestsByPostingId[p.id] || []}
+              incomingRequests={(requestsByPostingId[p.id] || []).filter((req) => isPendingBookingRequest(req) && !confirmedRequestIds.has(req.id))}
               actingOnRequest={actingOnRequest}
               onAccept={acceptRequest}
               onDecline={declineRequest}
@@ -659,7 +729,7 @@ function PostingCard({
 
   const hasRequests = incomingRequests.length > 0;
   const [flagVisible, setFlagVisible] = useState(false);
-  const isExpired = isPostingOutdated(p);
+  const isExpired = isPostingOutdated(p, Date.now(), hasRequests || Boolean(confirmedId));
 
   const statusLabel = p.status === 'cancelled' ? 'Cancelled'
     : p.status === 'completed' ? 'Completed'

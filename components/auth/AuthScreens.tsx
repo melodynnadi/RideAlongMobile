@@ -121,11 +121,11 @@ function useStyles(colors: AppColors) {
           backgroundColor: colors.bgCard,
           flexDirection: 'row',
           alignItems: 'center',
-          paddingHorizontal: 16,
-          gap: 10,
+          paddingHorizontal: 14,
+          gap: 8,
         },
         inputError: { borderColor: colors.red },
-        input: { flex: 1, minWidth: 0, color: colors.textPrimary, fontSize: 16, paddingVertical: 0 },
+        input: { flex: 1, minWidth: 0, minHeight: 48, color: colors.textPrimary, fontSize: 16, lineHeight: 22, paddingVertical: 0 },
         errorText: { color: colors.red, fontSize: 12, lineHeight: 17, marginTop: 5 },
 
         // Buttons
@@ -669,7 +669,7 @@ export function SignInScreen() {
         label="SCHOOL EMAIL"
         value={email}
         onChangeText={setEmail}
-        placeholder="you@university.edu"
+        placeholder="name@school.edu"
         keyboardType="email-address"
         textContentType="emailAddress"
       />
@@ -1120,7 +1120,7 @@ export function ForgotPasswordScreen() {
       <View style={styles.spamNote}>
         <Ionicons name="alert-circle-outline" size={15} color={colors.primary} />
         <Text style={styles.spamNoteText}>
-          Check spam if it doesn't arrive in 60 seconds.
+          {"Check spam if it doesn't arrive in 60 seconds."}
         </Text>
       </View>
     </AuthShell>

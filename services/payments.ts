@@ -145,19 +145,31 @@ export async function setDefaultPaymentMethod(
 export async function deletePaymentMethod(
   paymentMethodId: string,
   request: DeletePaymentMethodRequest
-): Promise<{ success: boolean; defaultPaymentMethodId?: string }> {
+): Promise<{ success: boolean; defaultPaymentMethodId?: string; paymentMethods?: PaymentMethod[] }> {
   const response = await fetchWithTimeout(
     `${API_BASE_URL}/api/payment-methods/${encodeURIComponent(paymentMethodId)}?userId=${encodeURIComponent(request.userId)}`,
     { method: 'DELETE' }
   );
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Failed to delete payment method' }));
-    const userMessage = error.message || error.error || 'Failed to delete payment method';
+  if (response.ok) {
+    return response.json();
+  }
+
+  const deleteError = await response.json().catch(() => ({ error: 'Failed to delete payment method' }));
+
+  const fallbackResponse = await fetchWithTimeout(`${API_BASE_URL}/api/payments/remove-method`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+
+  if (!fallbackResponse.ok) {
+    const fallbackError = await fallbackResponse.json().catch(() => deleteError);
+    const userMessage = fallbackError.message || fallbackError.error || deleteError.message || deleteError.error || 'Failed to delete payment method';
     throw new Error(userMessage);
   }
 
-  return response.json();
+  return fallbackResponse.json();
 }
 
 /**

@@ -10,7 +10,6 @@ import { firestore, firebaseAuth, storage } from '@/constants/services';
 import { doc, getDoc, query, collection, where, onSnapshot, getDocs } from 'firebase/firestore';
 import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 
-import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 import { useAppTheme } from '@/hooks/ThemeContext';
 
 async function resolveAvatarUrl(raw: string | null | undefined): Promise<string | null> {
@@ -23,6 +22,60 @@ async function resolveAvatarUrl(raw: string | null | undefined): Promise<string 
   } catch {
     return null;
   }
+}
+
+function firstText(...values: any[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function profileNameFrom(data: any): string | undefined {
+  const personal = data?.personalInfo || {};
+  const profile = data?.profile || {};
+  return firstText(
+    data?.fullName,
+    data?.name,
+    data?.displayName,
+    profile?.fullName,
+    profile?.name,
+    profile?.displayName,
+    personal?.fullName,
+    personal?.name,
+    personal?.displayName,
+    personal?.firstName && `${personal.firstName} ${personal.lastName || ''}`,
+    data?.firstName && `${data.firstName} ${data.lastName || ''}`,
+  );
+}
+
+function profileAvatarFrom(data: any): string | undefined {
+  const personal = data?.personalInfo || {};
+  const profile = data?.profile || {};
+  return firstText(
+    data?.avatarUrl1,
+    data?.avatarUrl,
+    data?.avatarURL,
+    data?.photoURL,
+    data?.photoUrl,
+    data?.profilePicture,
+    data?.profileImageUrl,
+    data?.imageUrl,
+    data?.picture,
+    data?.avatar,
+    profile?.avatarUrl1,
+    profile?.avatarUrl,
+    profile?.photoURL,
+    profile?.photoUrl,
+    profile?.profilePicture,
+    profile?.imageUrl,
+    personal?.avatarUrl1,
+    personal?.avatarUrl,
+    personal?.photoURL,
+    personal?.photoUrl,
+    personal?.profilePicture,
+    personal?.imageUrl,
+  );
 }
 
 
@@ -205,7 +258,7 @@ export default function RiderProfilePage() {
       (async () => {
         try {
           const commented  = revs.filter(r => r.comment && String(r.comment).trim().length > 0);
-          const getRaterId = (c: any) => c.raterId || c.rater || c.reviewerId || c.reviewer || c.userId || c.authorId || c.uid || c.by || c.createdBy;
+          const getRaterId = (c: any) => c.raterId || c.rater || c.reviewerId || c.reviewer || c.reviewerUid || c.driverId || c.driverUid || c.userId || c.authorId || c.uid || c.by || c.createdBy || c.ratedBy || c.fromUserId || c.fromId;
           if (commented.length === 0) { setComments([]); return; }
 
           const raterIds   = Array.from(new Set(commented.map(c => getRaterId(c)).filter(Boolean)));
@@ -214,33 +267,51 @@ export default function RiderProfilePage() {
 
           await Promise.all(raterIds.map(async (rid) => {
             try {
-              const [udoc, ddoc] = await Promise.all([
-                getDoc(doc(firestore, 'riders', rid)),
+              const [ddoc, udoc] = await Promise.all([
                 getDoc(doc(firestore, 'drivers', rid)),
+                getDoc(doc(firestore, 'riders', rid)),
               ]);
               let rawAvatar: string | null | undefined;
               let name: string | undefined;
-              if (udoc.exists()) {
-                const u = udoc.data() as any;
-                if (u?.role === 'driver' || u?.isDriver === true || u?.type === 'driver') driverMap[rid] = true;
-                rawAvatar = u?.avatarUrl || u?.avatarURL || u?.photoURL || u?.photoUrl;
-                name = u?.name || u?.displayName || u?.fullName || (u?.firstName && u?.lastName ? `${u.firstName} ${u.lastName}`.trim() : u?.firstName);
-              }
               if (ddoc.exists()) {
                 driverMap[rid] = true;
                 const dv = ddoc.data() as any;
-                rawAvatar = rawAvatar || dv?.avatarUrl1 || dv?.avatarUrl || dv?.photoURL;
-                name = name || dv?.fullName || dv?.name || (dv?.personalInfo?.firstName && `${dv.personalInfo.firstName} ${dv.personalInfo.lastName || ''}`.trim());
+                rawAvatar = profileAvatarFrom(dv);
+                name = profileNameFrom(dv);
+              }
+              if (udoc.exists()) {
+                const u = udoc.data() as any;
+                if (u?.role === 'driver' || u?.isDriver === true || u?.type === 'driver') driverMap[rid] = true;
+                rawAvatar = rawAvatar || profileAvatarFrom(u);
+                name = name || profileNameFrom(u);
               }
               const avatarUrl = await resolveAvatarUrl(rawAvatar);
               profileMap[rid] = { name, avatarUrl: avatarUrl || undefined };
             } catch {}
           }));
 
-          const built: CommentItem[] = commented.map((c) => {
+          const built = (await Promise.all(commented.map(async (c) => {
             const rid = getRaterId(c as any);
             if (!rid || !driverMap[rid]) return null;
             const p: any = profileMap[rid] || {};
+            const embeddedName = firstText(
+              (c as any).driverName,
+              (c as any).reviewerName,
+              (c as any).raterName,
+              (c as any).authorName,
+              (c as any).userName,
+            );
+            const embeddedAvatar = firstText(
+              (c as any).driverAvatarUrl,
+              (c as any).driverPhotoURL,
+              (c as any).reviewerAvatarUrl,
+              (c as any).reviewerPhotoURL,
+              (c as any).raterAvatarUrl,
+              (c as any).userAvatarUrl,
+              (c as any).avatarUrl,
+              (c as any).photoURL,
+              (c as any).profilePicture,
+            );
             try {
               const authUser = (firebaseAuth as any)?.currentUser;
               if (authUser && authUser.uid === rid) {
@@ -248,8 +319,9 @@ export default function RiderProfilePage() {
                 if (!p.avatarUrl && authUser.photoURL) p.avatarUrl = authUser.photoURL;
               }
             } catch {}
-            return { ...c as any, raterId: rid, commenterName: p.name, commenterAvatarUrl: p.avatarUrl } as CommentItem;
-          }).filter(Boolean) as CommentItem[];
+            const resolvedEmbeddedAvatar = p.avatarUrl ? undefined : await resolveAvatarUrl(embeddedAvatar);
+            return { ...c as any, raterId: rid, commenterName: p.name || embeddedName, commenterAvatarUrl: p.avatarUrl || resolvedEmbeddedAvatar || embeddedAvatar } as CommentItem;
+          }))).filter(Boolean) as CommentItem[];
 
           setComments(built);
         } catch { setComments([]); }
@@ -307,7 +379,7 @@ export default function RiderProfilePage() {
   const histogram     = [5, 4, 3, 2, 1].map(star => reviews.filter(r => Math.round(r.rating || 0) === star).length);
 
   const prefOrder  = ['conversationLevel', 'musicPreference', 'passengerType', 'smokingPreference', 'soundEnvironment', 'allowPets', 'temperaturePreference'];
-  const prefEntries: Array<[string, any]> = [];
+  const prefEntries: [string, any][] = [];
   if (rider?.preferences) {
     prefOrder.forEach(k => { if (rider.preferences[k] != null) prefEntries.push([k, rider.preferences[k]]); });
     Object.entries(rider.preferences).forEach(([k, v]) => { if (!prefOrder.includes(k)) prefEntries.push([k, v]); });
@@ -455,7 +527,7 @@ export default function RiderProfilePage() {
                     <View style={{ flex: 1 }}>
                       <Text style={s.commentName}>{c.commenterName ?? 'Driver'}</Text>
                       {c.comment ? (
-                        <Text style={s.commentText}>"{String(c.comment).trim()}"</Text>
+                        <Text style={s.commentText}>{String(c.comment).trim()}</Text>
                       ) : null}
                     </View>
                   </View>
@@ -468,7 +540,7 @@ export default function RiderProfilePage() {
             <View style={s.emptyState}>
               <Ionicons name="person-circle-outline" size={48} color={colors.border} />
               <Text style={s.emptyTitle}>No activity yet</Text>
-              <Text style={s.emptyText}>This rider hasn't completed any rides or received reviews.</Text>
+              <Text style={s.emptyText}>{"This rider hasn't completed any rides or received reviews."}</Text>
             </View>
           )}
 

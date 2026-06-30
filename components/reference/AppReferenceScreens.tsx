@@ -19,6 +19,8 @@ import { useEmergencyContactsStore } from '@/stores/emergencyContactsStore';
 import { firebaseAuth, firestore } from '@/constants/services';
 import { AddCardModal } from '@/components/AddCardModal';
 import { deleteMessageThread, getDeleteMessageThreadErrorMessage } from '@/services/messageThreadsService';
+import { canSendMessages, isTerminalStatus, MESSAGING_DISABLED_MESSAGE } from '@/constants/rideStatusConstants';
+import { resolveChatAvailability } from '@/src/services/chatAvailability';
 import type { EmergencyContact } from '@/types';
 import {
   MobileConversation,
@@ -306,7 +308,7 @@ function AuthSignInReferenceInner() {
       <Field label="SCHOOL EMAIL" value={email} onChangeText={setEmail} />
       <Field label="PASSWORD" value={password} onChangeText={setPassword} secureTextEntry />
       <View style={s.formRow}>
-        <Text style={s.remember}>â˜' Remember me</Text>
+        <Text style={s.remember}>Remember me</Text>
         <TouchableOpacity onPress={() => router.push('/(auth)/forgot-password')}>
           <Text style={s.orangeLink}>Forgot?</Text>
         </TouchableOpacity>
@@ -560,7 +562,17 @@ function RiderRequestsReferenceInner() {
   const MATCHED = new Set(['accepted', 'confirmed', 'matched', 'in_progress', 'in-progress', 'driver_completed', 'rider_completed']);
   const PAST = new Set(['completed', 'cancelled', 'canceled', 'rejected', 'expired']);
 
+  const hasRequestActivity = (request: MobileRideRequest): boolean => {
+    const raw = request.raw || {};
+    return MATCHED.has(request.status)
+      || request.status.includes('offer')
+      || Boolean(raw.confirmedRideId || raw.rideOfferId || raw.offerId || raw.acceptedBy || raw.assignedDriverId)
+      || raw.hasOffers === true
+      || Number(raw.offerCount || raw.offersCount || 0) > 0;
+  };
+
   const isDateExpired = (request: MobileRideRequest): boolean => {
+    if (!OPEN.has(request.status) || hasRequestActivity(request)) return false;
     // Prefer dateLabel (user-entered trip date) over request.date which may be createdAt
     let rideDate: Date | null = null;
     if (request.dateLabel && request.dateLabel !== 'Date pending') {
@@ -710,7 +722,7 @@ function RiderHistoryReferenceInner() {
               const driver = driverSnap.data() as any;
               driverName = textValue(driver.fullName, driver.name, driver.displayName,
                 [driver.firstName, driver.lastName].filter(Boolean).join(' ')) || driverName;
-              driverAvatarUrl = textValue(driver.avatarUrl1, driver.avatarUrl, driver.photoURL, driver.profilePicture) || driverAvatarUrl;
+              driverAvatarUrl = textValue(driver.avatarUrl, driver.photoURL, driver.profilePicture, driver.avatarUrl1) || driverAvatarUrl;
             }
           } catch {}
         }
@@ -989,7 +1001,7 @@ function DriverPublicProfileReferenceInner() {
 
   const name = driver?.fullName || driver?.name || driver?.displayName || 'Driver';
   const initials = name.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase();
-  const avatarUrl = driver?.avatarUrl1 || driver?.avatarUrl || driver?.photoURL || null;
+  const avatarUrl = driver?.avatarUrl || driver?.photoURL || driver?.avatarUrl1 || null;
   const avgRating = allRatings.length
     ? allRatings.reduce((s, r) => s + (typeof r.stars === 'number' ? r.stars : r.rating || 0), 0) / allRatings.length
     : (driver?.rating ?? 0);
@@ -1511,6 +1523,7 @@ function RiderMessagesReferenceInner() {
         </View>
         <View style={s.messageMeta}>
           <Text style={s.messageTime}>{formatChatTime(chat.updatedAt)}</Text>
+          {chat.chatAvailable === false ? <Text style={s.closedBadge}>CLOSED</Text> : null}
           {chat.unread > 0 ? <Text style={s.newBadge}>{chat.unread} NEW</Text> : null}
         </View>
       </TouchableOpacity>
@@ -1572,6 +1585,8 @@ function RiderChatReferenceInner() {
   const [recipientInitial, setRecipientInitial] = useState('?');
   const [recipientPhotoURL, setRecipientPhotoURL] = useState<string | null>(null);
   const [rideInfo, setRideInfo] = useState('');
+  const [rideStatus, setRideStatus] = useState<string | null>(null);
+  const [chatAvailable, setChatAvailable] = useState(true);
   const [recipientId, setRecipientId] = useState<string | null>(null);
   const flatListRef = React.useRef<any>(null);
 
@@ -1585,6 +1600,10 @@ function RiderChatReferenceInner() {
         const chatSnap = await getDoc(doc(firestore, 'chats', id));
         if (!chatSnap.exists()) return;
         const chatData = chatSnap.data() as any;
+        const availability = await resolveChatAvailability(chatData).catch(() => ({ available: true, status: null, rideInfo: '' }));
+        setChatAvailable(availability.available !== false);
+        setRideStatus(availability.status || null);
+        if (availability.rideInfo) setRideInfo(availability.rideInfo);
         const participants: string[] = Array.isArray(chatData.participants) ? chatData.participants : [];
         const otherId = participants.find((p) => p !== uid) || null;
         setRecipientId(otherId);
@@ -1615,7 +1634,7 @@ function RiderChatReferenceInner() {
             const rd = rideSnap.data() as any;
             const from = (rd.pickup || rd.pickupAddress || '').substring(0, 22);
             const to = (rd.dropoff || rd.dropoffAddress || '').substring(0, 22);
-            setRideInfo(`${from} → ${to}${rd.date ? ` · ${rd.date}` : ''}`);
+            if (!availability.rideInfo) setRideInfo(`${from} → ${to}${rd.date ? ` · ${rd.date}` : ''}`);
           }
         }
       } catch {}
@@ -1628,8 +1647,14 @@ function RiderChatReferenceInner() {
     return unsub;
   }, [id, uid]);
 
+  const messagingBlocked = chatAvailable === false || isTerminalStatus(rideStatus) || (rideStatus ? !canSendMessages(rideStatus) : false);
+
   const send = async () => {
     if (!id || !uid || !draft.trim() || sending) return;
+    if (messagingBlocked) {
+      Alert.alert('Chat unavailable', MESSAGING_DISABLED_MESSAGE);
+      return;
+    }
     const text = draft.trim();
     setSending(true);
     try {
@@ -1658,6 +1683,9 @@ function RiderChatReferenceInner() {
           }
         } catch {}
       }
+    } catch (error: any) {
+      console.warn('[RiderChatReference] send failed:', error);
+      Alert.alert('Message not sent', error?.message || 'Please check your connection and try again.');
     } finally {
       setSending(false);
     }
@@ -1754,23 +1782,32 @@ function RiderChatReferenceInner() {
 
           {/* Input bar */}
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 14, paddingVertical: 12, paddingBottom: 12 + insets.bottom, borderTopWidth: 1, borderTopColor: colors.border, gap: 10, backgroundColor: colors.bgCard }}>
-            <TextInput
-              style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, maxHeight: 100, backgroundColor: colors.bgSecondary, color: colors.textPrimary }}
-              placeholder="Message..."
-              placeholderTextColor={colors.textSecondary}
-              value={draft}
-              onChangeText={setDraft}
-              multiline
-              maxLength={1000}
-              onSubmitEditing={send}
-            />
-            <TouchableOpacity
-              style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', opacity: (!draft.trim() || sending) ? 0.45 : 1 }}
-              onPress={send}
-              disabled={!draft.trim() || sending}
-            >
-              {sending ? <ActivityIndicator size="small" color={colors.textInverse} /> : <Ionicons name="send" size={18} color={colors.textInverse} />}
-            </TouchableOpacity>
+            {messagingBlocked ? (
+              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 14, backgroundColor: colors.bgSecondary, borderRadius: 16, borderWidth: 1, borderColor: colors.border }}>
+                <Ionicons name="lock-closed-outline" size={14} color={colors.textSecondary} />
+                <RNText style={{ flex: 1, color: colors.textSecondary, fontSize: 13, textAlign: 'center', fontWeight: '500' }}>{MESSAGING_DISABLED_MESSAGE}</RNText>
+              </View>
+            ) : (
+              <>
+                <TextInput
+                  style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, maxHeight: 100, backgroundColor: colors.bgSecondary, color: colors.textPrimary }}
+                  placeholder="Message..."
+                  placeholderTextColor={colors.textSecondary}
+                  value={draft}
+                  onChangeText={setDraft}
+                  multiline
+                  maxLength={1000}
+                  onSubmitEditing={send}
+                />
+                <TouchableOpacity
+                  style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', opacity: (!draft.trim() || sending) ? 0.45 : 1 }}
+                  onPress={send}
+                  disabled={!draft.trim() || sending}
+                >
+                  {sending ? <ActivityIndicator size="small" color={colors.textInverse} /> : <Ionicons name="send" size={18} color={colors.textInverse} />}
+                </TouchableOpacity>
+              </>
+            )}
           </View>
 
         </KeyboardAvoidingView>
@@ -1873,11 +1910,31 @@ function RiderProfileReferenceInner() {
   const uid = firebaseAuth.currentUser?.uid;
   const [profile, setProfile] = useState<RiderProfile | null>(null);
   const [requests, setRequests] = useState<MobileRideRequest[]>([]);
+  const [completedRides, setCompletedRides] = useState(0);
   const [roleActionLoading, setRoleActionLoading] = useState(false);
   useEffect(() => uid ? subscribeRiderProfile(uid, setProfile) : undefined, [uid]);
   useEffect(() => uid ? subscribeRiderRequests(uid, setRequests) : undefined, [uid]);
+  // Count completed rides from confirmedRides — must query both riderId and userId fields
+  useEffect(() => {
+    if (!uid) return;
+    const isCompleted = (d: any) => ['COMPLETED', 'COMPLETE', 'FINISHED'].includes(String(d.data()?.status || '').toUpperCase());
+    const seen = new Set<string>();
+    let byRider: string[] = [];
+    let byUser: string[] = [];
+    const merge = () => {
+      seen.clear();
+      [...byRider, ...byUser].forEach((id) => seen.add(id));
+      setCompletedRides(seen.size);
+    };
+    const unsubA = onSnapshot(query(collection(firestore, 'confirmedRides'), where('riderId', '==', uid)), (snap) => {
+      byRider = snap.docs.filter(isCompleted).map((d) => d.id); merge();
+    }, () => {});
+    const unsubB = onSnapshot(query(collection(firestore, 'confirmedRides'), where('userId', '==', uid)), (snap) => {
+      byUser = snap.docs.filter(isCompleted).map((d) => d.id); merge();
+    }, () => {});
+    return () => { unsubA(); unsubB(); };
+  }, [uid]);
   const initials = (profile?.displayName || firebaseAuth.currentUser?.email || 'RA').split(/\s+|@/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
-  const completedRides = requests.filter((request) => ['completed', 'complete', 'finished'].includes(request.status)).length;
   const cancelledRides = requests.filter((request) => ['cancelled', 'canceled', 'declined', 'rejected'].includes(request.status)).length;
 
   const hasDriverAccount = role === 'both';
@@ -1919,7 +1976,7 @@ function RiderProfileReferenceInner() {
       <View style={s.profileActivity}>
         <View style={s.profileActivityItem}><Text style={s.profileActivityValue}>{completedRides}</Text><Text style={s.profileActivityLabel}>Completed</Text></View>
         <View style={s.profileActivityDivider} />
-        <View style={s.profileActivityItem}><Text style={s.profileActivityValue}>{requests.length}</Text><Text style={s.profileActivityLabel}>Posted</Text></View>
+        <View style={s.profileActivityItem}><Text style={s.profileActivityValue}>{completedRides + cancelledRides}</Text><Text style={s.profileActivityLabel}>Total</Text></View>
         <View style={s.profileActivityDivider} />
         <View style={s.profileActivityItem}><Text style={[s.profileActivityValue, cancelledRides > 0 && s.profileActivityCancelled]}>{cancelledRides}</Text><Text style={s.profileActivityLabel}>Cancelled</Text></View>
       </View>
@@ -2284,8 +2341,8 @@ function RiderPaymentMethodsReferenceInner() {
         onPress: async () => {
           try {
             await removePaymentMethod(uid, paymentMethodId);
-          } catch {
-            Alert.alert('Unable to remove card', 'Please try removing this card again.');
+          } catch (error: any) {
+            Alert.alert('Unable to remove card', error?.message || 'Please try removing this card again.');
           }
         },
       },
@@ -2790,6 +2847,7 @@ function makeStyles(colors: any) {
   messageName: { flex: 1, color: colors.textPrimary, fontSize: 16, fontWeight: '600' },
   messagePreview: { color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginTop: 2, fontWeight: '600' },
   newBadge: { color: colors.primary, backgroundColor: colors.primaryDim, overflow: 'hidden', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3, fontFamily: FONT_MONO, fontSize: 9, fontWeight: '700' },
+  closedBadge: { color: colors.textSecondary, backgroundColor: colors.bgSecondary, overflow: 'hidden', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3, fontFamily: FONT_MONO, fontSize: 9, fontWeight: '700' },
   chatInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   chatInput: { fontFamily: FONT_SANS, flex: 1, minHeight: 48, borderRadius: 24, backgroundColor: colors.bgSecondary, paddingHorizontal: 16, color: colors.textPrimary, fontSize: 15 },
   sendBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },

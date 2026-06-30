@@ -39,6 +39,8 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { DriverBottomNav } from '@/components/DriverBottomNav';
 import { DriverHomeUtilityBar } from '@/components/reference/DriverReferenceScreens';
 import { DatePickerModal, TimePickerModal, formatDateLabel } from '@/components/DateTimePickerModals';
+import { createRoleNotification } from '@/src/services/notificationRecords';
+import { getOrCreateRideChat } from '@/src/services/chatAvailability';
 
 // ─── Design Tokens (rider palette) ───────────────────────────────────────────
 const confirmationRepairs = new Set<string>();
@@ -347,7 +349,7 @@ function DriverHomePostRideCard() {
   );
 }
 
-function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRideCard; hasOfferReceived?: boolean }) {
+function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled }: { ride: UpcomingRideCard; hasOfferReceived?: boolean; seatsFilled?: number }) {
   const { colors } = useAppTheme();
   const s = useDriverHomeStyles();
   const [pickingUp,   setPickingUp]   = React.useState(false);
@@ -360,31 +362,60 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
   const isConfirmed     = isConfirmedOnly || isInProgress;
   const isOfferSent     = rawStatus.includes('offer') || rawStatus === 'sent';
   const isPosting       = ride.type === 'ridePosting';
+  const seatCount       = ride.seatCount ?? 1;
+  const isWaitingForSeats = rawStatus === 'pending' && isPosting && seatCount > 1;
+  // For a group ride, status stays IN_PROGRESS until every rider confirms arrival —
+  // only show "Complete Ride" while at least one passenger hasn't been driver-completed yet.
+  const groupPassengers = ride.type === 'groupRide' && Array.isArray((ride as any).passengers) ? (ride as any).passengers : null;
+  const needsGroupComplete = groupPassengers
+    ? groupPassengers.some((p: any) => String(p?.status || '').toUpperCase() !== 'COMPLETED' && p?.driverCompleteConfirmed !== true)
+    : true;
+  const groupWaitingCount = groupPassengers
+    ? groupPassengers.filter((p: any) => String(p?.status || '').toUpperCase() !== 'COMPLETED' && p?.driverCompleteConfirmed === true).length
+    : 0;
 
   const statusLabel = isInProgress ? 'IN PROGRESS'
     : isConfirmedOnly ? 'CONFIRMED'
+    : isWaitingForSeats ? 'WAITING FOR PASSENGERS'
     : (isPosting && hasOfferReceived) ? 'REQUEST RECEIVED'
     : isOfferSent ? 'OFFER SENT'
     : prettyStatus(rawStatus).toUpperCase();
   const statusColor = isInProgress ? colors.primary
     : isConfirmedOnly ? '#16A34A'
+    : isWaitingForSeats ? '#D97706'
     : (isPosting && hasOfferReceived) ? '#D97706'
     : isOfferSent ? colors.primary
     : colors.textSecondary;
   const statusBg    = isInProgress ? 'rgba(222,93,32,0.08)'
     : isConfirmedOnly ? '#EDFAF3'
+    : isWaitingForSeats ? 'rgba(245,158,11,0.12)'
     : (isPosting && hasOfferReceived) ? 'rgba(245,158,11,0.12)'
     : isOfferSent ? 'rgba(222,93,32,0.08)'
     : '#F1F3F6';
 
+  // Group rides have no single confirmedId of their own — borrow one of the
+  // child confirmedRides (the live trip view is the same posting/route for both).
+  const groupRideTripId = ride.type === 'groupRide'
+    ? (Array.isArray((ride as any).passengers) ? (ride as any).passengers[0]?.confirmedId : undefined)
+    : undefined;
+
   const openRequest = () => {
-    if (ride.type === 'ridePosting') router.push('/(driver)/my-postings' as any);
+    if (ride.type === 'ridePosting' || ride.type === 'groupRide') router.push('/(driver)/my-postings' as any);
     else router.push({ pathname: '/(driver)/request/[id]', params: { id: ride.id, returnTo: '/(driver)' } } as any);
   };
 
   const handlePickup = async () => {
     setPickingUp(true);
     try {
+      // A fully-confirmed multi-seat posting aggregates into a 'groupRide' card with
+      // no single confirmedId — pick up all child confirmedRides via the posting instead.
+      if (ride.type === 'groupRide') {
+        const result = await groupPickup(ride.ridePostingId || ride.id);
+        if (result.ok && result.confirmedRideIds[0]) {
+          router.push(('/(driver)/trip/' + result.confirmedRideIds[0]) as any);
+        }
+        return;
+      }
       const pickedUp = await actionConfirmPickup({
         confirmedId: ride.confirmedId,
         rideRequestId: ride.type === 'rideRequest' ? ride.id : undefined,
@@ -400,6 +431,16 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
   };
 
   const handleComplete = async () => {
+    if (ride.type === 'groupRide') {
+      setCompleting(true);
+      try {
+        await groupComplete(ride.ridePostingId || ride.id);
+      } finally {
+        setCompleting(false);
+      }
+      return;
+    }
+
     const confirmedId = ride.confirmedId;
     if (!confirmedId) return;
 
@@ -446,20 +487,6 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
     doComplete();
   };
 
-  const openChat = async () => {
-    // Chats are keyed by confirmedRides doc ID (rideId field), created by Cloud Function on confirmation
-    const confirmedId = ride.confirmedId || (isConfirmed ? ride.id : null);
-    if (!confirmedId) { Alert.alert('Not available', 'The chat opens once the ride is confirmed.'); return; }
-    try {
-      const chatSnap = await getDocs(query(collection(firestore, 'chats'), where('rideId', '==', confirmedId)));
-      if (!chatSnap.empty) {
-        router.push(`/(driver)/messages/${chatSnap.docs[0].id}` as any);
-      } else {
-        Alert.alert('Not available', 'The chat will be available shortly after confirmation.');
-      }
-    } catch { Alert.alert('Error', 'Could not open chat. Please try again.'); }
-  };
-
   return (
     <View style={[s.driverActivityCard, { minHeight: undefined }]}>
       {/* Status row */}
@@ -469,6 +496,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
           <Text style={{ color: statusColor, fontSize: 11, fontWeight: '800', letterSpacing: 0.5 }}>{statusLabel}</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {seatCount > 1 ? <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '700' }}>{seatsFilled ?? 0}/{seatCount} seats</Text> : null}
           {ride.priceText ? <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '800' }}>{ride.priceText}</Text> : null}
           {isConfirmed && ride.confirmedId ? (
             <TouchableOpacity onPress={() => setFlagVisible(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -479,7 +507,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
       </View>
 
       {/* Route */}
-      <TouchableOpacity activeOpacity={0.7} onPress={isInProgress && ride.confirmedId ? () => router.push(`/(driver)/trip/${ride.confirmedId}` as any) : openRequest}>
+      <TouchableOpacity activeOpacity={0.7} onPress={isInProgress && (ride.confirmedId || groupRideTripId) ? () => router.push(`/(driver)/trip/${ride.confirmedId || groupRideTripId}` as any) : openRequest}>
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <View style={{ alignItems: 'center', paddingTop: 4, gap: 4 }}>
             <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: colors.textPrimary }} />
@@ -496,15 +524,6 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
 
       {/* Actions */}
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
-        {ride.riderId && (
-          <TouchableOpacity
-            style={{ flex: 1, backgroundColor: colors.bgSecondary, borderRadius: 20, paddingVertical: 10, alignItems: 'center' }}
-            onPress={openChat}
-            activeOpacity={0.75}
-          >
-            <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: '700' }}>Message Rider</Text>
-          </TouchableOpacity>
-        )}
         {isConfirmedOnly && (
           <TouchableOpacity
             style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: pickingUp ? 0.6 : 1 }}
@@ -517,7 +536,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
               : <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>Pick Up</Text>}
           </TouchableOpacity>
         )}
-        {isInProgress && (
+        {isInProgress && needsGroupComplete && (
           <TouchableOpacity
             style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: completing ? 0.6 : 1 }}
             onPress={handleComplete}
@@ -528,6 +547,11 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
               ? <ActivityIndicator size="small" color="#FFF" />
               : <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>Complete Ride</Text>}
           </TouchableOpacity>
+        )}
+        {isInProgress && !needsGroupComplete && (
+          <View style={{ flex: 1, alignItems: 'center', paddingVertical: 10 }}>
+            <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '600' }}>Waiting for {groupWaitingCount} rider{groupWaitingCount === 1 ? '' : 's'} to confirm…</Text>
+          </View>
         )}
         {!isConfirmedOnly && !isInProgress && (
           <TouchableOpacity
@@ -555,7 +579,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived }: { ride: UpcomingRide
 
 type UpcomingRideCard = {
   id: string;
-  type: 'ride' | 'rideRequest' | 'ridePostingRequest' | 'ridePosting';
+  type: 'ride' | 'rideRequest' | 'ridePostingRequest' | 'ridePosting' | 'groupRide';
   status: string;
   from?: string;
   to?: string;
@@ -582,6 +606,7 @@ type UpcomingRideCard = {
   riderAvatarUrl?: string | null;
   riderRating?: number | null;
   raw?: Record<string, any>;
+  passengers?: Array<{ confirmedId: string; riderId?: string; name?: string; status: string; driverCompleteConfirmed?: boolean; [key: string]: any }>;
 };
 
 type OfferInfo = {
@@ -684,7 +709,6 @@ export default function HomeScreen() {
   const [rideActionLoading, setRideActionLoading] = useState<Record<string, boolean>>({});
   const [waitingAfterComplete, setWaitingAfterComplete] = useState<Record<string, boolean>>({});
   const [waitingAfterPickup, setWaitingAfterPickup] = useState<Record<string, boolean>>({});
-  const [waitingGroupAfterComplete, setWaitingGroupAfterComplete] = useState<Record<string, boolean>>({});
   // Maintain per-source maps so deletions are reflected (no stale cards)
   const [upcReqDriver, setUpcReqDriver] = useState<Record<string, UpcomingRideCard>>({});
   const [upcReqUserId, setUpcReqUserId] = useState<Record<string, UpcomingRideCard>>({});
@@ -841,25 +865,43 @@ export default function HomeScreen() {
 
   // Open chat for a specific ride card
   const openChatForRide = async (card: UpcomingRideCard) => {
-    // Find existing chat based on confirmedId (rideId in chats collection)
-    const confirmedId = card.confirmedId || card.id;
-    if (!confirmedId || !uid) return;
-    
+    if (!uid) return;
+    const confirmedId = card.confirmedId;
+    const riderId = card.riderId;
+    if (!riderId) { router.push('/(driver)/messages'); return; }
+    // Reuse the same thread the rider already started when they messaged from the
+    // request page — that chat is keyed by ridePostingRequestId, not confirmedId.
+    const ridePostingRequestId = card.raw?.ridePostingRequestId || null;
     try {
-      const chatsRef = collection(firestore, 'chats');
-      const q = query(chatsRef, where('rideId', '==', confirmedId));
-      const snapshot = await getDocs(q);
-      
-      if (!snapshot.empty) {
-        // Navigate to existing chat
-        const chatId = snapshot.docs[0].id;
-        router.push({ pathname: '/(driver)/messages/[chatId]', params: { chatId, returnTo: '/(driver)' } } as any);
-      } else {
-        // Navigate to messages tab - chat will be auto-created when first message is sent
-        router.push('/(driver)/messages');
-      }
-    } catch (error) {
-      console.error('Error finding chat:', error);
+      const chatId = await getOrCreateRideChat({
+        context: ridePostingRequestId ? 'booking-request' : 'confirmed-ride',
+        rideId: confirmedId || card.id,
+        driverId: uid,
+        riderId,
+        ridePostingId: card.ridePostingId || null,
+        ridePostingRequestId,
+      });
+      router.push({ pathname: '/(driver)/messages/[chatId]', params: { chatId, returnTo: '/(driver)' } } as any);
+    } catch {
+      router.push('/(driver)/messages');
+    }
+  };
+
+  // Message a single passenger on a group ride — reuses their existing thread
+  // (keyed by ridePostingRequestId) instead of creating a new one per tap.
+  const messagePassenger = async (p: any, ridePostingId?: string | null) => {
+    if (!uid || !p?.riderId) return;
+    try {
+      const chatId = await getOrCreateRideChat({
+        context: p.ridePostingRequestId ? 'booking-request' : 'confirmed-ride',
+        rideId: p.confirmedId,
+        driverId: uid,
+        riderId: p.riderId,
+        ridePostingId: ridePostingId || null,
+        ridePostingRequestId: p.ridePostingRequestId || null,
+      });
+      router.push({ pathname: '/(driver)/messages/[chatId]', params: { chatId, returnTo: '/(driver)' } } as any);
+    } catch {
       router.push('/(driver)/messages');
     }
   };
@@ -1658,7 +1700,9 @@ export default function HomeScreen() {
           if (r.ridePostingId) postMap[String(r.ridePostingId)] = true;
           if (isHistoryOnly) {
             if (r.rideRequestId) historyOnlyKeys.add(`rideRequest:${String(r.rideRequestId)}`);
-            if (r.ridePostingId) historyOnlyKeys.add(`ridePosting:${String(r.ridePostingId)}`);
+            // Posting-level history-only is decided after the loop, once every
+            // sibling seat on the posting is known (a multi-seat group ride must
+            // stay visible until ALL passengers are completed, not just one).
             if (r.ridePostingRequestId) historyOnlyKeys.add(`ridePostingRequest:${String(r.ridePostingRequestId)}`);
           }
           // Accumulate by posting for potential group ride aggregation
@@ -1727,6 +1771,13 @@ export default function HomeScreen() {
               raw: r,
             };
           } else if (r.ridePostingId) {
+            const seatCount = Number(
+              r?.totalSeats
+              ?? r?.originalRidePosting?.seatsAvailable
+              ?? r?.originalRidePosting?.seats
+              ?? r?.originalRidePosting?.availableSeats
+              ?? 1
+            ) || 1;
             cards[`ridePosting-${String(r.ridePostingId)}`] = {
               id: String(r.ridePostingId),
               type: 'ridePosting',
@@ -1742,14 +1793,36 @@ export default function HomeScreen() {
               riderId: r.riderId || r.userId || r.requesterId || r.ownerId || r.user?.id,
         confirmedDriverComplete: r.driverCompleteConfirmed === true,
               confirmedDriverPickup: r.driverPickupConfirmed === true,
+              seatCount,
               raw: r,
             };
           }
         });
+        // Now that every sibling seat for each posting is known, decide history-only
+        // status per-posting (not per-doc) — a group ride stays visible until ALL
+        // its passengers are completed, not just the first one to finish.
+        Object.entries(groupBuckets).forEach(([pid, items]) => {
+          const allDocsCompleted = items.every(({ data }) => {
+            const s = String(data?.status || '').toUpperCase();
+            const saf = String(data?.statusAtFlag || data?.statusBeforeFlag || data?.flaggedFromStatus || data?.previousStatus || '').replace(/[-\s]/g, '_').toUpperCase();
+            return s === 'COMPLETED' || (s === 'FLAGGED' && saf === 'COMPLETED');
+          });
+          if (allDocsCompleted) {
+            historyOnlyKeys.add(`ridePosting:${pid}`);
+            cards[`ridePosting-${pid}`] = {
+              id: pid, type: 'ridePosting',
+              status: 'completed', confirmedStatus: 'COMPLETED',
+              from: '', to: '', confirmedId: items[0].id,
+            } as any;
+          }
+        });
         // Aggregate group rides (2+ seats) into a single card per posting as soon as first passenger is confirmed
         Object.entries(groupBuckets).forEach(([pid, items]) => {
+          // totalSeats is the canonical field the server writes on every confirmedRide
+          // doc; the others are legacy/client-only fallbacks for older records.
           const seatCount = Number(
-            items?.[0]?.data?.originalRidePosting?.seatsAvailable
+            items?.[0]?.data?.totalSeats
+            || items?.[0]?.data?.originalRidePosting?.seatsAvailable
             || items?.[0]?.data?.originalRidePosting?.seats
             || items?.[0]?.data?.seatsAvailable
             || items?.[0]?.data?.seats
@@ -1790,8 +1863,6 @@ export default function HomeScreen() {
               return (raw === 'DRIVER_COMPLETED' || raw === 'RIDER_COMPLETED') ? 'IN_PROGRESS' : raw;
             });
             const allConfirmed = childStatuses.every((s) => s === 'CONFIRMED');
-            const anyConfirmed = childStatuses.some((s) => s === 'CONFIRMED');
-            const anyPending = childStatuses.some((s) => s === 'PENDING');
             const anyInProgress = childStatuses.some((s) => s === 'IN_PROGRESS');
             const allCompleted = childStatuses.every((s) => s === 'COMPLETED');
             const anyFlagged = childStatuses.some((s) => s === 'FLAGGED');
@@ -1811,7 +1882,7 @@ export default function HomeScreen() {
                 ? 'COMPLETED'
                 : anyInProgress
                   ? 'IN_PROGRESS'
-                  : (allConfirmed || anyConfirmed || anyPending)
+                  : allConfirmed
                     ? 'CONFIRMED'
                     : 'PENDING';
             // Remove individual posting/request cards for this posting once group view is available
@@ -1840,6 +1911,8 @@ export default function HomeScreen() {
                 : (typeof it.data?.rating === 'number') ? it.data.rating
                 : null,
               paymentCaptured: it.data?.paymentCaptured === true,
+              driverCompleteConfirmed: it.data?.driverCompleteConfirmed === true,
+              ridePostingRequestId: it.data?.ridePostingRequestId || null,
             }));
             (cards as any)[`groupRide-${pid}`] = {
               id: String(pid),
@@ -2246,12 +2319,6 @@ export default function HomeScreen() {
           if (typeof v === 'string') { const d = new Date(v); return isNaN(d.getTime()) ? null : d; }
           return null;
         };
-        const toNum = (v: any): number => {
-          if (typeof v === 'number') return v;
-          if (typeof v === 'string') { const n = Number(v.replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; }
-          return 0;
-        };
-
         const snap = await getDocs(query(
           collection(firestore, 'confirmedRides'),
           where('driverId', '==', uid),
@@ -2259,7 +2326,6 @@ export default function HomeScreen() {
         ));
 
         let rides = 0;
-        let earnings = 0;
         const monthlyRideIds: string[] = [];
 
         snap.forEach((d) => {
@@ -2268,9 +2334,6 @@ export default function HomeScreen() {
           if (!rideDate || rideDate < startOfMonth) return;
           rides++;
           monthlyRideIds.push(d.id);
-          const raw = r.paymentAmount ?? r.contributionAmount ?? r.price ?? r.fare
-            ?? r.originalRidePosting?.pricePerSeat ?? r.originalRideRequest?.maxPrice ?? 0;
-          earnings += toNum(raw);
         });
 
         // Fetch ratings for this month's rides
@@ -2296,7 +2359,7 @@ export default function HomeScreen() {
           }
         }
 
-        if (mounted) setMonthlyStats({ rides, earnings, rating: monthlyRating, loaded: true });
+        if (mounted) setMonthlyStats((current) => ({ ...current, rides, rating: monthlyRating, loaded: true }));
       } catch {
         if (mounted) setMonthlyStats((s) => ({ ...s, loaded: true }));
       }
@@ -2690,7 +2753,7 @@ export default function HomeScreen() {
         totalSeats,
         seatsTaken,
         seatsRemaining,
-        status: 'CONFIRMED',
+        status: (result.rideFull ?? seatsTaken >= totalSeats) ? 'CONFIRMED' : 'PENDING',
         source: 'mobile:accept-posting-request',
         originalRidePosting: post || null,
         originalRidePostingRequest: { id: requestId, ...r },
@@ -2706,6 +2769,20 @@ export default function HomeScreen() {
         acceptedBy: uid,
         updatedAt: serverTimestamp(),
       });
+      await createRoleNotification({
+        recipientId: String(riderId),
+        recipientRole: 'rider',
+        type: 'ride_accepted',
+        title: 'Your ride is confirmed',
+        message: `${driverName || 'Your driver'} accepted your ride request.`,
+        driverId: uid,
+        riderId: String(riderId),
+        rideId: confirmedId,
+        confirmedRideId: confirmedId,
+        ridePostingId: String(postingId),
+        ridePostingRequestId: requestId,
+        dedupeId: `confirmed-${confirmedId}-rider`,
+      }).catch(() => {});
 
       setConfirmedCountByPostingId((prev) => ({
         ...prev,
@@ -3215,12 +3292,42 @@ export default function HomeScreen() {
   }, [driverLocation, liveRequestMarkers]);
 
   const firstName = userName ? capitalize(userName) : 'Driver';
+  const postAgainRoutes = useMemo(() => {
+    const routeText = (v: any): string => {
+      if (typeof v === 'string') return v.trim();
+      if (v && typeof v === 'object') {
+        const c = v.address || v.description || v.name || v.formattedAddress || v.fullAddress;
+        return typeof c === 'string' ? c.trim() : '';
+      }
+      return '';
+    };
+    const byKey = new Map<string, { from: string; to: string; meta: string; updatedAt: number }>();
+    recentConfirmed.forEach((cr) => {
+      const from = routeText(cr.pickup);
+      const to = routeText(cr.dropoff);
+      if (!from || !to) return;
+      const key = `${from.toLowerCase()}::${to.toLowerCase()}`;
+      if (!byKey.has(key)) {
+        const ts = (cr as any).completedAt?.toMillis?.() || (cr as any).completedAt?.toDate?.()?.getTime?.() || 0;
+        byKey.set(key, { from, to, meta: 'Driven before', updatedAt: ts });
+      }
+    });
+    return Array.from(byKey.values())
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, 3);
+  }, [recentConfirmed]);
+
   const driverHeroPrompt = useMemo(() => {
     const next = displayUpcoming[0];
     if (!next) return 'where to?';
 
     const status = String(next.confirmedStatus || next.status || '').toLowerCase();
     if (status.includes('progress') || status.includes('driver_completed') || status.includes('rider_completed')) return 'your ride is in progress.';
+    if (status === 'pending' && next.type === 'ridePosting' && (next.seatCount ?? 1) > 1) {
+      const filled = confirmedCountByPostingId[next.id] || 0;
+      const remaining = (next.seatCount ?? 1) - filled;
+      return remaining > 0 ? `${remaining} seat${remaining === 1 ? '' : 's'} left!` : 'waiting for passengers!';
+    }
     if (status.includes('confirmed')) return 'your ride has been confirmed!';
     if (next.type === 'ridePosting') {
       return postingReqByPostingId[next.id] ? 'you received a request!' : 'your ride is posted.';
@@ -3229,7 +3336,7 @@ export default function HomeScreen() {
     if (next.type === 'ridePostingRequest' || status.includes('offer') || status.includes('pending')) return 'you have a ride request!';
 
     return 'your next ride is coming up.';
-  }, [displayUpcoming, postingReqByPostingId]);
+  }, [displayUpcoming, postingReqByPostingId, confirmedCountByPostingId]);
 
   if (loading) {
     return (
@@ -3285,6 +3392,7 @@ export default function HomeScreen() {
                     ? !!postingReqByPostingId[displayUpcoming[0].id]
                     : false
                 }
+                seatsFilled={confirmedCountByPostingId[displayUpcoming[0].id]}
               />
             ) : (
               <DriverHomePostRideCard />
@@ -3546,7 +3654,10 @@ export default function HomeScreen() {
                 const isGrpInProgress = aggStatus === 'IN_PROGRESS';
                 const isGrpFlagged = aggStatus === 'FLAGGED';
                 const passengers: Array<any> = Array.isArray(gr.passengers) ? gr.passengers : [];
-                const waitingCount = passengers.filter((p) => String(p?.status || '').toUpperCase() !== 'COMPLETED').length;
+                // Distinguish "driver hasn't tapped Complete yet" from "driver completed,
+                // waiting on this rider to confirm arrival" — both look like status IN_PROGRESS.
+                const needsDriverComplete = passengers.filter((p) => String(p?.status || '').toUpperCase() !== 'COMPLETED' && p?.driverCompleteConfirmed !== true).length;
+                const waitingCount = passengers.filter((p) => String(p?.status || '').toUpperCase() !== 'COMPLETED' && p?.driverCompleteConfirmed === true).length;
                 const allCompleted = passengers.length > 0 && passengers.every((p) => String(p?.status || '').toUpperCase() === 'COMPLETED');
                 const badge = isGrpFlagged
                   ? { bg: 'rgba(239,68,68,0.15)', txt: colors.red,   label: 'Flagged' }
@@ -3591,11 +3702,21 @@ export default function HomeScreen() {
                             <Ionicons name="flag" size={16} color={colors.red} />
                           </TouchableOpacity>
                         )}
-                        {aggStatus === 'CONFIRMED' && !waitingGroupAfterComplete[postingId] && (
-                          <Button size="sm" variant="primary" onPress={async () => { try { await groupPickup(postingId); } catch {} }}>Pick Up</Button>
+                        {aggStatus === 'CONFIRMED' && (
+                          <Button size="sm" variant="primary" onPress={async () => {
+                            try {
+                              const result = await groupPickup(postingId);
+                              if (result.ok && result.confirmedRideIds[0]) {
+                                router.push(('/(driver)/trip/' + result.confirmedRideIds[0]) as any);
+                              }
+                            } catch {}
+                          }}>Pick Up</Button>
                         )}
-                        {aggStatus === 'IN_PROGRESS' && !waitingGroupAfterComplete[postingId] && (
-                          <Button size="sm" variant="primary" onPress={async () => { try { await groupComplete(postingId); setWaitingGroupAfterComplete((m) => ({ ...m, [postingId]: true })); } catch {} }}>Complete Ride</Button>
+                        {isGrpInProgress && passengers[0]?.confirmedId && (
+                          <Button size="sm" variant="secondary" onPress={() => router.push(('/(driver)/trip/' + passengers[0].confirmedId) as any)}>Live View</Button>
+                        )}
+                        {aggStatus === 'IN_PROGRESS' && needsDriverComplete > 0 && (
+                          <Button size="sm" variant="primary" onPress={async () => { try { await groupComplete(postingId); } catch {} }}>Complete Ride</Button>
                         )}
                         {allCompleted && (
                           <Button size="sm" variant="primary" onPress={async () => {
@@ -3608,8 +3729,8 @@ export default function HomeScreen() {
                           }}>Capture Payments</Button>
                         )}
                       </View>
-                      {(waitingGroupAfterComplete[postingId] || (aggStatus === 'IN_PROGRESS' && waitingCount > 0)) && (
-                        <Text style={s.waitingText}>Waiting for {waitingCount} rider(s) to confirm…</Text>
+                      {aggStatus === 'IN_PROGRESS' && waitingCount > 0 && (
+                        <Text style={s.waitingText}>Waiting for {waitingCount} rider{waitingCount === 1 ? '' : 's'} to confirm…</Text>
                       )}
                     </View>
                   </View>
@@ -3763,11 +3884,61 @@ export default function HomeScreen() {
           </View>}
 
           {/* ══════════════════════════════════════════════════════════
+              POST AGAIN
+          ══════════════════════════════════════════════════════════ */}
+          <View style={[s.section, { marginBottom: 8 }]}>
+            <View style={s.sectionHdrRow}>
+              <Text style={s.sectionTitle}>{postAgainRoutes.length > 0 ? 'Post again' : 'Start here'}</Text>
+              <TouchableOpacity onPress={() => router.push('/(driver)/book' as any)}>
+                <Text style={s.viewAll}>Post a ride</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ gap: 8 }}>
+              {postAgainRoutes.length > 0 ? postAgainRoutes.map((route, idx) => (
+                <TouchableOpacity
+                  key={idx}
+                  style={[s.rideCard, { padding: 14 }]}
+                  onPress={() => router.push({ pathname: '/(driver)/book', params: { pickup: route.from, dropoff: route.to } } as any)}
+                  activeOpacity={0.75}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="refresh-outline" size={18} color={colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textPrimary }} numberOfLines={1}>{route.from} → {route.to}</Text>
+                      <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>{route.meta}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                  </View>
+                </TouchableOpacity>
+              )) : (
+                <TouchableOpacity
+                  style={[s.rideCard, { padding: 14 }]}
+                  onPress={() => router.push('/(driver)/book' as any)}
+                  activeOpacity={0.75}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textPrimary }}>Post your first ride</Text>
+                      <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>Riders near you are looking for drivers</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                  </View>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          {/* ══════════════════════════════════════════════════════════
               THIS MONTH SUMMARY
           ══════════════════════════════════════════════════════════ */}
           <View style={[s.section, { marginBottom: 8 }]}>
             <View style={s.sectionHdrRow}>
-              <Text style={s.sectionTitle}>This month</Text>
+              <Text style={s.sectionTitle}>Driver summary</Text>
               <TouchableOpacity onPress={() => router.push('/(driver)/earnings' as any)}>
                 <Text style={s.viewAll}>View earnings</Text>
               </TouchableOpacity>
@@ -3781,7 +3952,7 @@ export default function HomeScreen() {
                   <Text style={s.monthStatValue}>
                     {monthlyStats.loaded ? String(monthlyStats.rides) : '—'}
                   </Text>
-                  <Text style={s.monthStatLabel}>Rides</Text>
+                  <Text style={s.monthStatLabel}>Month rides</Text>
                 </View>
                 <View style={s.monthDivider} />
                 <View style={s.monthStat}>
@@ -3789,9 +3960,9 @@ export default function HomeScreen() {
                     <Ionicons name="cash-outline" size={18} color={colors.primary} />
                   </View>
                   <Text style={s.monthStatValue}>
-                    {monthlyStats.loaded ? `$${Math.round(monthlyStats.earnings)}` : '—'}
+                    {monthlyStats.loaded ? `$${Math.round(stats.totalEarnings)}` : '—'}
                   </Text>
-                  <Text style={s.monthStatLabel}>Earned</Text>
+                  <Text style={s.monthStatLabel}>Total earned</Text>
                 </View>
                 <View style={s.monthDivider} />
                 <View style={s.monthStat}>
@@ -3801,7 +3972,7 @@ export default function HomeScreen() {
                   <Text style={s.monthStatValue}>
                     {monthlyStats.loaded ? (monthlyStats.rating != null ? monthlyStats.rating.toFixed(1) : '—') : '—'}
                   </Text>
-                  <Text style={s.monthStatLabel}>Rating</Text>
+                  <Text style={s.monthStatLabel}>Month rating</Text>
                 </View>
               </View>
               {monthlyStats.loaded && monthlyStats.rides === 0 && (
@@ -3918,6 +4089,12 @@ export default function HomeScreen() {
                                 </View>
                               </View>
                               <TouchableOpacity
+                                style={[s.callBtn, { backgroundColor: colors.bgSecondary, marginRight: 8 }]}
+                                onPress={() => messagePassenger(p, (selectedRide as any)?.ridePostingId || (selectedRide as any)?.id)}
+                              >
+                                <Ionicons name="chatbubble" size={18} color={colors.primary} />
+                              </TouchableOpacity>
+                              <TouchableOpacity
                                 style={[s.callBtn, { backgroundColor: p?.phone ? colors.primary : colors.bgSecondary }]}
                                 disabled={!p?.phone}
                                 onPress={() => p?.phone && Linking.openURL(`tel:${String(p.phone).replace(/[^0-9+]/g, '')}`).catch(() => {})}
@@ -3949,6 +4126,12 @@ export default function HomeScreen() {
                                   <Text style={s.passengerRating}>{typeof modalRider?.rating === 'number' ? modalRider.rating.toFixed(1) : '—'}</Text>
                                 </View>
                               </View>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[s.callBtn, { backgroundColor: colors.bgSecondary, marginRight: 8 }]}
+                              onPress={() => openChatForRide(selectedRide as UpcomingRideCard)}
+                            >
+                              <Ionicons name="chatbubble" size={18} color={colors.primary} />
                             </TouchableOpacity>
                             <TouchableOpacity
                               style={[s.callBtn, { backgroundColor: phone ? colors.primary : colors.bgSecondary }]}
@@ -4162,7 +4345,7 @@ async function ensureAcceptedPostingRequestConfirmation(requestId: string, reque
     const riderId = request.riderId || request.userId || request.requesterId || request.ownerId;
     if (!riderId) throw new Error('Accepted request is missing riderId');
 
-    const totalSeats = Number(posting.seatsAvailable ?? posting.totalSeats ?? posting.seats ?? 1) || 1;
+    const totalSeats = Number(posting.seatsAvailable ?? posting.totalSeats ?? posting.seats ?? posting.availableSeats ?? 1) || 1;
     const seatsTaken = Number(posting.seatsTaken ?? request.passengers ?? 1) || 1;
     const payload = deepClean({
       ridePostingRequestId: requestId,
@@ -4187,8 +4370,8 @@ async function ensureAcceptedPostingRequestConfirmation(requestId: string, reque
       paymentStatus: request.paymentStatus || 'authorized',
       totalSeats,
       seatsTaken,
-      seatsRemaining: Math.max(0, Number(posting.availableSeats ?? (totalSeats - seatsTaken)) || 0),
-      status: 'CONFIRMED',
+      seatsRemaining: Math.max(0, Number(totalSeats - seatsTaken) || 0),
+      status: seatsTaken >= totalSeats ? 'CONFIRMED' : 'PENDING',
       source: 'mobile:repair-accepted-posting-request',
       originalRidePosting: posting,
       originalRidePostingRequest: { id: requestId, ...request },

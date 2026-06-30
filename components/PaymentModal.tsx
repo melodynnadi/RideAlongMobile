@@ -238,12 +238,27 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
     try {
       setErrorMsg(null);
       setConfirming(true);
+
+      // Cancel any PI left over from a previous failed attempt before creating a new one
+      if (pendingIntentId) {
+        fetch(`${baseUrl}/api/payments/cancel-intent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paymentIntentId: pendingIntentId }),
+        }).catch(() => {});
+        setPendingIntentId(null);
+      }
       if (!selectedMethod) {
         Alert.alert('Select a method', 'Please select a payment method.');
         return;
       }
       if (!riderId) {
         Alert.alert('Sign in required', 'Please sign in to continue.');
+        return;
+      }
+      if (driverId && riderId === driverId) {
+        Alert.alert('Not allowed', 'You cannot request your own ride posting.');
+        onClose();
         return;
       }
 
@@ -257,7 +272,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
         );
         const dupSnap = await getDocs(dupQuery);
         const hasPendingOrAccepted = dupSnap.docs.some(d => {
-          const status = d.data()?.status;
+          const status = String(d.data()?.status || '').toLowerCase();
           return status === 'pending' || status === 'accepted';
         });
 
@@ -345,20 +360,9 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           if (t) userMessage = t;
         }
 
-        // Check if the error is due to invalid payment method (test/live mode mismatch)
-        if (errorData.requiresPaymentMethod || errorData.cleared) {
-          Alert.alert(
-            'Payment Method Required',
-            'Your saved payment method is no longer valid. Please add a new payment method in the Payment Methods section.',
-            [{ text: 'OK' }]
-          );
-          onClose();
-          return;
-        }
-
         throw new Error(userMessage);
       }
-      const { clientSecret, id, stripeStatus } = (await createResp.json()) as { clientSecret: string; id: string; stripeStatus?: string };
+      const { clientSecret, id } = (await createResp.json()) as { clientSecret: string; id: string; stripeStatus?: string };
       setPendingIntentId(id);
 
       // 2) Confirm payment with Apple Pay or saved card
@@ -389,19 +393,16 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           return;
         }
 
-        // Skip confirmation if already confirmed by backend (stripeStatus: requires_capture)
-        if (stripeStatus === 'requires_capture') {
-          log('Payment already confirmed by backend', { stripeStatus });
-        } else {
-          log('Confirming payment with saved card', { paymentMethodId: selectedPaymentMethodId });
-          const { error } = await confirmPayment(clientSecret, {
-            paymentMethodType: 'Card',
-            paymentMethodData: {
-              paymentMethodId: selectedPaymentMethodId,
-            },
-          });
-          if (error) throw new Error(error.message || 'Payment confirmation failed');
-        }
+        // Always confirm via the Stripe SDK so that 3DS / authentication challenges
+        // are handled correctly. The backend pre-attaches the payment method but
+        // intentionally does NOT auto-confirm, so this step is always required.
+        const { error } = await confirmPayment(clientSecret, {
+          paymentMethodType: 'Card',
+          paymentMethodData: {
+            paymentMethodId: selectedPaymentMethodId,
+          },
+        });
+        if (error) throw new Error(error.message || 'Payment confirmation failed');
       } else {
         Alert.alert('Payment method not supported', 'Please select a payment method.');
         return;

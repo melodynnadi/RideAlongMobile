@@ -18,6 +18,8 @@ import { firestore, firebaseAuth } from '@/constants/services';
 import { Ionicons } from '@expo/vector-icons';
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { getOrCreateRideChat } from '@/src/services/chatAvailability';
+import { createRoleNotification } from '@/src/services/notificationRecords';
 
 const PREF_ICONS: Record<string, string> = {
   musicPreference:       'musical-notes-outline',
@@ -214,6 +216,11 @@ export default function RequestDeepLinkScreen() {
       return;
     }
     if (!request || !requestId) return;
+    const riderId = request.userId || request.riderId || request.requesterId || null;
+    if (riderId && user.uid === riderId) {
+      Alert.alert('Not allowed', 'You cannot make an offer on your own ride request.');
+      return;
+    }
     setSubmitting(true);
     try {
       const price       = request.contributionAmount ?? request.estimatedFare ?? request.price ?? null;
@@ -221,11 +228,10 @@ export default function RequestDeepLinkScreen() {
       const driverName  = user.displayName || (driverEmail ? driverEmail.split('@')[0] : null);
       const pickup  = request.pickupAddress  || request.pickup  || request.pickupLocation?.address  || request.from || null;
       const dropoff = request.dropoffAddress || request.dropoff || request.dropoffLocation?.address || request.to   || null;
-
-      await addDoc(collection(firestore, 'rideOffers'), {
+      const offerRef = await addDoc(collection(firestore, 'rideOffers'), {
         rideRequestId: requestId,
         driverId: user.uid, driverEmail, driverName,
-        riderId: request.userId || request.riderId || request.requesterId || null,
+        riderId,
         riderEmail: request.userEmail || request.riderEmail || request.requesterEmail || null,
         riderName:  request.userName  || request.riderName  || request.requesterName  || null,
         status: 'pending',
@@ -239,6 +245,17 @@ export default function RequestDeepLinkScreen() {
           contributionAmount: typeof price === 'number' ? price.toFixed(2) : null,
         },
       });
+      await createRoleNotification({
+        recipientId: riderId,
+        recipientRole: 'rider',
+        type: 'offer_received',
+        title: 'You have a ride offer',
+        message: `${driverName || 'A driver'} sent an offer for your ride request.`,
+        driverId: user.uid,
+        riderId,
+        rideRequestId: requestId,
+        dedupeId: `ride-offer-${offerRef.id}-rider`,
+      }).catch(() => {});
       setAlreadyOffered(true);
       Alert.alert('Offer sent! 🎉', "Your offer was sent to the rider. You'll be notified if they accept.");
     } catch (e) {
@@ -294,9 +311,11 @@ export default function RequestDeepLinkScreen() {
       <View style={s.root}>
         <StatusBar barStyle={colors.statusBar} />
         <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
-          <TouchableOpacity style={s.backBtn} onPress={goBack}>
-            <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
-          </TouchableOpacity>
+          <View style={[s.header, { paddingHorizontal: 16 }]}>
+            <TouchableOpacity style={s.backBtn} onPress={goBack}>
+              <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
+            </TouchableOpacity>
+          </View>
           <View style={s.center}>
             <Text style={s.errorTitle}>Request not found</Text>
             <Text style={s.errorSub}>This ride request may have already been filled or removed.</Text>
@@ -466,6 +485,20 @@ export default function RequestDeepLinkScreen() {
             const openRiderChat = async () => {
               if (!requestId) return;
               try {
+                const uid = firebaseAuth.currentUser?.uid;
+                const rId = riderId || request?.userId || request?.riderId || request?.requesterId;
+                if (alreadyOffered && uid && rId && offerDocId) {
+                  const chatId = await getOrCreateRideChat({
+                    context: 'ride-offer',
+                    rideId: requestId,
+                    rideRequestId: requestId,
+                    rideOfferId: offerDocId,
+                    driverId: uid,
+                    riderId: String(rId),
+                  });
+                  router.push(`/(driver)/messages/${chatId}` as any);
+                  return;
+                }
                 const confirmedSnap = await getDocs(query(collection(firestore, 'confirmedRides'), where('rideRequestId', '==', requestId)));
                 if (confirmedSnap.empty) { Alert.alert('Not available', 'The chat opens once the ride is confirmed.'); return; }
                 const confirmedRideId = confirmedSnap.docs[0].id;

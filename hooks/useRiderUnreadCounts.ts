@@ -3,7 +3,18 @@ import { useEffect, useState } from 'react';
 import { firebaseAuth, firestore } from '@/constants/services';
 import { subscribeRiderConversations, subscribeRiderNotifications } from '@/src/services/riderData';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { chatBelongsToRole, isReadForRole, notificationBelongsToRole, roleKey, roleUnreadField, legacyUnreadField } from '@/src/utils/roleIdentity';
+import {
+  chatBelongsToRole,
+  isReadForRole,
+  legacyUnreadField,
+  notificationBelongsToRole,
+  notificationHasExplicitRoleScope,
+  notificationIsAddressedToUid,
+  notificationLooksRiderOnly,
+  notificationTypeIsRiderOnly,
+  roleKey,
+  roleUnreadField,
+} from '@/src/utils/roleIdentity';
 
 type UnreadCounts = { messageCount: number; notificationCount: number };
 
@@ -43,6 +54,16 @@ function handleUnreadListenerError(scope: string, error: unknown) {
     return;
   }
   console.warn(`[${scope}] Firestore unread listener error:`, error);
+}
+
+function notificationTargetsDriver(data: Record<string, any>, uid: string): boolean {
+  return notificationBelongsToRole(data, uid, 'driver')
+    || (
+      notificationIsAddressedToUid(data, uid)
+      && !notificationHasExplicitRoleScope(data)
+      && !notificationLooksRiderOnly(data)
+      && !notificationTypeIsRiderOnly(data)
+    );
 }
 
 export function useRiderUnreadCounts(): UnreadCounts {
@@ -102,6 +123,7 @@ export function useDriverUnreadCounts(): UnreadCounts {
     );
 
     const base = collection(firestore, 'notifications');
+    const email = firebaseAuth.currentUser?.email;
     const notificationBuckets = new Map<number, string[]>();
     const flushNotifications = () => {
       const unique = new Set<string>();
@@ -112,13 +134,15 @@ export function useDriverUnreadCounts(): UnreadCounts {
       query(base, where('userId', '==', uid)),
       query(base, where('recipientId', '==', uid)),
       query(base, where('recipients', 'array-contains', uid)),
+      query(base, where('recipientKeys', 'array-contains', roleKey('driver', uid))),
+      ...(email ? [query(base, where('userEmail', '==', email))] : []),
     ];
     const notificationUnsubs = notificationQueries.map((qy, index) => onSnapshot(
       qy,
       (snapshot) => {
         notificationBuckets.set(index, snapshot.docs.flatMap((item) => {
           const data = item.data();
-          if (!notificationBelongsToRole(data, uid, 'driver') || isReadForRole(data, uid, 'driver')) return [];
+          if (!notificationTargetsDriver(data, uid) || isReadForRole(data, uid, 'driver')) return [];
           return [item.id];
         }));
         flushNotifications();

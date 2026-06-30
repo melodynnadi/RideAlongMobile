@@ -86,6 +86,7 @@ export async function pickAndUploadProfilePhoto(): Promise<PickUploadResult> {
     userDocRef,
     {
       avatarUrl: photoURL,
+      avatarUrl1: photoURL,
       photoURL,
       photoPath,
       updatedAt: serverTimestamp(),

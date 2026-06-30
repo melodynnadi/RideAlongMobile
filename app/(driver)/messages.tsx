@@ -41,6 +41,7 @@ import {
 import { showErrorToast, showSuccessToast } from '@/src/utils/showToast';
 import { chatBelongsToRole, legacyUnreadField, roleKey, roleUnreadField } from '@/src/utils/roleIdentity';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { resolveChatAvailability } from '@/src/services/chatAvailability';
 
 interface Chat {
   id: string;
@@ -53,6 +54,8 @@ interface Chat {
   recipientName: string;
   recipientPhotoURL?: string | null;
   unreadCount?: number;
+  chatAvailable?: boolean;
+  unavailableMessage?: string;
 }
 
 const userCache = new Map<string, any>();
@@ -154,6 +157,16 @@ export default function MessagesScreen() {
     newBadge: {
       color: colors.primary,
       backgroundColor: colors.primaryDim,
+      overflow: 'hidden',
+      borderRadius: 10,
+      paddingHorizontal: 7,
+      paddingVertical: 3,
+      fontSize: 9,
+      fontWeight: '700',
+    },
+    closedBadge: {
+      color: colors.textSecondary,
+      backgroundColor: colors.bgSecondary,
       overflow: 'hidden',
       borderRadius: 10,
       paddingHorizontal: 7,
@@ -338,7 +351,8 @@ export default function MessagesScreen() {
               );
             }
 
-            const chatsList: Chat[] = chatDocs.map(({ id: docId, data: chatData }) => {
+            const chatsList: Chat[] = await Promise.all(chatDocs.map(async ({ id: docId, data: chatData }) => {
+              const availability = await resolveChatAvailability(chatData).catch(() => ({ available: true }));
               const { riderId, driverId, rideId, lastMessage, lastMessageTimestamp } = chatData;
 
               const participants = Array.isArray(chatData.participants) ? chatData.participants : [];
@@ -382,14 +396,23 @@ export default function MessagesScreen() {
                 riderId,
                 driverId,
                 participants,
-                lastMessage: lastMessage || 'No messages yet',
+                lastMessage: availability.available === false ? (availability.unavailableMessage || 'Chat no longer available') : lastMessage || 'No messages yet',
                 lastMessageTimestamp,
                 recipientName,
                 recipientPhotoURL,
                 unreadCount,
+                chatAvailable: availability.available,
+                unavailableMessage: availability.unavailableMessage,
               };
-            });
+            }));
 
+            // Always re-sort client-side by most-recent-first: the fallback
+            // query (used when the composite index is missing) has no orderBy.
+            chatsList.sort((a, b) => {
+              const at = a.lastMessageTimestamp?.toDate?.()?.getTime?.() ?? 0;
+              const bt = b.lastMessageTimestamp?.toDate?.()?.getTime?.() ?? 0;
+              return bt - at;
+            });
             setChats(chatsList);
             setLoading(false);
             setRefreshing(false);
@@ -538,6 +561,7 @@ export default function MessagesScreen() {
 
           <View style={s.rowMeta}>
             <Text style={s.time}>{formatTimestamp(item.lastMessageTimestamp)}</Text>
+            {item.chatAvailable === false ? <Text style={s.closedBadge}>CLOSED</Text> : null}
             {hasUnread ? <Text style={s.newBadge}>{item.unreadCount} NEW</Text> : null}
           </View>
         </TouchableOpacity>

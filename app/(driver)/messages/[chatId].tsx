@@ -44,6 +44,7 @@ import {
 import { showErrorToast, showSuccessToast } from '@/src/utils/showToast';
 import { legacyUnreadField, roleKey, roleUnreadField } from '@/src/utils/roleIdentity';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { resolveChatAvailability } from '@/src/services/chatAvailability';
 
 
 interface Message {
@@ -155,6 +156,9 @@ export default function ChatDetailScreen() {
       const chatDoc = await getDoc(doc(firestore, 'chats', chatId as string));
       if (!chatDoc.exists()) { setLoading(false); return; }
       const chatData = chatDoc.data();
+      const availability = await resolveChatAvailability(chatData).catch(() => ({ available: true, status: null, rideInfo: '' }));
+      setRideStatus(availability.status || null);
+      if (availability.rideInfo) setRideInfo(availability.rideInfo);
       const { driverId, rideId, participants } = chatData;
       const safeParticipants   = Array.isArray(participants) ? participants : [];
       const riderId            = chatData.riderId || chatData.riderUID || chatData.riderUid || chatData.userId;
@@ -227,10 +231,15 @@ export default function ChatDetailScreen() {
     }, (e) => { console.error('Error loading messages:', e); setLoading(false); });
   };
 
+  const messagingAllowed = !isTerminalStatus(rideStatus) && (rideStatus ? canSendMessages(rideStatus) : true);
+
   const sendMessage = async () => {
     const text = messageText.trim();
     if (!text || !currentUser || sending || !recipientId) return;
-    if (!canSendMessages(rideStatus) || isTerminalStatus(rideStatus)) return;
+    if (!messagingAllowed) {
+      Alert.alert('Chat unavailable', MESSAGING_DISABLED_MESSAGE);
+      return;
+    }
     setSending(true);
     try {
       await addDoc(collection(firestore, 'chats', chatId as string, 'messages'), { senderId: currentUser.uid, senderRole: 'driver', text, timestamp: serverTimestamp(), read: false });
@@ -274,7 +283,10 @@ export default function ChatDetailScreen() {
           }
         } catch {}
       }
-    } catch (e) { console.error('Error sending message:', e); }
+    } catch (e: any) {
+      console.error('Error sending message:', e);
+      Alert.alert('Message not sent', e?.message || 'Please check your connection and try again.');
+    }
     finally { setSending(false); }
   };
 
@@ -331,8 +343,6 @@ export default function ChatDetailScreen() {
       </View>
     );
   };
-
-  const messagingAllowed = canSendMessages(rideStatus) && !isTerminalStatus(rideStatus);
 
   if (loading) {
     return (

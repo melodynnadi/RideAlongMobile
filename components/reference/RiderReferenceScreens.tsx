@@ -1,4 +1,4 @@
-import React, { createContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Platform, ScrollView, Share, StyleSheet, Text as RNText, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
@@ -30,8 +30,10 @@ import { useRideBrowseStore, type RiderRideFilter } from '@/stores/rideBrowseSto
 import { FlagRideModal } from '@/components/FlagRideModal';
 import { CityAutocomplete } from '@/components/CityAutocomplete';
 import { DatePickerModal, TimePickerModal, formatDateLabel } from '@/components/DateTimePickerModals';
-import { computeRiderSuggestedPrice, formatPricingBreakdown, getRideType } from '@/src/utils/pricing';
+import { computeRiderSuggestedPrice, formatContributionRange, getRideType } from '@/src/utils/pricing';
 import { chatBelongsToRole, roleKey } from '@/src/utils/roleIdentity';
+import { getOrCreateRideChat } from '@/src/services/chatAvailability';
+import { createRoleNotification } from '@/src/services/notificationRecords';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { lightColors, type AppColors } from '@/constants/theme';
 
@@ -745,6 +747,7 @@ export function RiderHomeReference() {
     if (activeRideStatus === 'COMPLETED') return 'where to?';
     if (isDriverCompleted) return 'confirm your arrival!';
     if (isRideInProgress) return 'your ride is in progress!';
+    if (activeRideStatus === 'PENDING' && nextRide) return 'your seat is reserved!';
     if (nextRide || nextRequestIsConfirmed) return 'your ride is confirmed!';
     if (nextRequest) {
       if ((nextRequest as any)._isPostingRequest) {
@@ -838,9 +841,12 @@ function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
   const rawStatus = String(ride.status || '').replace(/[-\s]/g, '_').toUpperCase();
   const isDriverCompleted = rawStatus === 'DRIVER_COMPLETED';
   const isInProgress = ['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED'].includes(rawStatus);
-  const statusLabel = isDriverCompleted ? 'CONFIRM ARRIVAL' : isInProgress ? 'IN PROGRESS' : 'CONFIRMED';
-  const statusColor = isInProgress ? colors.primary : colors.green;
-  const statusBg    = isInProgress ? colors.primaryDim : colors.greenDim;
+  const isPending = rawStatus === 'PENDING';
+  const statusLabel = isDriverCompleted ? 'CONFIRM ARRIVAL' : isInProgress ? 'IN PROGRESS' : isPending ? 'WAITING FOR PASSENGERS' : 'CONFIRMED';
+  const statusColor = isInProgress ? colors.primary : isPending ? colors.primary : colors.green;
+  const statusBg    = isInProgress ? colors.primaryDim : isPending ? colors.primaryDim : colors.greenDim;
+  const totalSeats = Number(ride.raw?.totalSeats) || 0;
+  const seatsTaken = Number(ride.raw?.seatsTaken) || 0;
   const dateText = ride.date
     ? ride.date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) +
       ' · ' + ride.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
@@ -887,6 +893,7 @@ function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
           <Text style={{ color: statusColor, fontSize: 11, fontWeight: '800', letterSpacing: 0.5 }}>{statusLabel}</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {totalSeats > 1 && <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '700' }}>{seatsTaken}/{totalSeats} seats</Text>}
           {ride.price > 0 && <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '800' }}>${ride.price.toFixed(2)}</Text>}
           <TouchableOpacity onPress={() => setFlagVisible(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Ionicons name="flag-outline" size={18} color={colors.red} />
@@ -1052,6 +1059,24 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
   const openChat = async () => {
     try {
       await openChatForConfirmedRide(request.id, (chatId) => router.push(`/(rider)/messages/${chatId}` as any));
+    } catch {
+      Alert.alert('Error', 'Could not open chat. Please try again.');
+    }
+  };
+
+  const openOfferChat = async () => {
+    const riderId = firebaseAuth.currentUser?.uid;
+    if (!riderId || !offerInfo?.driverId || !offerInfo.offerId) return;
+    try {
+      const chatId = await getOrCreateRideChat({
+        context: 'ride-offer',
+        rideId: request.id,
+        rideRequestId: request.id,
+        rideOfferId: offerInfo.offerId,
+        driverId: offerInfo.driverId,
+        riderId,
+      });
+      router.push(`/(rider)/messages/${chatId}` as any);
     } catch {
       Alert.alert('Error', 'Could not open chat. Please try again.');
     }
@@ -1248,11 +1273,11 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
           <>
             <TouchableOpacity
               style={styles.actionBtnSecondary}
-              onPress={() => offerInfo?.driverId && router.push({ pathname: '/(rider)/driver/[driverId]', params: { driverId: offerInfo.driverId } } as any)}
+              onPress={openOfferChat}
               disabled={acting || !offerInfo?.driverId}
               activeOpacity={0.75}
             >
-              <Text style={styles.actionBtnSecondaryText}>View Driver</Text>
+              <Text style={styles.actionBtnSecondaryText}>Message Driver</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.actionBtnPrimary, acting && { opacity: 0.6 }]}
@@ -1560,9 +1585,11 @@ export function RiderRequestReference() {
   const [dropoffCoords, setDropoffCoords] = useState<Coords | null>(null);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [requestPaymentVisible, setRequestPaymentVisible] = useState(false);
+  const pendingRequestDataRef = useRef<any>(null);
   const triedRequestLocationRef = useRef(false);
   const suggestedPrice = distanceMiles && distanceMiles > 0 ? computeRiderSuggestedPrice(distanceMiles, 1) : 0;
-  const suggestedText = distanceMiles && distanceMiles > 0 ? formatPricingBreakdown(distanceMiles, 1, 'rider') : 'Select route to calculate';
+  const suggestedText = distanceMiles && distanceMiles > 0 ? formatContributionRange(distanceMiles, 1) : 'Select route to calculate';
 
   useEffect(() => {
     let cancelled = false;
@@ -1607,6 +1634,11 @@ export function RiderRequestReference() {
         setDurationText(metrics.durationText);
         const nextSuggested = computeRiderSuggestedPrice(metrics.distanceMiles, 1);
         if (!priceEdited && nextSuggested > 0) setPrice(nextSuggested.toFixed(2));
+      } else {
+        setDistanceMiles(null);
+        setDurationMinutes(null);
+        setDistanceText(null);
+        setDurationText(null);
       }
     }, 450);
     return () => {
@@ -1710,7 +1742,9 @@ export function RiderRequestReference() {
         }
       } catch {}
 
-      await addDoc(collection(firestore, 'rideRequests'), {
+      // Store the resolved data and open the payment modal.
+      // The Firestore doc is created only after payment is authorized.
+      pendingRequestDataRef.current = {
         riderId: user.uid,
         riderEmail: user.email || null,
         pickup: pickup.trim(),
@@ -1741,6 +1775,26 @@ export function RiderRequestReference() {
           seconds: submitDurationMinutes != null ? Math.round(submitDurationMinutes * 60) : null,
         } : null,
         notes: notes.trim(),
+        resolvedPrice,
+      };
+      setRequestPaymentVisible(true);
+    } catch (error: any) {
+      Alert.alert('Could not post request', error?.message || 'Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleRequestPaymentSuccess = async (paymentIntentId: string) => {
+    setRequestPaymentVisible(false);
+    const data = pendingRequestDataRef.current;
+    if (!data) return;
+    pendingRequestDataRef.current = null;
+    try {
+      await addDoc(collection(firestore, 'rideRequests'), {
+        ...data,
+        paymentIntentId,
+        paymentStatus: 'authorized',
         status: 'pending',
         state: 'pending',
         createdAt: serverTimestamp(),
@@ -1749,9 +1803,12 @@ export function RiderRequestReference() {
       Alert.alert('Request posted', 'Drivers can now send you offers.');
       router.replace('/(rider)/requests' as any);
     } catch (error: any) {
-      Alert.alert('Could not post request', error?.message || 'Please try again.');
-    } finally {
-      setSubmitting(false);
+      // Payment was authorized but doc creation failed — void the hold.
+      try {
+        const { cancelRidePayment } = await import('@/services/payments');
+        await cancelRidePayment({ paymentIntentId, rideId: paymentIntentId });
+      } catch {}
+      Alert.alert('Could not post request', 'Your payment was not charged. Please try again.');
     }
   };
 
@@ -1815,13 +1872,21 @@ export function RiderRequestReference() {
           />
         </View>
         <View style={styles.requestSuggestedWrap}>
-          <Text style={styles.requestSuggestedLabel}>SUGGESTED</Text>
+          <Text style={styles.requestSuggestedLabel}>MIN / MAX</Text>
           <Text style={styles.requestSuggestedText}>{suggestedText}</Text>
         </View>
       </View>
       <Text style={styles.eyebrow}>NOTE</Text>
       <TextInput style={styles.noteBox} multiline value={notes} onChangeText={setNotes} placeholder="Luggage, pickup flexibility, or anything drivers should know" placeholderTextColor={colors.textSecondary} />
       <TouchableOpacity disabled={submitting} style={[styles.primaryBtnFull, styles.requestSubmitButton]} onPress={submit}><Text style={styles.primaryText}>{submitting ? 'Posting...' : 'Post request ->'}</Text></TouchableOpacity>
+      <PaymentModal
+        visible={requestPaymentVisible}
+        onClose={() => { setRequestPaymentVisible(false); pendingRequestDataRef.current = null; }}
+        rideId={`req_${firebaseAuth.currentUser?.uid ?? 'anon'}_${Date.now()}`}
+        driverId={null}
+        baseFare={pendingRequestDataRef.current?.resolvedPrice ?? 0}
+        onPaymentSuccess={handleRequestPaymentSuccess}
+      />
     </PhoneScreen>
   );
 }
@@ -1910,22 +1975,44 @@ export function RiderAvailableReference() {
   // Track which posting IDs this rider has already requested (so we can hide them)
   useEffect(() => {
     if (!uid) return undefined;
-    const inactive = new Set(['cancelled', 'canceled', 'rejected', 'declined', 'completed']);
-    const q = query(collection(firestore, 'ridePostingRequests'), where('riderId', '==', uid));
-    return onSnapshot(q, (snap) => {
+    const inactive = new Set(['cancelled', 'canceled', 'rejected', 'declined', 'completed', 'expired']);
+    const buckets = new Map<string, Set<string>>();
+    const applySnapshot = (key: string, snap: any) => {
       const ids = new Set<string>();
       snap.forEach((d) => {
         const r = d.data() as any;
-        const status = String(r.status || '').toLowerCase();
+        const status = String(r.status || r.state || 'pending').replace(/[-\s]+/g, '_').toLowerCase();
         if (inactive.has(status)) return;
-        const postingId = r.ridePostingId || r.rideId || '';
+        const postingId = String(r.ridePostingId || r.postingId || r.rideId || '');
         if (postingId) ids.add(postingId);
       });
-      setMyRequestedPostingIds(ids);
-    }, (error) => {
-      setMyRequestedPostingIds(new Set());
-      console.warn('[RiderAvailableReference] requested postings listener error:', error);
-    });
+      buckets.set(key, ids);
+      const merged = new Set<string>();
+      buckets.forEach((bucket) => bucket.forEach((id) => merged.add(id)));
+      setMyRequestedPostingIds(merged);
+    };
+    const unsubRider = onSnapshot(
+      query(collection(firestore, 'ridePostingRequests'), where('riderId', '==', uid)),
+      (snap) => applySnapshot('riderId', snap),
+      (error) => {
+        buckets.delete('riderId');
+        setMyRequestedPostingIds(new Set(Array.from(buckets.values()).flatMap((bucket) => Array.from(bucket))));
+        console.warn('[RiderAvailableReference] requested postings riderId listener error:', error);
+      },
+    );
+    const unsubUser = onSnapshot(
+      query(collection(firestore, 'ridePostingRequests'), where('userId', '==', uid)),
+      (snap) => applySnapshot('userId', snap),
+      (error) => {
+        buckets.delete('userId');
+        setMyRequestedPostingIds(new Set(Array.from(buckets.values()).flatMap((bucket) => Array.from(bucket))));
+        console.warn('[RiderAvailableReference] requested postings userId listener error:', error);
+      },
+    );
+    return () => {
+      unsubRider();
+      unsubUser();
+    };
   }, [uid]);
 
   const shareRide = async (ride: MobileRidePosting) => {
@@ -1940,9 +2027,14 @@ export function RiderAvailableReference() {
     await Share.share({ message: parts }).catch(() => {});
   };
 
+  const visibleRidePool = useMemo(
+    () => liveRides.filter((ride) => !myRequestedPostingIds.has(ride.id)),
+    [liveRides, myRequestedPostingIds],
+  );
+
   const filteredRides = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    let result = liveRides.filter((ride) => {
+    let result = visibleRidePool.filter((ride) => {
       if (q) {
         const searchable = [ride.driverName, ride.from, ride.to, ride.vehicle].join(' ').toLowerCase();
         if (!searchable.includes(q)) return false;
@@ -1958,15 +2050,29 @@ export function RiderAvailableReference() {
     });
     result = result.filter((ride) => applyFiltersToRide(ride, filterOptions, true));
     return result;
-  }, [liveRides, searchQuery, timeFilter, myRequestedPostingIds, filterOptions]);
+  }, [visibleRidePool, searchQuery, timeFilter, filterOptions]);
 
   const formatRideTime = (date: Date | null | undefined) => {
     if (!date) return '';
-    return date.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+    const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const now = new Date();
+    const isToday =
+      date.getFullYear() === now.getFullYear() &&
+      date.getMonth() === now.getMonth() &&
+      date.getDate() === now.getDate();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(now.getDate() + 1);
+    const isTomorrow =
+      date.getFullYear() === tomorrow.getFullYear() &&
+      date.getMonth() === tomorrow.getMonth() &&
+      date.getDate() === tomorrow.getDate();
+    if (isToday) return `Today · ${time}`;
+    if (isTomorrow) return `Tomorrow · ${time}`;
+    return date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + ` · ${time}`;
   };
 
   const chips: { key: TimeFilter; label: string }[] = [
-    { key: 'all', label: `ALL\n${liveRides.length}` },
+    { key: 'all', label: `ALL\n${visibleRidePool.length}` },
     { key: 'morning', label: 'Morning' },
     { key: 'afternoon', label: 'Afternoon' },
     { key: 'evening', label: 'Evening' },
@@ -2083,19 +2189,19 @@ export function RiderAvailableReference() {
       {!loading && !filteredRides.length ? (
         <View style={styles.availableEmptyState}>
           <View style={styles.availableEmptyIcon}><Ionicons name="car-outline" size={27} color={colors.primary} /></View>
-          <Text style={styles.availableEmptyTitle}>{liveRides.length ? 'No rides match' : 'No rides posted yet'}</Text>
+          <Text style={styles.availableEmptyTitle}>{visibleRidePool.length ? 'No rides match' : 'No rides posted yet'}</Text>
           <Text style={styles.availableEmptyText}>
-            {liveRides.length
+            {visibleRidePool.length
               ? 'Try a different search or clear the filters.'
               : 'Request your trip and let nearby drivers send you an offer.'}
           </Text>
           <TouchableOpacity
             style={styles.availableEmptyPrimary}
-            onPress={() => liveRides.length ? (setSearchQuery(''), setTimeFilter('all'), setFilterOptions(getDefaultFilters())) : router.push('/(rider)/book')}
+            onPress={() => visibleRidePool.length ? (setSearchQuery(''), setTimeFilter('all'), setFilterOptions(getDefaultFilters())) : router.push('/(rider)/book')}
             accessibilityRole="button"
           >
-            <Ionicons name={liveRides.length ? 'refresh-outline' : 'add-circle-outline'} size={18} color="#FFFFFF" />
-            <Text style={styles.availableEmptyPrimaryText}>{liveRides.length ? 'Clear filters' : 'Request a ride'}</Text>
+            <Ionicons name={visibleRidePool.length ? 'refresh-outline' : 'add-circle-outline'} size={18} color="#FFFFFF" />
+            <Text style={styles.availableEmptyPrimaryText}>{visibleRidePool.length ? 'Clear filters' : 'Request a ride'}</Text>
           </TouchableOpacity>
         </View>
       ) : null}
@@ -2177,6 +2283,7 @@ export function RiderDetailReference() {
   const [loading, setLoading] = useState(true);
   const [paymentVisible, setPaymentVisible] = useState(false);
   const [checkingVerification, setCheckingVerification] = useState(false);
+  const [postingVehicleImageUrl, setPostingVehicleImageUrl] = useState<string | null>(null);
 
   const handleRequestSeat = async () => {
     const user = firebaseAuth.currentUser;
@@ -2256,6 +2363,34 @@ export function RiderDetailReference() {
     return '';
   };
 
+  const vehicleImageFrom = useCallback(function resolveVehicleImageFrom(...values: any[]): string | null {
+    for (const value of values) {
+      if (!value) continue;
+      if (typeof value === 'string' && value.trim()) return value.trim();
+      if (Array.isArray(value)) {
+        const nested = resolveVehicleImageFrom(...value);
+        if (nested) return nested;
+        continue;
+      }
+      if (typeof value === 'object') {
+        const nested = resolveVehicleImageFrom(
+          value.imageUrl,
+          value.vehicleImageUrl,
+          value.photoUrl,
+          value.photoURL,
+          value.url,
+          value.uri,
+          value.downloadUrl,
+          value.downloadURL,
+          value.imageList,
+          value.images,
+        );
+        if (nested) return nested;
+      }
+    }
+    return null;
+  }, []);
+
   const detailAddress = (kind: 'pickup' | 'dropoff') => {
     const raw = ride?.raw || {};
     if (kind === 'pickup') {
@@ -2332,6 +2467,37 @@ export function RiderDetailReference() {
     })();
   }, [rideId]);
 
+  useEffect(() => {
+    setPostingVehicleImageUrl(null);
+    if (!ride) return;
+    const embedded = vehicleImageFrom(
+      ride.raw?.vehicleInfo,
+      ride.raw?.vehicle,
+      ride.raw?.vehicleImageUrl,
+      ride.raw?.vehiclePhotoUrl,
+      ride.raw?.carImageUrl,
+      ride.raw?.imageUrl,
+    );
+    if (embedded) setPostingVehicleImageUrl(embedded);
+    const driverId = ride.driverId || rawText(ride.raw?.driverId) || rawText(ride.raw?.driverUid) || rawText(ride.raw?.driverUID);
+    if (!driverId) return;
+    let cancelled = false;
+    getDoc(doc(firestore, 'drivers', driverId)).then((snap) => {
+      if (cancelled || !snap.exists()) return;
+      const data = snap.data() as any;
+      const imageUrl = vehicleImageFrom(
+        data.vehicleInfo,
+        data.vehicle,
+        data.vehicleImageUrl,
+        data.vehiclePhotoUrl,
+        data.carImageUrl,
+        data.imageUrl,
+      );
+      if (imageUrl) setPostingVehicleImageUrl(imageUrl);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [ride, vehicleImageFrom]);
+
   if (loading) {
     return <PhoneScreen title="Ride Details" showBack onBack={goBackFromDetails}><ActivityIndicator color={colors.primary} size="large" /></PhoneScreen>;
   }
@@ -2344,8 +2510,7 @@ export function RiderDetailReference() {
     const driverName = driver?.fullName || driver?.name || driver?.displayName || '';
     const driverInitials = driverName.split(/\s+/).map((p: string) => p[0]).join('').slice(0, 2).toUpperCase();
     const driverProfile = driver?.personalInfo || driver?.profile || {};
-    const driverAvatarUrl = rawText(driver?.avatarUrl1)
-      || rawText(driver?.avatarUrl)
+    const driverAvatarUrl = rawText(driver?.avatarUrl)
       || rawText(driver?.photoURL)
       || rawText(driver?.photoUrl)
       || rawText(driver?.profilePicture)
@@ -2353,9 +2518,26 @@ export function RiderDetailReference() {
       || rawText(driverProfile.photoURL)
       || rawText(driverProfile.photoUrl)
       || rawText(driverProfile.profilePicture)
+      || rawText(driver?.avatarUrl1)
       || null;
     const driverRating = driver?.rating ? Number(driver.rating).toFixed(1) : null;
-    const vehicle = [driver?.vehicleYear, driver?.vehicleMake, driver?.vehicleModel].filter(Boolean).join(' ') || driver?.vehicle || '';
+    const driverVehicleInfo = driver?.vehicleInfo || {};
+    const vehicle = [driverVehicleInfo.year || driver?.vehicleYear, driverVehicleInfo.color || driver?.vehicleColor, driverVehicleInfo.make || driver?.vehicleMake, driverVehicleInfo.model || driver?.vehicleModel].filter(Boolean).join(' ')
+      || rawText(driver?.vehicle)
+      || rawText(confirmedRequest.confirmed?.vehicleInfo)
+      || rawText(req.vehicleInfo)
+      || '';
+    const vehicleImageUrl = vehicleImageFrom(
+      driverVehicleInfo,
+      driver?.vehicle,
+      driver?.vehicleImageUrl,
+      driver?.vehiclePhotoUrl,
+      driver?.carImageUrl,
+      confirmedRequest.confirmed?.vehicleInfo,
+      confirmedRequest.confirmed?.vehicleImageUrl,
+      req.vehicleInfo,
+      req.vehicleImageUrl,
+    );
     const pickup = req.pickupAddress || req.pickup || req.from || 'Pickup';
     const dropoff = req.dropoffAddress || req.dropoff || req.to || 'Destination';
     const fare = req.estimatedFare ? `$${Number(req.estimatedFare).toFixed(2)}` : req.maxPrice ? `$${Number(req.maxPrice).toFixed(0)}` : null;
@@ -2363,7 +2545,7 @@ export function RiderDetailReference() {
     const hasAssignedDriver = !!confirmedRequest.confirmed || ['CONFIRMED', 'IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED', 'COMPLETED'].includes(rideStatus);
     const hasDriverInfo = hasAssignedDriver && (!!driverId || !!driverName || !!driverAvatarUrl);
     const statusMeta: Record<string, { label: string; color: string; bg: string }> = {
-      PENDING: { label: 'PENDING OFFER', color: colors.primary, bg: colors.primaryDim },
+      PENDING: { label: confirmedRequest.confirmed ? 'WAITING FOR PASSENGERS' : 'PENDING OFFER', color: colors.primary, bg: colors.primaryDim },
       CONFIRMED: { label: 'CONFIRMED', color: colors.green, bg: colors.greenDim },
       IN_PROGRESS: { label: 'IN PROGRESS', color: colors.primary, bg: colors.primaryDim },
       DRIVER_COMPLETED: { label: 'CONFIRM ARRIVAL', color: colors.primary, bg: colors.primaryDim },
@@ -2410,27 +2592,17 @@ export function RiderDetailReference() {
             style: 'destructive',
             onPress: async () => {
               try {
-                const { doc: dc, updateDoc, serverTimestamp: st } = await import('firebase/firestore');
-                const { firestore: db } = await import('@/constants/services');
-                await updateDoc(dc(db, 'rideRequests', rideId!), {
-                  status: 'cancelled',
-                  cancelledBy: 'rider',
-                  updatedAt: st(),
+                // Cancel via the backend so the parent posting's seat count is
+                // released/reopened and any payment hold is voided server-side.
+                const { getApiBaseUrl } = await import('@/constants/services');
+                const targetCollection = confirmedRideDocId ? 'confirmedRides' : 'rideRequests';
+                const targetId = confirmedRideDocId || rideId!;
+                const res = await fetch(`${getApiBaseUrl()}/api/rides/${targetId}/cancel`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ collection: targetCollection, cancelledBy: 'rider' }),
                 });
-                // Attempt to release the payment hold
-                if (confirmedRequest.confirmed?.id) {
-                  try {
-                    const rideSnap = await import('firebase/firestore').then(({ getDoc, doc: d }) =>
-                      getDoc(d(db, 'confirmedRides', confirmedRequest.confirmed!.id))
-                    );
-                    const rideData = rideSnap.exists() ? (rideSnap.data() as any) : null;
-                    const paymentIntentId = rideData?.paymentIntentId || rideData?.stripePaymentIntentId;
-                    if (paymentIntentId) {
-                      const { cancelRidePayment } = await import('@/services/payments');
-                      await cancelRidePayment({ paymentIntentId, rideId: confirmedRequest.confirmed!.id });
-                    }
-                  } catch {}
-                }
+                if (!res.ok) throw new Error(`Server error ${res.status}`);
                 goBackFromDetails();
                 Alert.alert('Ride cancelled', 'Your ride has been cancelled. Any payment hold will be released within 3–5 business days.');
               } catch {
@@ -2521,10 +2693,14 @@ export function RiderDetailReference() {
             {/* Vehicle */}
             {vehicle ? (
               <View style={{ backgroundColor: colors.bgCard, borderRadius: 18, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-                <View style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name="car-sport-outline" size={20} color={colors.primary} />
+                <View style={{ width: 54, height: 46, borderRadius: 12, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                  {vehicleImageUrl ? (
+                    <Image source={{ uri: vehicleImageUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                  ) : (
+                    <Ionicons name="car-sport-outline" size={20} color={colors.primary} />
+                  )}
                 </View>
-                <View>
+                <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' }}>{vehicle}</Text>
                   <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>Verified vehicle</Text>
                 </View>
@@ -2644,7 +2820,13 @@ export function RiderDetailReference() {
         </View>
 
         <View style={[styles.detailCard, styles.detailInfoRow]}>
-          <View style={styles.detailInfoIcon}><Ionicons name="car-sport" size={23} color={colors.textSecondary} /></View>
+          <View style={[styles.detailInfoIcon, postingVehicleImageUrl && styles.detailVehicleImageWrap]}>
+            {postingVehicleImageUrl ? (
+              <Image source={{ uri: postingVehicleImageUrl }} style={styles.detailVehicleImage} resizeMode="cover" />
+            ) : (
+              <Ionicons name="car-sport" size={23} color={colors.textSecondary} />
+            )}
+          </View>
           <View style={styles.detailInfoCopy}>
             <Text style={styles.detailInfoTitle}>{ride.vehicle}</Text>
             <Text style={styles.detailInfoText}>Driver and vehicle details are verified through RideAlong.</Text>
@@ -2774,12 +2956,25 @@ export function RiderDetailReference() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ paymentIntentId, riderId, driverId }),
               });
-            } catch {}
+            } catch {
+              await createRoleNotification({
+                recipientId: driverId,
+                recipientRole: 'driver',
+                type: 'new_ride_request',
+                title: 'New ride request',
+                message: 'A rider requested a seat on your posted ride.',
+                driverId,
+                riderId,
+                ridePostingId: rideId,
+                ridePostingRequestId: reqDocId,
+                dedupeId: `posting-request-${reqDocId}-driver`,
+              }).catch(() => {});
+            }
 
             // Only navigate to confirmed screen after the booking is persisted
             router.replace({
               pathname: '/(rider)/booking-confirmed',
-              params: { rideId, driverId: ride.driverId || '', driverName: ride.driverName || '' },
+              params: { rideId, driverId: ride.driverId || '', driverName: ride.driverName || '', ridePostingRequestId: reqDocId },
             } as any);
           } catch (e: any) {
             // Booking creation failed — void the authorized payment so the rider is not charged
@@ -2801,7 +2996,7 @@ export function RiderDetailReference() {
 export function RiderConfirmedReference() {
   const { colors } = useAppTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { rideId, driverId: driverIdParam, driverName: driverNameParam } = useLocalSearchParams<{ rideId?: string; driverId?: string; driverName?: string }>();
+  const { rideId, driverId: driverIdParam, driverName: driverNameParam, ridePostingRequestId: ridePostingRequestIdParam } = useLocalSearchParams<{ rideId?: string; driverId?: string; driverName?: string; ridePostingRequestId?: string }>();
   const insets = useSafeAreaInsets();
 
   const [loading, setLoading]       = useState(true);
@@ -2958,32 +3153,16 @@ export function RiderConfirmedReference() {
             onPress={async () => {
               const riderId = firebaseAuth.currentUser?.uid;
               if (!riderId || !driverId) { router.replace('/(rider)/messages' as any); return; }
-              // Find or create chat between rider and driver
               try {
-                const chatsRef = collection(firestore, 'chats');
-                const q1 = query(chatsRef, where('participants', 'array-contains', riderId));
-                const snap = await getDocs(q1);
-                const existing = snap.docs.find((d) => {
-                  const data = d.data();
-                  const p = data.participants || [];
-                  return p.includes(driverId) && chatBelongsToRole(data, riderId, 'rider');
+                const chatId = await getOrCreateRideChat({
+                  context: 'booking-request',
+                  rideId: rideId || driverId,
+                  ridePostingId: rideId || null,
+                  ridePostingRequestId: ridePostingRequestIdParam || null,
+                  driverId,
+                  riderId,
                 });
-                if (existing) {
-                  router.replace({ pathname: '/(rider)/messages/[chatId]', params: { chatId: existing.id } } as any);
-                } else {
-                  const newChat = await addDoc(chatsRef, {
-                    participants: [riderId, driverId],
-                    participantKeys: [roleKey('rider', riderId), roleKey('driver', driverId)],
-                    participantRoles: { [riderId]: 'rider', [driverId]: 'driver' },
-                    riderId,
-                    driverId,
-                    rideId: rideId || null,
-                    createdAt: serverTimestamp(),
-                    lastMessage: null,
-                    lastMessageTimestamp: null,
-                  });
-                  router.replace({ pathname: '/(rider)/messages/[chatId]', params: { chatId: newChat.id } } as any);
-                }
+                router.replace({ pathname: '/(rider)/messages/[chatId]', params: { chatId } } as any);
               } catch {
                 router.replace('/(rider)/messages' as any);
               }
@@ -3232,6 +3411,8 @@ function makeStyles(colors: AppColors) {
   vehicleTitle: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 13, fontWeight: '600', marginLeft: 62 },
   detailInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 13 },
   detailInfoIcon: { width: 48, height: 48, borderRadius: 12, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center' },
+  detailVehicleImageWrap: { width: 58, height: 46, overflow: 'hidden' },
+  detailVehicleImage: { width: '100%', height: '100%' },
   detailInfoCopy: { flex: 1, minWidth: 0 },
   detailInfoTitle: { color: colors.textPrimary, fontSize: 14, lineHeight: 20, fontWeight: '700' },
   detailInfoText: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 3 },

@@ -661,10 +661,14 @@ export default function RequestsInboxScreen() {
     const unsubs: (() => void)[] = [];
 
     const handler = (sourceKey: string) => (snap: any) => {
+      const currentUid = firebaseAuth.currentUser?.uid;
       const rows: InboxItem[] = [];
       snap.forEach((d: any) => {
         const r = d.data() || {};
         if (!isPendingFutureRequest(r)) return;
+        // Dual-role users must not see their own rider requests as a driver
+        const requestRiderId = r.riderId || r.userId || r.requesterId || null;
+        if (currentUid && requestRiderId === currentUid) return;
         const dt = getRideDateTime(r);
         const distInfo = getDistanceInfo(r);
         const pickupCoords = extractCoords(r, 'pickup');

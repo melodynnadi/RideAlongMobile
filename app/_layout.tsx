@@ -5,8 +5,10 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Toast from 'react-native-toast-message';
+import { toastConfig } from '@/components/ui/RideAlongToast';
 import * as NativeSplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
+import { StripeProvider } from '@stripe/stripe-react-native';
 import '../global.css';
 
 import { useAuthStore } from '@/stores/authStore';
@@ -78,7 +80,7 @@ function AppStack() {
         <Stack.Screen name="(rider)" />
         <Stack.Screen name="(driver)" />
       </Stack>
-      <Toast />
+      <Toast config={toastConfig} />
     </View>
   );
 }
@@ -133,6 +135,7 @@ export default function RootLayout() {
   }, [isLoading, minSplashPassed]);
 
   return (
+    <StripeProvider publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? ''}>
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
@@ -151,5 +154,6 @@ export default function RootLayout() {
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+    </StripeProvider>
   );
 }

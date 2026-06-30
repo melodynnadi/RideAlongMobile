@@ -54,6 +54,21 @@ export function computeDriverMaxPrice(distanceInMiles: number, seats: number | n
   return computeSegmentPrice(distanceInMiles, seats);
 }
 
+export function computeContributionRange(distanceInMiles: number, seats: number | null | undefined = 1): { min: number; max: number } {
+  if (!distanceInMiles || distanceInMiles <= 0) return { min: 0, max: 0 };
+  return {
+    min: computeRiderSuggestedPrice(distanceInMiles, seats),
+    max: computeDriverMaxPrice(distanceInMiles, seats),
+  };
+}
+
+export function formatContributionRange(distanceInMiles: number, seats: number | null | undefined = 1): string {
+  const { min, max } = computeContributionRange(distanceInMiles, seats);
+  if (!min || !max) return 'Select route to calculate';
+  if (Math.abs(min - max) < 0.01) return `$${min.toFixed(2)} min/max`;
+  return `$${min.toFixed(2)} - $${max.toFixed(2)} per seat`;
+}
+
 export function formatPricingBreakdown(distanceInMiles: number, seats: number | null | undefined = 1, mode: 'rider' | 'driver' = 'rider'): string {
   if (!distanceInMiles || distanceInMiles <= 0) return 'Select a route to calculate price';
   const tier = normalizeSeatTier(seats);

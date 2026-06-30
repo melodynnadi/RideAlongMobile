@@ -252,9 +252,10 @@ export default function EarningsScreen() {
     if (!grossDollars || grossDollars <= 0) { Alert.alert('No instant balance', 'You have no funds currently eligible for instant deposit.'); return; }
     const rideAlongFee  = grossDollars * 0.03;
     const estimatedNet  = grossDollars - rideAlongFee;
+    const stripeInstantFee = estimatedNet * 0.015;
     Alert.alert(
       'Instant Deposit Fees',
-      `Available Balance: $${grossDollars.toFixed(2)}\n\nFees:\n• RideAlong fee (3%): -$${rideAlongFee.toFixed(2)}\n\nEstimated amount to receive: $${estimatedNet.toFixed(2)}\n\nDo you want to proceed?`,
+      `Available Balance: $${grossDollars.toFixed(2)}\n\nFees:\n• RideAlong fee (3%): -$${rideAlongFee.toFixed(2)}\n• Stripe instant payout fee (1.5%): about -$${stripeInstantFee.toFixed(2)}, deducted by Stripe\n\nEstimated RideAlong payout: $${estimatedNet.toFixed(2)}\n\nDo you want to proceed?`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Continue', onPress: async () => {

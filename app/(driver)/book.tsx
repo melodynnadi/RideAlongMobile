@@ -24,7 +24,7 @@ import { firestore, firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import { addDoc, collection, serverTimestamp, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
 import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import * as Location from 'expo-location';
-import { computeMaxPrice, computeDriverMaxPrice, formatPricingBreakdown } from '@/src/utils/pricing';
+import { computeMaxPrice, computeDriverMaxPrice, formatContributionRange } from '@/src/utils/pricing';
 import EmailTriggerService from '@/services/EmailTriggerService';
 import { Ionicons } from '@expo/vector-icons';
 import { DriverBottomNav } from '@/components/DriverBottomNav';
@@ -1174,6 +1174,43 @@ export default function BookScreen() {
     applyCurrentLocation({ silent: true });
   }, [pickupLocation]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const pickupText = pickupLocation.trim();
+      const dropoffText = dropoffLocation.trim();
+      if (!pickupText || !dropoffText) {
+        setDistanceText('--');
+        setDurationText('--');
+        setDistanceMiles(null);
+        setDurationMinutes(null);
+        return;
+      }
+      if (pickupCoords && dropoffCoords) return;
+
+      setCalcLoading(true);
+      const [nextPickupCoords, nextDropoffCoords] = await Promise.all([
+        pickupCoords ? Promise.resolve(pickupCoords) : geocodeAddress(pickupText),
+        dropoffCoords ? Promise.resolve(dropoffCoords) : geocodeAddress(dropoffText),
+      ]);
+      if (cancelled) return;
+      if (nextPickupCoords) setPickupCoords(nextPickupCoords);
+      if (nextDropoffCoords) setDropoffCoords(nextDropoffCoords);
+      if (!nextPickupCoords || !nextDropoffCoords) {
+        setDistanceText('--');
+        setDurationText('--');
+        setDistanceMiles(null);
+        setDurationMinutes(null);
+        setCalcLoading(false);
+      }
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [pickupLocation, dropoffLocation, pickupCoords, dropoffCoords]);
+
   // Distance/Duration calculation using Google Distance Matrix API
   useEffect(() => {
     let timer: any;
@@ -1209,6 +1246,8 @@ export default function BookScreen() {
       } catch {
         setDistanceText('--');
         setDurationText('--');
+        setDistanceMiles(null);
+        setDurationMinutes(null);
       } finally {
         setCalcLoading(false);
       }
@@ -1262,7 +1301,7 @@ export default function BookScreen() {
     ? Math.max(0, Number(uberEstimate) - priceNum).toFixed(2) : null;
   const routeIsReady = !!(pickupLocation && dropoffLocation && pickupCoords && dropoffCoords);
   const suggestedText = distanceMiles && distanceMiles > 0
-    ? formatPricingBreakdown(distanceMiles, seats, 'driver')
+    ? formatContributionRange(distanceMiles, seats)
     : 'Select route to estimate';
 
 
@@ -1388,7 +1427,7 @@ export default function BookScreen() {
                   />
 
                   <View style={styles.suggestedWrap}>
-                    <Text style={styles.suggestedLabel}>SUGGESTED</Text>
+                    <Text style={styles.suggestedLabel}>MIN / MAX</Text>
                     <Text style={styles.suggestedText}>{suggestedText}</Text>
                   </View>
                 </View>

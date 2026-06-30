@@ -26,7 +26,15 @@ import {
 import { firebaseAuth, firestore } from '@/constants/services';
 
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
-import { isReadForRole, notificationBelongsToRole, roleKey } from '@/src/utils/roleIdentity';
+import {
+  isReadForRole,
+  notificationBelongsToRole,
+  notificationHasExplicitRoleScope,
+  notificationIsAddressedToUid,
+  notificationLooksRiderOnly,
+  notificationTypeIsRiderOnly,
+  roleKey,
+} from '@/src/utils/roleIdentity';
 import { useAppTheme } from '@/hooks/ThemeContext';
 
 type NotificationType = 'ride' | 'payment' | 'driver' | 'system';
@@ -87,6 +95,16 @@ function toDate(value: any): Date | undefined {
     return Number.isNaN(parsed.getTime()) ? undefined : parsed;
   }
   return undefined;
+}
+
+function notificationTargetsDriver(data: Record<string, any>, uid: string): boolean {
+  return notificationBelongsToRole(data, uid, 'driver')
+    || (
+      notificationIsAddressedToUid(data, uid)
+      && !notificationHasExplicitRoleScope(data)
+      && !notificationLooksRiderOnly(data)
+      && !notificationTypeIsRiderOnly(data)
+    );
 }
 
 export default function NotificationsScreen() {
@@ -160,6 +178,7 @@ export default function NotificationsScreen() {
     const qUserId    = query(base, where('userId',    '==',             user.uid));
     const qRecipient = query(base, where('recipientId', '==',           user.uid));
     const qArr       = query(base, where('recipients', 'array-contains', user.uid));
+    const qRoleKey   = query(base, where('recipientKeys', 'array-contains', roleKey('driver', user.uid)));
     const qEmail     = user.email ? query(base, where('userEmail', '==', user.email)) : null;
 
     const scheduleFlush = () => {
@@ -203,7 +222,10 @@ export default function NotificationsScreen() {
         if (rawType.includes('ride') || rawType.includes('offer')) mappedType = 'ride';
         else if (rawType.includes('driver')) mappedType = 'driver';
         else if (rawType.includes('pay')) mappedType = 'payment';
-        if (!notificationBelongsToRole(data, user.uid, 'driver')) return;
+        if (!notificationTargetsDriver(data, user.uid)) {
+          pendingMap.delete(document.id);
+          return;
+        }
         const read = isReadForRole(data, user.uid, 'driver');
         pendingMap.set(document.id, {
           id: document.id,
@@ -224,7 +246,8 @@ export default function NotificationsScreen() {
     const u1 = onSnapshot(qUserId,    handleSnap, () => {});
     const u2 = onSnapshot(qRecipient, handleSnap, () => {});
     const u3 = onSnapshot(qArr,       handleSnap, () => {});
-    unsubsRef.current.push(u1, u2, u3);
+    const u4 = onSnapshot(qRoleKey,   handleSnap, () => {});
+    unsubsRef.current.push(u1, u2, u3, u4);
     if (qEmail) unsubsRef.current.push(onSnapshot(qEmail, handleSnap, () => {}));
 
     return () => {

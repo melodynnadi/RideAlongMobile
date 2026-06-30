@@ -20,7 +20,7 @@ const COLORS = {
   dark: '#0B1220',
 };
 
-export type ToastType = 'success' | 'error' | 'info' | 'warning';
+export type ToastType = 'success' | 'error' | 'info' | 'warning' | 'message' | 'loading';
 
 /**
  * Trigger haptic feedback for notification
@@ -49,11 +49,10 @@ export const showToast = (
   type: ToastType,
   title: string,
   message?: string,
-  duration: number = 4000
+  duration: number = 4000,
+  props?: Record<string, any>
 ): void => {
-  // Trigger haptic feedback (respects sound effects setting)
   triggerNotificationFeedback();
-  
   Toast.show({
     type,
     text1: title,
@@ -61,7 +60,46 @@ export const showToast = (
     visibilityTime: duration,
     position: 'top',
     topOffset: 50,
+    props,
   });
+};
+
+export const showMessageToast = (params: {
+  senderName: string;
+  preview?: string;
+  initials?: string;
+  online?: boolean;
+  time?: string;
+  onPress?: () => void;
+}): void => {
+  triggerNotificationFeedback();
+  const initials = params.initials
+    ?? params.senderName.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+  Toast.show({
+    type: 'message',
+    text1: `${params.senderName} sent a message`,
+    text2: params.preview ? `"${params.preview}"` : undefined,
+    visibilityTime: 5000,
+    position: 'top',
+    topOffset: 50,
+    props: { initials, online: params.online ?? true, time: params.time ?? 'now', onPress: params.onPress },
+  });
+};
+
+export const showLoadingToast = (title: string, subtitle?: string): void => {
+  Toast.show({
+    type: 'loading',
+    text1: title,
+    text2: subtitle,
+    visibilityTime: 30000,
+    position: 'top',
+    topOffset: 50,
+    autoHide: false,
+  });
+};
+
+export const hideToast = (): void => {
+  Toast.hide();
 };
 
 /**
@@ -90,15 +128,6 @@ export const showInfoToast = (title: string, message?: string): void => {
  */
 export const showWarningToast = (title: string, message?: string): void => {
   showToast('warning', title, message);
-};
-
-/**
- * Custom toast configuration for RideAlong styling
- * Note: Pass this as the config prop to <Toast />
- */
-export const toastConfig = {
-  // You can customize the default toast components here if needed
-  // For now, we'll use the default components with inline styling via the show() method
 };
 
 // Ride-specific toast helpers for drivers

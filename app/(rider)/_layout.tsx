@@ -9,13 +9,13 @@ import { HapticTab } from '@/components/HapticTab';
 import TabBarBackground from '@/components/ui/TabBarBackground';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { useAuthStore } from '@/stores/authStore';
-import { useUnreadMessages } from '@/hooks/useUnreadMessages';
+import { useRiderUnreadCounts } from '@/hooks/useRiderUnreadCounts';
 import { usePendingRatingGate } from '@/src/hooks/usePendingRatingGate';
 
 export default function RiderTabLayout() {
   const { colors } = useAppTheme();
   const { isAuthenticated, isEmailVerified, checkEmailVerification } = useAuthStore();
-  const totalUnread = useUnreadMessages();
+  const { messageCount: totalUnread } = useRiderUnreadCounts();
   usePendingRatingGate('rider', isAuthenticated && isEmailVerified);
 
   useEffect(() => {

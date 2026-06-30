@@ -27,7 +27,8 @@ import {
   where,
 } from 'firebase/firestore';
 import { firebaseAuth, firestore, GOOGLE_MAPS_API_KEY } from '@/constants/services';
-import { completeRide, riderCompleteRide } from '@/src/services/rideActions';
+import { completeRide, riderCompleteRide, groupComplete } from '@/src/services/rideActions';
+import { getOrCreateRideChat } from '@/src/services/chatAvailability';
 import { hasUserRatedRide } from '@/src/services/ratings';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { type AppColors } from '@/constants/theme';
@@ -217,6 +218,9 @@ type TripData = {
   riderId:   string | null;
   riderName: string | null;
   driverLocation: { latitude: number; longitude: number } | null;
+  ridePostingId?: string | null;
+  ridePostingRequestId?: string | null;
+  totalSeats?: number;
 };
 
 type DriverInfo = {
@@ -796,6 +800,15 @@ export function DriverTripInProgressReference() {
   const [durationMin,  setDurationMin]  = useState<number | null>(null);
   const [rideStatus,   setRideStatus]   = useState<string>('');
   const [completing,   setCompleting]   = useState(false);
+  const [groupPendingCount, setGroupPendingCount] = useState(1);
+  const [groupRiders, setGroupRiders] = useState<Array<{
+    confirmedRideId: string;
+    riderId: string | null;
+    ridePostingRequestId: string | null;
+    name: string;
+    photoURL: string | null;
+    status: string;
+  }>>([]);
   const [loading, setLoading] = useState(true);
   const ratingNavRef = useRef(false);
 
@@ -834,6 +847,9 @@ export function DriverTripInProgressReference() {
         riderId:  d.riderId  ?? null,
         riderName: d.riderName ?? null,
         driverLocation: null,
+        ridePostingId: d.ridePostingId ?? null,
+        ridePostingRequestId: d.ridePostingRequestId ?? null,
+        totalSeats: Number(d.totalSeats) || 1,
       });
       if (status === 'COMPLETED' && !ratingNavRef.current) {
         ratingNavRef.current = true;
@@ -847,6 +863,29 @@ export function DriverTripInProgressReference() {
     });
     return unsub;
   }, [confirmedRideId]);
+
+  // For multi-seat postings, track every sibling rider — pending-confirmation count
+  // and full passenger info so the live map can show everyone, not just this one.
+  useEffect(() => {
+    if (!trip?.ridePostingId || trip.totalSeats <= 1) { setGroupPendingCount(1); setGroupRiders([]); return; }
+    const qy = query(collection(firestore, 'confirmedRides'), where('ridePostingId', '==', trip.ridePostingId));
+    const unsub = onSnapshot(qy, (snap) => {
+      const pending = snap.docs.filter((d) => String(d.data()?.status || '').toUpperCase() !== 'COMPLETED').length;
+      setGroupPendingCount(pending);
+      setGroupRiders(snap.docs.map((d) => {
+        const data = d.data() || {};
+        return {
+          confirmedRideId: d.id,
+          riderId: data.riderId ?? null,
+          ridePostingRequestId: data.ridePostingRequestId ?? null,
+          name: data.riderName || 'Rider',
+          photoURL: data.riderAvatarUrl || data.userAvatarUrl || data.profilePicture || data.photoURL || null,
+          status: String(data.status || '').toUpperCase(),
+        };
+      }));
+    }, () => {});
+    return unsub;
+  }, [trip?.ridePostingId, trip?.totalSeats]);
 
   // Fetch rider profile
   useEffect(() => {
@@ -1059,17 +1098,36 @@ export function DriverTripInProgressReference() {
   };
 
   const openChat = async () => {
-    if (!confirmedRideId) return;
+    if (!confirmedRideId || !trip?.riderId || !uid) return;
+    // Reuse the rider's existing thread (keyed by ridePostingRequestId) instead of
+    // creating a new one — chats created here used to never match the rider's.
     try {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        if (attempt > 0) await new Promise((r) => setTimeout(r, 1500));
-        const chatSnap = await getDocs(query(collection(firestore, 'chats'), where('rideId', '==', confirmedRideId)));
-        if (!chatSnap.empty) {
-          router.push(`/(driver)/messages/${chatSnap.docs[0].id}` as any);
-          return;
-        }
-      }
-      Alert.alert('Chat not ready', 'The chat is still being set up. Try again in a moment.');
+      const chatId = await getOrCreateRideChat({
+        context: trip.ridePostingRequestId ? 'booking-request' : 'confirmed-ride',
+        rideId: confirmedRideId,
+        driverId: uid,
+        riderId: trip.riderId,
+        ridePostingId: trip.ridePostingId || null,
+        ridePostingRequestId: trip.ridePostingRequestId || null,
+      });
+      router.push(`/(driver)/messages/${chatId}` as any);
+    } catch {
+      Alert.alert('Error', 'Could not open chat.');
+    }
+  };
+
+  const openChatWithOtherRider = async (rider: { confirmedRideId: string; riderId: string | null; ridePostingRequestId: string | null }) => {
+    if (!rider.riderId || !uid) return;
+    try {
+      const chatId = await getOrCreateRideChat({
+        context: rider.ridePostingRequestId ? 'booking-request' : 'confirmed-ride',
+        rideId: rider.confirmedRideId,
+        driverId: uid,
+        riderId: rider.riderId,
+        ridePostingId: trip?.ridePostingId || null,
+        ridePostingRequestId: rider.ridePostingRequestId || null,
+      });
+      router.push(`/(driver)/messages/${chatId}` as any);
     } catch {
       Alert.alert('Error', 'Could not open chat.');
     }
@@ -1097,7 +1155,13 @@ export function DriverTripInProgressReference() {
     if (!confirmedRideId || completing) return;
     const doComplete = async () => {
       setCompleting(true);
-      await completeRide({ confirmedId: confirmedRideId });
+      // Multi-seat postings have one confirmedRide per rider — completing here
+      // must mark every sibling seat, not just the one this trip page is bound to.
+      if (trip?.ridePostingId && trip.totalSeats > 1) {
+        await groupComplete(trip.ridePostingId);
+      } else {
+        await completeRide({ confirmedId: confirmedRideId });
+      }
       setCompleting(false);
     };
     // Check distance from dropoff
@@ -1251,6 +1315,24 @@ export function DriverTripInProgressReference() {
             </TouchableOpacity>
           </View>
 
+          {/* Other passengers on this group ride */}
+          {groupRiders.filter((r) => r.confirmedRideId !== confirmedRideId).map((r) => (
+            <View key={r.confirmedRideId} style={s.driverRow}>
+              <View style={s.driverAvatar}>
+                {r.photoURL
+                  ? <Image source={{ uri: r.photoURL }} style={s.driverAvatarImg} />
+                  : <Text style={s.driverInitials}>{r.name.split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase()}</Text>}
+              </View>
+              <View style={s.driverInfo}>
+                <Text style={s.driverName}>{r.name}</Text>
+                <Text style={s.driverVehicle}>{r.status === 'COMPLETED' ? 'Completed' : 'Passenger'}</Text>
+              </View>
+              <TouchableOpacity style={s.iconBtn} onPress={() => openChatWithOtherRider(r)} activeOpacity={0.75}>
+                <Ionicons name="chatbubble-ellipses" size={20} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+          ))}
+
           {/* ETA row */}
           <View style={s.etaRow}>
             <View style={s.etaBlock}>
@@ -1285,7 +1367,7 @@ export function DriverTripInProgressReference() {
           ) : rideStatus === 'DRIVER_COMPLETED' ? (
             <View style={s.waitingBanner}>
               <ActivityIndicator size="small" color={colors.primary} style={{ marginRight: 10 }} />
-              <Text style={s.waitingText}>Waiting for rider to confirm arrival…</Text>
+              <Text style={s.waitingText}>Waiting for {groupPendingCount} rider{groupPendingCount === 1 ? '' : 's'} to confirm arrival…</Text>
             </View>
           ) : (
             <View style={[s.waitingBanner, { backgroundColor: colors.greenDim }]}>

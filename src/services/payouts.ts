@@ -168,10 +168,11 @@ export async function getDriverEarnings(userId: string): Promise<EarningsData> {
   // 2. ridesCompleted count from confirmedRides (optional for future UI)
   // 3. availableBalance from Stripe instant_available via driver-stats endpoint
 
-  // Firestore: get user profile totalEarnings
+  // Firestore: get driver profile totalEarnings — the backend increments this
+  // on drivers/{driverId} after each payment capture, not on users/{uid}.
   let totalEarnings = 0;
   try {
-    const userRef = doc(firestore as any, 'users', userId);
+    const userRef = doc(firestore as any, 'drivers', userId);
     const snap = await getDoc(userRef);
     if (snap.exists()) {
       const data: any = snap.data();

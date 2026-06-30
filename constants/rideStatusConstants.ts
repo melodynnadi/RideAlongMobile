@@ -12,7 +12,15 @@ export const TERMINAL_RIDE_STATUSES = [
   'CANCELED',
   'CANCELLED',
   'expired',
-  'EXPIRED'
+  'EXPIRED',
+  'rejected',
+  'REJECTED',
+  'declined',
+  'DECLINED',
+  'complete',
+  'COMPLETE',
+  'finished',
+  'FINISHED',
 ] as const;
 
 /**
@@ -26,8 +34,21 @@ export const ACTIVE_RIDE_STATUSES = [
   'in-progress',
   'IN-PROGRESS',
   'active',
-  'ACTIVE'
+  'ACTIVE',
+  'pending',
+  'PENDING',
+  'open',
+  'OPEN',
+  'requested',
+  'REQUESTED',
+  'offered',
+  'OFFERED',
+  'offer_sent',
+  'OFFER_SENT',
 ] as const;
+
+const normalizeRideStatus = (status: string | undefined | null): string =>
+  String(status || '').replace(/[-\s]+/g, '_').toLowerCase().trim();
 
 /**
  * Check if a ride status is terminal (no more messaging allowed)
@@ -36,8 +57,8 @@ export const ACTIVE_RIDE_STATUSES = [
  */
 export function isTerminalStatus(status: string | undefined | null): boolean {
   if (!status) return false;
-  const normalizedStatus = String(status).toLowerCase().trim();
-  return TERMINAL_RIDE_STATUSES.some(s => s.toLowerCase() === normalizedStatus);
+  const normalizedStatus = normalizeRideStatus(status);
+  return TERMINAL_RIDE_STATUSES.some(s => normalizeRideStatus(s) === normalizedStatus);
 }
 
 /**
@@ -47,11 +68,11 @@ export function isTerminalStatus(status: string | undefined | null): boolean {
  */
 export function canSendMessages(status: string | undefined | null): boolean {
   if (!status) return false;
-  const normalizedStatus = String(status).toLowerCase().trim();
-  return ACTIVE_RIDE_STATUSES.some(s => s.toLowerCase() === normalizedStatus);
+  const normalizedStatus = normalizeRideStatus(status);
+  return ACTIVE_RIDE_STATUSES.some(s => normalizeRideStatus(s) === normalizedStatus);
 }
 
 /**
  * Message to display when messaging is disabled
  */
-export const MESSAGING_DISABLED_MESSAGE = 'This conversation is closed. Messaging is no longer available for this ride.';
+export const MESSAGING_DISABLED_MESSAGE = 'This chat is no longer available for this ride.';

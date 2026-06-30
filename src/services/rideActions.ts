@@ -6,7 +6,7 @@ import { resolveConfirmedDocId } from '@/src/services/ridesData';
 import { submitDriverFlag, FlagPayload } from '@/src/services/flagService';
 import { logActivity } from '@/src/services/activity';
 import EmailTriggerService from '../../services/EmailTriggerService';
-import { captureRidePayment, cancelRidePayment } from '@/services/payments';
+import { captureRidePayment } from '@/services/payments';
 
 function showRideError(e: any) {
   try { console.warn('updateRideStatus error', e); } catch {}
@@ -204,39 +204,17 @@ export async function cancelRide(card: RideCardRef): Promise<boolean> {
       return false;
     }
 
-    // Void the authorized payment so the rider is not charged
-    const paymentIntentId: string | null =
-      rideData.paymentIntentId || rideData.stripePaymentIntentId || null;
-    if (paymentIntentId) {
-      try {
-        await cancelRidePayment({ paymentIntentId, rideId });
-      } catch (payErr) {
-        try { console.warn('[cancelRide] payment void failed', payErr); } catch {}
-        // Continue — the ride should still be cancelled even if payment void fails
-      }
-    }
-
-    // Mark the confirmed ride cancelled
-    await updateDoc(doc(firestore, 'confirmedRides', rideId), {
-      status: 'CANCELLED',
-      cancelledAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+    // Cancel via the backend so the payment hold is voided, the cancellation is
+    // propagated to the originating request docs, and — for group rides — the
+    // seat is released back to the parent posting (reopening it if it was full).
+    const base = getApiBaseUrl();
+    const resp = await fetch(`${base}/api/rides/${encodeURIComponent(rideId)}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collection: 'confirmedRides', cancelledBy: 'driver' }),
     });
-
-    // Propagate cancellation to the source request documents
-    const sourceRequestId: string | null = rideData.rideRequestId || null;
-    const sourcePostingRequestId: string | null = rideData.ridePostingRequestId || null;
-    if (sourceRequestId) {
-      await updateDoc(doc(firestore, 'rideRequests', sourceRequestId), {
-        status: 'cancelled',
-        updatedAt: serverTimestamp(),
-      }).catch(() => {});
-    }
-    if (sourcePostingRequestId) {
-      await updateDoc(doc(firestore, 'ridePostingRequests', sourcePostingRequestId), {
-        status: 'cancelled',
-        updatedAt: serverTimestamp(),
-      }).catch(() => {});
+    if (!resp.ok) {
+      throw new Error(`Server error ${resp.status}`);
     }
 
     await logActivity({
@@ -345,7 +323,7 @@ export async function groupFlag(ridePostingId: string, payload: FlagPayload): Pr
 
 // --- Group ride actions (posting-level) ---
 // Pick up all child confirmed rides for a posting (Dual Passenger Group Ride)
-export async function groupPickup(ridePostingId: string): Promise<{ ok: boolean; updated: number; riderIds: string[] }> {
+export async function groupPickup(ridePostingId: string): Promise<{ ok: boolean; updated: number; total: number; failedCount: number; riderIds: string[]; confirmedRideIds: string[] }> {
   try {
     if (!ridePostingId) throw new Error('missing_posting_id');
     const qy = query(
@@ -365,6 +343,7 @@ export async function groupPickup(ridePostingId: string): Promise<{ ok: boolean;
       }
     });
     let updated = 0;
+    const confirmedRideIds: string[] = [];
     for (const id of targets) {
       try {
         // Local mark then backend callable (mirrors single-ride flow)
@@ -375,19 +354,28 @@ export async function groupPickup(ridePostingId: string): Promise<{ ok: boolean;
         const ok = await callUpdateRideStatus(id, 'driver_pickup');
         if (!ok) throw new Error('pickup_failed');
         updated++;
+        confirmedRideIds.push(id);
       } catch (e) {
-        // continue other children
+        // Don't silently drop this rider — surface it so the driver knows to retry.
+        console.warn('[groupPickup] failed for confirmedRide', id, e);
       }
     }
-    return { ok: true, updated, riderIds };
+    const failedCount = targets.length - updated;
+    if (failedCount > 0) {
+      Alert.alert(
+        'Pickup incomplete',
+        `Picked up ${updated} of ${targets.length} passenger(s). Tap Pick Up again to retry the rest.`,
+      );
+    }
+    return { ok: failedCount === 0, updated, total: targets.length, failedCount, riderIds, confirmedRideIds };
   } catch (e) {
     showRideError(e);
-    return { ok: false, updated: 0, riderIds: [] };
+    return { ok: false, updated: 0, total: 0, failedCount: 0, riderIds: [], confirmedRideIds: [] };
   }
 }
 
 // Request completion for all IN_PROGRESS child rides of a posting
-export async function groupComplete(ridePostingId: string): Promise<{ ok: boolean; updated: number; riderIds: string[] }> {
+export async function groupComplete(ridePostingId: string): Promise<{ ok: boolean; updated: number; total: number; failedCount: number; riderIds: string[] }> {
   try {
     if (!ridePostingId) throw new Error('missing_posting_id');
     const qy = query(
@@ -418,13 +406,21 @@ export async function groupComplete(ridePostingId: string): Promise<{ ok: boolea
         if (!ok) throw new Error('complete_failed');
         updated++;
       } catch (e) {
-        // continue
+        // Don't silently drop this rider — surface it so the driver knows to retry.
+        console.warn('[groupComplete] failed for confirmedRide', id, e);
       }
     }
-    return { ok: true, updated, riderIds };
+    const failedCount = targets.length - updated;
+    if (failedCount > 0) {
+      Alert.alert(
+        'Completion incomplete',
+        `Completed ${updated} of ${targets.length} passenger(s). Tap Complete Ride again to retry the rest.`,
+      );
+    }
+    return { ok: failedCount === 0, updated, total: targets.length, failedCount, riderIds };
   } catch (e) {
     showRideError(e);
-    return { ok: false, updated: 0, riderIds: [] };
+    return { ok: false, updated: 0, total: 0, failedCount: 0, riderIds: [] };
   }
 }
 

@@ -9,7 +9,7 @@ import * as Device from 'expo-device';
 import { Platform, AppState } from 'react-native';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import { showToast, rideToasts } from '../utils/showToast';
+import { showToast, showMessageToast, rideToasts } from '../utils/showToast';
 import { buildToastKey, shouldShowToastEvent } from '../utils/toastDeduper';
 import { settingsService } from './settingsService';
 import { useAuthStore } from '@/stores/authStore';
@@ -346,13 +346,18 @@ class NotificationService {
       // Backend sends 'ride_status_change' with a status sub-field
       case 'ride_status_change': {
         const status = String(notificationData.status || '').toUpperCase();
-        if (status === 'IN_PROGRESS') rideToasts.rideStarted('');
+        if (status === 'IN_PROGRESS') rideToasts.rideStarted(notificationData.riderName || notificationData.userName || notificationData.passengerName || 'Rider');
         else if (status === 'COMPLETED') rideToasts.rideCompleted();
         else showToast('info', title || 'Ride update', body || undefined);
         break;
       }
       case 'new_message':
-        showToast('info', title || 'New message', body || undefined);
+        showMessageToast({
+          senderName: notificationData.senderName || notificationData.riderName || notificationData.driverName || title || 'New message',
+          preview: body || undefined,
+          initials: notificationData.senderInitials || undefined,
+          online: true,
+        });
         break;
       default:
         showToast('info', title || 'Notification', body || undefined);

@@ -50,7 +50,7 @@ const driverOnlyNotificationPatterns = [
   /\bride request received\b/,
   /\brequest received\b/,
   /\brequested (a seat|your ride|to join)\b/,
-  /\bpassenger\b/,
+  /\bpassengers?\b/,
 ];
 
 const riderOnlyNotificationPatterns = [
@@ -60,6 +60,7 @@ const riderOnlyNotificationPatterns = [
   /\bseat confirmed\b/,
   /\bpayment authorized\b/,
   /\brate your driver\b/,
+  /\bpreferred.?route\b/,
 ];
 
 const looksDriverOnlyNotification = (data: Record<string, any>) => (
@@ -69,6 +70,27 @@ const looksDriverOnlyNotification = (data: Record<string, any>) => (
 const looksRiderOnlyNotification = (data: Record<string, any>) => (
   riderOnlyNotificationPatterns.some((pattern) => pattern.test(textBlob(data)))
 );
+
+export const notificationLooksDriverOnly = looksDriverOnlyNotification;
+export const notificationLooksRiderOnly = looksRiderOnlyNotification;
+
+export function notificationIsAddressedToUid(data: Record<string, any>, uid: string): boolean {
+  const recipients = asStringArray(data.recipients);
+  return data.userId === uid || data.recipientId === uid || recipients.includes(uid);
+}
+
+export function notificationHasExplicitRoleScope(data: Record<string, any>): boolean {
+  return Boolean(
+    asStringArray(data.recipientKeys).length > 0
+    || explicitNotificationRoles(data).length > 0
+    || data.driverId
+    || data.driverUID
+    || data.driverUid
+    || data.riderId
+    || data.riderUID
+    || data.riderUid
+  );
+}
 
 export function chatBelongsToRole(data: Record<string, any>, uid: string, role: RideAlongRole): boolean {
   const participants = asStringArray(data.participants);
@@ -91,6 +113,32 @@ export function chatBelongsToRole(data: Record<string, any>, uid: string, role: 
   return !hasExplicitRoleShape && participants.includes(uid);
 }
 
+// Notification types that exclusively target drivers
+const knownDriverNotificationTypes = new Set([
+  'payout_sent', 'payout_pending', 'payout_failed',
+  'bank_account_added', 'bank_account_verification_needed', 'bank_account_verification_failed',
+  'driver_application_approved', 'driver_application_rejected', 'driver_approved', 'driver_rejected',
+  'ride_request_received', 'ride_request_canceled', 'two_passenger_mode_reminder',
+  'ride_fully_booked', 'ride_seats_filled_driver', 'ride_posting_expired',
+]);
+
+// Notification types that exclusively target riders
+const knownRiderNotificationTypes = new Set([
+  'ride_request_submitted', 'ride_request_declined', 'ride_request_expired',
+  'payment_success', 'charge_succeeded', 'charge_failed', 'refund_issued',
+  'payment_method_added', 'payment_method_failed', 'payment_method_expiring',
+  'student_verified', 'document_uploaded', 'verification_rejected',
+  'student_document_uploaded', 'student_verification_approved', 'student_verification_rejected',
+  'email_verification_reminder', 'email_verified', 'password_changed',
+  'preferred_route_match', 'ride_offer', 'driver_on_the_way', 'driver_arrived',
+  'ride_updated',
+]);
+
+export function notificationTypeIsRiderOnly(data: Record<string, any>): boolean {
+  const type = String(data.type || '').toLowerCase().replace(/-/g, '_');
+  return knownRiderNotificationTypes.has(type);
+}
+
 export function notificationBelongsToRole(data: Record<string, any>, uid: string, role: RideAlongRole): boolean {
   const recipientKeys = asStringArray(data.recipientKeys);
   if (recipientKeys.includes(roleKey(role, uid))) return true;
@@ -111,16 +159,18 @@ export function notificationBelongsToRole(data: Record<string, any>, uid: string
     if (driverId === uid && riderId !== uid) return false;
   }
 
+  // Type-based detection catches known notification types even without role fields.
+  // This fixes existing Firestore data that lacks recipientKeys.
+  const notifType = String(data.type || '').toLowerCase().replace(/-/g, '_');
+  if (knownDriverNotificationTypes.has(notifType)) return role === 'driver';
+  if (knownRiderNotificationTypes.has(notifType)) return role === 'rider';
+
   if (role === 'rider' && looksDriverOnlyNotification(data)) return false;
   if (role === 'driver' && looksRiderOnlyNotification(data)) return false;
 
-  const recipients = asStringArray(data.recipients);
-  const uidMatch = data.userId === uid || data.recipientId === uid || recipients.includes(uid);
+  const uidMatch = notificationIsAddressedToUid(data, uid);
   if (!uidMatch) return false;
 
-  // When a notification has no role-scoping at all (just userId==uid), show it on the
-  // role the user was in when the notification was created. If we still can't determine
-  // that, default to showing it only on rider side to avoid double-showing on driver home.
   const createdForRole = data.userRole || data.senderRole || data.createdForRole;
   if (createdForRole) return String(createdForRole).toLowerCase() === role;
 
