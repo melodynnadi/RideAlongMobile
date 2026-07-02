@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import * as WebBrowser from 'expo-web-browser';
 import {
   Alert,
   Linking,
@@ -204,6 +205,14 @@ export default function SettingsScreen() {
             <NavRow
               colors={colors}
               s={s}
+              icon="chatbubble-ellipses-outline"
+              label="Report a Bug / Feedback"
+              sub="Help us improve RideAlong"
+              onPress={() => WebBrowser.openBrowserAsync('https://ridealongapp.com/pages/feedback')}
+            />
+            <NavRow
+              colors={colors}
+              s={s}
               icon="mail-outline"
               label="Contact Support"
               sub="Response within 24h"
@@ -215,7 +224,7 @@ export default function SettingsScreen() {
               icon="shield-checkmark-outline"
               label="Privacy Policy"
               sub="How we protect your data"
-              onPress={() => openLink('https://ridealongapp.com/privacy')}
+              onPress={() => WebBrowser.openBrowserAsync('https://ridealongapp.com/pages/privacy')}
             />
             <NavRow
               colors={colors}
@@ -223,7 +232,7 @@ export default function SettingsScreen() {
               icon="document-text-outline"
               label="Terms of Service"
               sub="User agreement"
-              onPress={() => openLink('https://ridealongapp.com/terms')}
+              onPress={() => WebBrowser.openBrowserAsync('https://ridealongapp.com/pages/terms')}
               isLast
             />
           </View>

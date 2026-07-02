@@ -245,15 +245,40 @@ export default function RiderProfilePage() {
   useEffect(() => {
     if (!riderId) return;
     let mounted = true;
+    let unsubReviews: (() => void) | null = null;
 
-    const revQ = query(collection(firestore, 'rideRatings'), where('rateeId', '==', riderId));
-    const unsubReviews = onSnapshot(revQ, (snap) => {
+    // Fetch rider's completed rides first so we can filter ratings to only ones
+    // where they acted as a rider — dual-role accounts share a UID, so without
+    // this filter, ratings earned as a driver bleed into the rider profile.
+    const riderRideIds = new Set<string>();
+    (async () => {
+      try {
+        const ridesSnap = await getDocs(
+          query(collection(firestore, 'confirmedRides'), where('riderId', '==', riderId), where('status', '==', 'COMPLETED'))
+        );
+        if (!mounted) return;
+        setTotalRides(ridesSnap.size || 0);
+        ridesSnap.docs.forEach((d) => {
+          riderRideIds.add(d.id);
+          const rd = d.data() as any;
+          if (rd.rideRequestId) riderRideIds.add(String(rd.rideRequestId));
+          if (rd.ridePostingId) riderRideIds.add(String(rd.ridePostingId));
+          if (rd.ridePostingRequestId) riderRideIds.add(String(rd.ridePostingRequestId));
+        });
+      } catch {}
+
       if (!mounted) return;
-      const revs: Review[] = snap.docs.map((d) => {
-        const data = d.data() as any;
-        return { id: d.id, ...data, rating: typeof data.stars === 'number' ? data.stars : data.rating } as Review;
-      });
-      setReviews(revs);
+      const revQ = query(collection(firestore, 'rideRatings'), where('rateeId', '==', riderId));
+      unsubReviews = onSnapshot(revQ, (snap) => {
+        if (!mounted) return;
+        const allRevs: Review[] = snap.docs.map((d) => {
+          const data = d.data() as any;
+          return { id: d.id, ...data, rating: typeof data.stars === 'number' ? data.stars : data.rating } as Review;
+        });
+        const revs = riderRideIds.size > 0
+          ? allRevs.filter(r => riderRideIds.has(String((r as any).rideId || '')))
+          : allRevs;
+        setReviews(revs);
 
       (async () => {
         try {
@@ -327,6 +352,7 @@ export default function RiderProfilePage() {
         } catch { setComments([]); }
       })();
     }, () => {});
+    })(); // close outer async IIFE (rides fetch + ratings subscription)
 
     (async () => {
       try {
@@ -346,16 +372,11 @@ export default function RiderProfilePage() {
 
         if (!mounted) return;
         setRider(finalRider);
-
-        const ridesSnap = await getDocs(
-          query(collection(firestore, 'confirmedRides'), where('riderId', '==', riderId), where('status', '==', 'COMPLETED'))
-        );
-        if (mounted) setTotalRides(ridesSnap.size || 0);
       } catch {}
       finally { if (mounted) setLoading(false); }
     })();
 
-    return () => { mounted = false; unsubReviews(); };
+    return () => { mounted = false; unsubReviews?.(); };
   }, [riderId]);
 
   if (loading) {
@@ -538,9 +559,9 @@ export default function RiderProfilePage() {
 
           {totalReviews === 0 && prefEntries.length === 0 && comments.length === 0 && (
             <View style={s.emptyState}>
-              <Ionicons name="person-circle-outline" size={48} color={colors.border} />
-              <Text style={s.emptyTitle}>No activity yet</Text>
-              <Text style={s.emptyText}>{"This rider hasn't completed any rides or received reviews."}</Text>
+              <Ionicons name="ribbon-outline" size={48} color={colors.border} />
+              <Text style={s.emptyTitle}>New to RideAlong</Text>
+              <Text style={s.emptyText}>This rider is just getting started — no ratings or reviews yet.</Text>
             </View>
           )}
 

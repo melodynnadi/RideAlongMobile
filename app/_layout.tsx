@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import * as Sentry from '@sentry/react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -17,6 +18,20 @@ import DismissKeyboardView from '@/components/DismissKeyboardView';
 import SplashScreen from '@/components/SplashScreen';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { notificationService } from '@/src/services/notificationService';
+
+// Crash reporting — set EXPO_PUBLIC_SENTRY_DSN in .env to enable
+const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    environment: __DEV__ ? 'development' : 'production',
+    tracesSampleRate: __DEV__ ? 1.0 : 0.2,
+    // Tag every event with app context for easy filtering
+    initialScope: { tags: { app: 'ridealong-mobile' } },
+  });
+} else if (!__DEV__) {
+  console.warn('[Sentry] EXPO_PUBLIC_SENTRY_DSN not set — crash reporting disabled in production');
+}
 
 // Keep native splash up until we explicitly hide it on first React frame.
 NativeSplashScreen.preventAutoHideAsync();
@@ -146,7 +161,7 @@ export default function RootLayout() {
               </DismissKeyboardView>
               {splashVisible && (
                 <View style={StyleSheet.absoluteFill}>
-                  <SplashScreen />
+                  <SplashScreen animated={false} />
                 </View>
               )}
             </ErrorBoundary>

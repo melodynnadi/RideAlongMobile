@@ -148,7 +148,9 @@ export async function riderCompleteRide(confirmedRideId: string): Promise<boolea
       metadata: { role: 'rider' },
     });
 
-    // Capture the authorized payment — rider confirming is the final step
+    // Capture the authorized payment — rider confirming is the final step.
+    // Guard: only capture if the ride actually progressed through pickup (driverPickupConfirmed)
+    // to prevent capturing payment for rides that were never actually driven.
     try {
       const rideSnap = await getDoc(doc(firestore, 'confirmedRides', confirmedRideId));
       if (rideSnap.exists()) {
@@ -156,8 +158,9 @@ export async function riderCompleteRide(confirmedRideId: string): Promise<boolea
         const paymentIntentId: string | null =
           rideData.paymentIntentId || rideData.stripePaymentIntentId || null;
         const driverId: string | null = rideData.driverId || null;
-        if (paymentIntentId && driverId) {
-          // Mark payment as pending so UI can show a processing state
+        const wasPickedUp = rideData.driverPickupConfirmed === true || rideData.riderPickupConfirmed === true;
+        const alreadyCaptured = rideData.paymentStatus === 'CAPTURED';
+        if (paymentIntentId && driverId && wasPickedUp && !alreadyCaptured) {
           await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), {
             paymentStatus: 'PENDING',
           }).catch(() => {});
@@ -165,10 +168,11 @@ export async function riderCompleteRide(confirmedRideId: string): Promise<boolea
           await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), {
             paymentStatus: 'CAPTURED',
           }).catch(() => {});
+        } else if (paymentIntentId && !wasPickedUp) {
+          console.warn('[riderComplete] skipping capture — driver never confirmed pickup');
         }
       }
     } catch (captureErr) {
-      // Mark as failed so the rider sees a clear message and support can reconcile
       await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), {
         paymentStatus: 'FAILED',
       }).catch(() => {});
@@ -232,91 +236,54 @@ export async function cancelRide(card: RideCardRef): Promise<boolean> {
   }
 }
 
+async function callFlagEndpoint(rideId: string, payload: FlagPayload): Promise<{ flaggedRides: number; isGroupRide: boolean }> {
+  const token = await firebaseAuth.currentUser?.getIdToken();
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/rides/${encodeURIComponent(rideId)}/flag`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ reason: payload.reason, details: payload.details, flaggedByRole: payload.flaggedByRole, severity: 'normal' }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Server error ${res.status}`);
+  return { flaggedRides: body.flaggedRides || 1, isGroupRide: body.isGroupRide || false };
+}
+
 export async function flagRide(card: RideCardRef, payload: FlagPayload): Promise<boolean> {
   try {
     const rideId = await resolveConfirmedDocId(card);
-    if (!rideId) {
-      Alert.alert('Error', 'Ride not found');
-      return false;
-    }
-    const result = await submitDriverFlag(rideId, payload);
-    await logActivity({
-      type: 'ride_flagged',
-      entityType: 'ride',
-      entityId: rideId,
-      metadata: { 
-        reason: payload.reason, 
-        payload,
-        flaggedRides: result.flaggedRides,
-        isGroupRide: result.isGroupRide 
-      },
-    });
-    
-    // Show appropriate success message
-    if (result.isGroupRide) {
-      Alert.alert(
-        'Group Ride Flagged',
-        `All ${result.flaggedRides} passengers in this group ride have been flagged. Admin will review this case. No further actions can be taken until resolved.`,
-        [{ text: 'OK' }]
-      );
-    } else {
-      Alert.alert(
-        'Ride Flagged',
-        'This ride has been flagged for admin review. No further actions can be taken until resolved.',
-        [{ text: 'OK' }]
-      );
-    }
-    
+    if (!rideId) { Alert.alert('Error', 'Ride not found'); return false; }
+    const result = await callFlagEndpoint(rideId, payload);
+    await logActivity({ type: 'ride_flagged', entityType: 'ride', entityId: rideId, metadata: { reason: payload.reason, flaggedRides: result.flaggedRides, isGroupRide: result.isGroupRide } });
+    Alert.alert(
+      result.isGroupRide ? 'Group Ride Flagged' : 'Ride Flagged',
+      result.isGroupRide
+        ? `All ${result.flaggedRides} passengers have been flagged. Admin will review. No further actions until resolved.`
+        : 'This ride has been flagged for admin review. No further actions until resolved.',
+      [{ text: 'OK' }]
+    );
     return true;
   } catch (e: any) {
-    try { console.warn('flagRide error', e); } catch {}
-    Alert.alert('Error', 'Could not submit flag. Please try again.');
+    console.warn('flagRide error', e);
+    Alert.alert('Error', e?.message || 'Could not submit flag. Please try again.');
     return false;
   }
 }
 
-// Flag all rides in a group posting (driver-initiated)
 export async function groupFlag(ridePostingId: string, payload: FlagPayload): Promise<boolean> {
   try {
     if (!ridePostingId) throw new Error('missing_posting_id');
-    
-    // Find any confirmed ride from this posting to use as the base
-    const qy = query(
-      collection(firestore, 'confirmedRides'),
-      where('ridePostingId', '==', ridePostingId)
-    );
+    const qy = query(collection(firestore, 'confirmedRides'), where('ridePostingId', '==', ridePostingId));
     const snap = await getDocs(qy);
-    
-    if (snap.empty) {
-      Alert.alert('Error', 'No confirmed rides found for this posting');
-      return false;
-    }
-    
-    // Use the first ride's ID to trigger the group flag
+    if (snap.empty) { Alert.alert('Error', 'No confirmed rides found for this posting'); return false; }
     const firstRideId = snap.docs[0].id;
-    const result = await submitDriverFlag(firstRideId, payload);
-    
-    await logActivity({
-      type: 'group_ride_flagged',
-      entityType: 'posting',
-      entityId: ridePostingId,
-      metadata: { 
-        reason: payload.reason, 
-        payload,
-        flaggedRides: result.flaggedRides 
-      },
-    });
-    
-    Alert.alert(
-      'Group Ride Flagged',
-      `All ${result.flaggedRides} passengers in this group ride have been flagged. Admin will review this case.`,
-      [{ text: 'OK' }]
-    );
-    
+    const result = await callFlagEndpoint(firstRideId, payload);
+    await logActivity({ type: 'group_ride_flagged', entityType: 'posting', entityId: ridePostingId, metadata: { reason: payload.reason, flaggedRides: result.flaggedRides } });
+    Alert.alert('Group Ride Flagged', `All ${result.flaggedRides} passengers have been flagged. Admin will review.`, [{ text: 'OK' }]);
     return true;
   } catch (e: any) {
-    try { console.warn('groupFlag error', e); } catch {}
-    Alert.alert('Error', 'Could not submit flag. Please try again.');
+    console.warn('groupFlag error', e);
+    Alert.alert('Error', e?.message || 'Could not submit flag. Please try again.');
     return false;
   }
 }

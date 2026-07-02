@@ -130,6 +130,7 @@ export default function EarningsScreen() {
   const [ridesCompleted, setRidesCompleted] = useState(0);
   const [averagePerRide, setAveragePerRide] = useState(0);
   const [depositing, setDepositing]       = useState(false);
+  const [depositSlowWarning, setDepositSlowWarning] = useState(false);
   const [accountId, setAccountId]         = useState<string | null>(null);
   const [linking, setLinking]             = useState(false);
   const [showAddBankModal, setShowAddBankModal] = useState(false);
@@ -183,6 +184,20 @@ export default function EarningsScreen() {
 
   useEffect(() => { load(); }, []);
   useEffect(() => { return () => { spinValue.stopAnimation(); }; }, []);
+
+  // Refresh earnings automatically when Stripe redirects back via deep link
+  useEffect(() => {
+    const isStripeReturn = (url: string) =>
+      url.includes('earnings') && (url.includes('stripe=return') || url.includes('stripe=refresh'));
+    const handleUrl = ({ url }: { url: string }) => {
+      if (isStripeReturn(url)) setTimeout(() => onRefresh(), 1500);
+    };
+    const sub = Linking.addEventListener('url', handleUrl);
+    Linking.getInitialURL().then((url) => {
+      if (url && isStripeReturn(url)) setTimeout(() => onRefresh(), 1500);
+    }).catch(() => {});
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     if (earnings) {
@@ -248,19 +263,26 @@ export default function EarningsScreen() {
     const user = firebaseAuth.currentUser;
     if (!user) { Alert.alert('Not signed in', 'Please sign in first.'); return; }
     if (!accountId) { Alert.alert('Set up payouts', 'Please set up your payout account first.'); return; }
+    // Warm up the server before the multi-step Stripe operation so we don't
+    // burn half the timeout on a cold-start spin-up.
+    try { await fetch(`${getApiBaseUrl()}/health`, { signal: AbortSignal.timeout(5000) }).catch(() => {}); } catch {}
     const grossDollars = summary.available;
     if (!grossDollars || grossDollars <= 0) { Alert.alert('No instant balance', 'You have no funds currently eligible for instant deposit.'); return; }
-    const rideAlongFee  = grossDollars * 0.03;
-    const estimatedNet  = grossDollars - rideAlongFee;
-    const stripeInstantFee = estimatedNet * 0.015;
+    const rideAlongFee     = grossDollars * 0.03;         // 3% — transferred to RideAlong
+    const bankPayout       = grossDollars - rideAlongFee; // 97% — the actual payout sent to your bank
+    const stripeInstantFee = bankPayout * 0.015;          // 1.5% Stripe instant payout fee (deducted from your Stripe balance)
+    const totalFees        = rideAlongFee + stripeInstantFee;
+    const netReceived      = grossDollars - totalFees;    // your real net after all fees
     Alert.alert(
-      'Instant Deposit Fees',
-      `Available Balance: $${grossDollars.toFixed(2)}\n\nFees:\n• RideAlong fee (3%): -$${rideAlongFee.toFixed(2)}\n• Stripe instant payout fee (1.5%): about -$${stripeInstantFee.toFixed(2)}, deducted by Stripe\n\nEstimated RideAlong payout: $${estimatedNet.toFixed(2)}\n\nDo you want to proceed?`,
+      'Instant Deposit',
+      `Available balance: $${grossDollars.toFixed(2)}\n\nFees:\n• RideAlong (3%): -$${rideAlongFee.toFixed(2)}\n• Stripe instant payout (1.5%): -$${stripeInstantFee.toFixed(2)}\n• Total fees: -$${totalFees.toFixed(2)}\n\nYou receive: $${netReceived.toFixed(2)}\n\nProceed?`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Continue', onPress: async () => {
           try {
             setDepositing(true);
+            setDepositSlowWarning(false);
+            const slowTimer = setTimeout(() => setDepositSlowWarning(true), 10000);
             const res = await instantDeposit(accountId, grossDollars);
             if (res.ok) {
               try { await logActivity({ type: 'payout_initiated', entityType: 'payout', entityId: res.payoutId ?? null, metadata: { accountId, requestedGrossDollars: grossDollars, feePhase: 'deducted_server_side', payoutId: res.payoutId ?? null, message: res.message ?? null } }); } catch {}
@@ -273,7 +295,7 @@ export default function EarningsScreen() {
           } catch (e: any) {
             try { await logActivity({ type: 'payout_failed', entityType: 'payout', entityId: null, metadata: { accountId, requestedGrossDollars: grossDollars, error: e?.message ?? String(e) } }); } catch {}
             Alert.alert('Deposit error', e?.message || 'Could not process deposit');
-          } finally { setDepositing(false); }
+          } finally { clearTimeout(slowTimer); setDepositing(false); setDepositSlowWarning(false); }
         } },
       ]
     );
@@ -296,8 +318,14 @@ export default function EarningsScreen() {
       async function continueSetup() {
         try {
           setLinking(true);
-          const baseUrl    = apiBase.replace('/api', '');
-          const payload: any = { country: 'US', userId: user!.uid };
+          const payload: any = {
+            country: 'US',
+            userId: user!.uid,
+            // Deep links so Stripe redirects back into the app after onboarding.
+            // Using the earnings route directly avoids a "not found" flash.
+            returnUrl: 'ridealong://(driver)/earnings?stripe=return',
+            refreshUrl: 'ridealong://(driver)/earnings?stripe=refresh',
+          };
           if (user!.email) payload.email = user!.email;
           if (accountId)   payload.accountId = accountId;
           const { url, accountId: newAccountId } = await createOnboardingLink(payload);
@@ -552,7 +580,10 @@ export default function EarningsScreen() {
                 activeOpacity={0.85}
               >
                 {depositing ? (
-                  <ActivityIndicator color="#FFFFFF" />
+                  <View style={{ alignItems: 'center', gap: 4 }}>
+                    <ActivityIndicator color="#FFFFFF" />
+                    {depositSlowWarning && <Text style={{ color: '#FFFFFF', fontSize: 11, opacity: 0.85 }}>Still processing…</Text>}
+                  </View>
                 ) : (
                   <>
                     <Ionicons name="flash" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />

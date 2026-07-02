@@ -223,7 +223,8 @@ export async function getDriverEarnings(userId: string): Promise<EarningsData> {
   };
 }
 
-const PAYOUT_TIMEOUT_MS = 30_000;
+// Instant deposit involves 5+ sequential Stripe API calls; 30s isn't enough on cold start.
+const PAYOUT_TIMEOUT_MS = 90_000;
 
 async function authorizedFetch(input: string, init: RequestInit = {}) {
   const user = firebaseAuth.currentUser;

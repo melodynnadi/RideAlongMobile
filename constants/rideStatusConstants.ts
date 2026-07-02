@@ -47,7 +47,7 @@ export const ACTIVE_RIDE_STATUSES = [
   'OFFER_SENT',
 ] as const;
 
-const normalizeRideStatus = (status: string | undefined | null): string =>
+export const normalizeRideStatus = (status: string | undefined | null): string =>
   String(status || '').replace(/[-\s]+/g, '_').toLowerCase().trim();
 
 /**

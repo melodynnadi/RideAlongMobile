@@ -4,10 +4,9 @@ import {
   ActivityIndicator, Alert, Switch, Platform, KeyboardAvoidingView, ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { firebaseAuth, firestore } from '@/constants/services';
+import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { logActivity } from '@/utils/activityLogger';
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
-import { roleKey } from '@/src/utils/roleIdentity';
+import { doc, getDoc } from 'firebase/firestore';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import type { AppColors } from '@/constants/theme';
 
@@ -62,147 +61,71 @@ export function FlagRideModal({ visible, onClose, rideId, role = 'rider', onFlag
   }, [visible, rideId, role]);
 
   const valid = details.trim().length >= 20 && !!reason && REASONS.some((r) => r.value === reason) && !!rideId;
+  const [isGroupRide, setIsGroupRide] = useState(false);
+  const [groupPassengerCount, setGroupPassengerCount] = useState(1);
 
-  const submitFlag = async () => {
-    if (submitting) return;
+  // Detect group ride so we can show a warning
+  useEffect(() => {
+    if (!visible || !rideId) return;
+    getDoc(doc(firestore, 'confirmedRides', rideId)).then((snap) => {
+      if (!snap.exists()) return;
+      const d = snap.data() as any;
+      if (d?.ridePostingId) {
+        setIsGroupRide(true);
+        // Best-effort count from totalSeats
+        setGroupPassengerCount(Number(d?.totalSeats) || 2);
+      }
+    }).catch(() => {});
+  }, [visible, rideId]);
+
+  const doSubmitFlag = async () => {
     const user = firebaseAuth.currentUser;
-    if (!user) { Alert.alert('Sign in required', 'You need to sign in to flag a ride.'); return; }
-    if (!rideId) { Alert.alert('Ride not found', 'No ride selected.'); return; }
+    if (!user || !rideId) return;
     setSubmitting(true);
     try {
-      const rideSnap = await getDoc(doc(firestore, 'confirmedRides', rideId));
-      if (!rideSnap.exists()) throw new Error('Ride not found');
-      const ride = rideSnap.data() as any;
-
-      const postingId = ride?.ridePostingId;
-      let allRideIds   = [rideId];
-      let allRiderIds  = [ride?.riderId ?? ride?.userId ?? null];
-      let allRiderNames = [ride?.riderName ?? 'Passenger'];
-
-      if (postingId) {
-        try {
-          const groupSnap = await getDocs(query(
-            collection(firestore, 'confirmedRides'),
-            where('ridePostingId', '==', postingId),
-            where('driverId', '==', ride.driverId)
-          ));
-          allRideIds = []; allRiderIds = []; allRiderNames = [];
-          groupSnap.forEach((d) => {
-            allRideIds.push(d.id);
-            const data = d.data();
-            allRiderIds.push(data?.riderId ?? data?.userId ?? null);
-            allRiderNames.push(data?.riderName ?? 'Passenger');
-          });
-        } catch (e) { console.warn('Could not fetch group rides for flagging', e); }
-      }
-
-      for (let i = 0; i < allRideIds.length; i++) {
-        const rid = allRideIds[i];
-        const flagDocId = `${rid}_${role}`;
-        const thisRideSnap = await getDoc(doc(firestore, 'confirmedRides', rid));
-        const thisRide = thisRideSnap.exists() ? thisRideSnap.data() : ride;
-        const statusBeforeFlag = String(thisRide?.status || '').toUpperCase();
-        const completedAtValue = thisRide?.completedAt;
-        const completedAt = completedAtValue?.toDate
-          ? completedAtValue.toDate()
-          : completedAtValue
-            ? new Date(completedAtValue)
-            : null;
-        const payoutHold = role === 'rider' && (
-          statusBeforeFlag !== 'COMPLETED' ||
-          (!!completedAt && !Number.isNaN(completedAt.getTime()) && Date.now() - completedAt.getTime() <= 24 * 60 * 60 * 1000)
-        );
-        await setDoc(doc(firestore, 'rideFlags', flagDocId), {
-          rideId: rid, ridePostingId: postingId ?? null, isGroupRide: !!postingId,
-          totalPassengers: allRideIds.length,
-          riderId: thisRide?.riderId ?? thisRide?.userId ?? null,
-          riderName: thisRide?.riderName ?? 'Passenger',
-          driverId: thisRide?.driverId ?? null, driverName: thisRide?.driverName ?? 'Driver',
-          statusBeforeFlag: thisRide?.status ?? null,
-          statusAtFlag: thisRide?.status ?? null,
-          pickup: thisRide?.pickup ?? null, dropoff: thisRide?.dropoff ?? null,
-          date: thisRide?.date ?? null, time: thisRide?.time ?? null,
-          reason, details: details.trim(),
-          severity: severityHigh ? 'high' : 'normal',
-          attachments: [], flaggedByRole: role, reviewStatus: 'open',
-          updatedAt: serverTimestamp(), createdAt: serverTimestamp(),
-        } as any, { merge: true });
-        await updateDoc(doc(firestore, 'confirmedRides', rid), {
-          status: 'FLAGGED',
-          statusBeforeFlag: thisRide?.status ?? 'IN_PROGRESS',
-          statusAtFlag: thisRide?.status ?? 'IN_PROGRESS',
-          ...(payoutHold ? { payoutHold: true } : {}),
-          updatedAt: serverTimestamp(),
-        });
-      }
-
-      try {
-        if (ride?.driverId) {
-          await addDoc(collection(firestore, 'notifications'), {
-            userId: ride.driverId, type: 'ride_flagged',
-            recipientId: ride.driverId,
-            recipientRole: 'driver',
-            recipientKeys: [roleKey('driver', ride.driverId)],
-            driverId: ride.driverId,
-            title: postingId ? 'Group Ride Flagged' : 'Ride Flagged',
-            message: postingId
-              ? `Your group ride with ${allRiderNames.join(', ')} has been flagged and requires admin review.`
-              : `Your ride with ${allRiderNames[0]} has been flagged and requires admin review.`,
-            rideId: allRideIds[0], ridePostingId: postingId ?? null,
-            severity: 'high', read: false, createdAt: serverTimestamp(),
-          });
-        }
-      } catch (e) { console.warn('Failed to send driver notification', e); }
-
-      try {
-        await addDoc(collection(firestore, 'adminNotifications'), {
-          type: 'ride_flag',
-          title: postingId ? 'Group Ride Flagged' : 'Ride Flagged',
-          message: `A ${postingId ? 'group ride' : 'ride'} has been flagged by ${role}. Reason: ${reason}`,
-          rideIds: allRideIds, ridePostingId: postingId ?? null,
-          flaggedByRole: role, flaggedById: user.uid,
-          reason, details: details.trim(),
-          driverId: ride?.driverId ?? null, driverName: ride?.driverName ?? 'Driver',
-          riderIds: allRiderIds.filter(Boolean), riderNames: allRiderNames,
-          severity: 'high', status: 'pending', read: false, createdAt: serverTimestamp(),
-        });
-      } catch (e) { console.warn('Failed to send admin notification', e); }
-
-      if (postingId && allRiderIds.length > 1) {
-        for (let i = 0; i < allRiderIds.length; i++) {
-          const riderId = allRiderIds[i];
-          if (!riderId || riderId === user.uid) continue;
-          try {
-            await addDoc(collection(firestore, 'notifications'), {
-              userId: riderId, type: 'ride_flagged', title: 'Group Ride Flagged',
-              recipientId: riderId,
-              recipientRole: 'rider',
-              recipientKeys: [roleKey('rider', riderId)],
-              riderId,
-              message: 'Your group ride has been flagged and requires admin review.',
-              rideId: allRideIds[i], ridePostingId: postingId,
-              severity: 'high', read: false, createdAt: serverTimestamp(),
-            });
-          } catch (e) { console.warn(`Failed to notify rider ${riderId}`, e); }
-        }
-      }
+      const token = await user.getIdToken();
+      const base = getApiBaseUrl();
+      const res = await fetch(`${base}/api/rides/${encodeURIComponent(rideId)}/flag`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ reason, details: details.trim(), flaggedByRole: role, severity: severityHigh ? 'high' : 'normal' }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Server error ${res.status}`);
 
       try { onFlagged?.(rideId); } catch {}
-      void logActivity({
-        type: 'ride_flagged', entityType: 'ride', entityId: rideId,
-        metadata: { rideId, reason, severity: severityHigh ? 'high' : 'normal', flaggedRides: allRideIds.length, isGroupRide: !!postingId },
-      });
+      void logActivity({ type: 'ride_flagged', entityType: 'ride', entityId: rideId, metadata: { rideId, reason, severity: severityHigh ? 'high' : 'normal', flaggedRides: body.flaggedRides, isGroupRide: body.isGroupRide } });
 
       Alert.alert(
-        postingId ? 'Group ride flagged' : 'Ride flagged',
-        postingId
-          ? `All ${allRideIds.length} rides have been flagged for review.`
-          : 'Thank you — the ride has been flagged for admin review.',
-        [{ text: 'OK', onPress: () => onClose() }]
+        body.isGroupRide ? 'Group ride flagged' : 'Ride flagged',
+        body.isGroupRide
+          ? `All ${body.flaggedRides} rides have been frozen for admin review.`
+          : 'Your report has been submitted. The ride is frozen until an admin resolves it.',
+        [{ text: 'OK', onPress: () => onClose() }],
       );
     } catch (err: any) {
       Alert.alert('Error', err?.message ?? 'Could not submit flag');
       setSubmitting(false);
+    }
+  };
+
+  const submitFlag = () => {
+    if (submitting || !valid) return;
+    const user = firebaseAuth.currentUser;
+    if (!user) { Alert.alert('Sign in required', 'You need to sign in to flag a ride.'); return; }
+
+    // Group ride warning — flagging freezes ALL passengers, not just one
+    if (isGroupRide) {
+      Alert.alert(
+        'Flag group ride?',
+        `This will freeze the ride for all ${groupPassengerCount} passengers and require admin resolution before anyone can continue.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Flag all seats', style: 'destructive', onPress: doSubmitFlag },
+        ],
+      );
+    } else {
+      doSubmitFlag();
     }
   };
 
@@ -338,6 +261,80 @@ function makeStyles(colors: AppColors) {
   submitBtnDisabled: { opacity: 0.45 },
   submitBtnText: { color: colors.textInverse, fontSize: 14, fontWeight: '700' },
   });
+}
+
+// ─── Post-flag banner shown on ride cards when status=FLAGGED ─────────────────
+type FlaggedBannerProps = {
+  rideId: string;
+  role: 'driver' | 'rider';
+  colors: AppColors;
+  onUnflagged?: () => void;
+};
+
+export function FlaggedRideBanner({ rideId, role, colors, onUnflagged }: FlaggedBannerProps) {
+  const [canUnflag, setCanUnflag] = useState(false);
+  const [unflagging, setUnflagging] = useState(false);
+
+  useEffect(() => {
+    const uid = firebaseAuth.currentUser?.uid;
+    if (!uid) return;
+    // Check if current user is the flagger and within the 5-min window
+    getDoc(doc(firestore, 'rideFlags', `${rideId}_${role}`)).then((snap) => {
+      if (!snap.exists()) return;
+      const d = snap.data() as any;
+      if (d?.flaggedById === uid && d?.reviewStatus === 'open') {
+        const flaggedAtMs = d?.flaggedAtMs || 0;
+        setCanUnflag(Date.now() - flaggedAtMs < 5 * 60 * 1000);
+      }
+    }).catch(() => {});
+  }, [rideId, role]);
+
+  const handleUnflag = async () => {
+    const user = firebaseAuth.currentUser;
+    if (!user) return;
+    Alert.alert('Retract flag?', 'This will remove your flag and unfreeze the ride.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Retract', style: 'destructive', onPress: async () => {
+        setUnflagging(true);
+        try {
+          const token = await user.getIdToken();
+          const base = getApiBaseUrl();
+          const res = await fetch(`${base}/api/rides/${encodeURIComponent(rideId)}/unflag`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ flaggedByRole: role }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(body.error || 'Failed to retract flag');
+          setCanUnflag(false);
+          onUnflagged?.();
+        } catch (e: any) {
+          Alert.alert('Error', e?.message || 'Could not retract flag');
+        } finally {
+          setUnflagging(false);
+        }
+      }},
+    ]);
+  };
+
+  return (
+    <View style={{ backgroundColor: colors.redDim, borderRadius: 12, padding: 12, marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <Ionicons name="flag" size={16} color={colors.red} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: colors.red, fontWeight: '700', fontSize: 13 }}>Under admin review</Text>
+        <Text style={{ color: colors.red, fontSize: 12, marginTop: 2, opacity: 0.85 }}>
+          No ride actions can be taken until an admin resolves this flag.
+        </Text>
+      </View>
+      {canUnflag && (
+        <TouchableOpacity onPress={handleUnflag} disabled={unflagging} style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: colors.red }}>
+          {unflagging
+            ? <ActivityIndicator size="small" color="#fff" />
+            : <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Retract</Text>}
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 }
 
 export default FlagRideModal;

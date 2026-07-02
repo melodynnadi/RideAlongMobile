@@ -873,20 +873,27 @@ export default function BookScreen() {
         return;
       }
 
-      // Check student verification status before allowing post
-      // Only block if BOTH not verified AND past deadline (matching server logic)
+      // Check student verification status before allowing post.
+      // Check both drivers and riders docs — a driver upgraded from a rider-only
+      // account may only have verification on the riders side, and vice versa.
       try {
-        const userDoc = await getDoc(doc(firestore, 'drivers', user.uid));
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          const isVerified = data?.isVerified === true;
-          const verificationDeadline = data?.verificationDeadline;
-          const isPastDeadline = verificationDeadline 
-            ? new Date() > (typeof verificationDeadline?.toDate === 'function' ? verificationDeadline.toDate() : new Date(verificationDeadline))
-            : false;
-          
-          // Only block if not verified AND past deadline
-          if (!isVerified && isPastDeadline) {
+        const [driverDoc, riderDoc] = await Promise.all([
+          getDoc(doc(firestore, 'drivers', user.uid)),
+          getDoc(doc(firestore, 'riders', user.uid)),
+        ]);
+        const driverData = driverDoc.exists() ? driverDoc.data() : null;
+        const riderData  = riderDoc.exists()  ? riderDoc.data()  : null;
+        const isVerified =
+          driverData?.isVerified === true ||
+          riderData?.isVerified  === true ||
+          ['approved','auto-approved'].includes(String(driverData?.verificationStatus||'').toLowerCase()) ||
+          ['approved','auto-approved'].includes(String(riderData?.verificationStatus||'').toLowerCase());
+        const verificationDeadline = driverData?.verificationDeadline ?? riderData?.verificationDeadline;
+        const isPastDeadline = verificationDeadline
+          ? new Date() > (typeof verificationDeadline?.toDate === 'function' ? verificationDeadline.toDate() : new Date(verificationDeadline))
+          : false;
+
+        if (!isVerified && isPastDeadline) {
             Alert.alert(
               'Verification Deadline Passed',
               'Your verification deadline has passed. Please verify your student status immediately to post rides.',
@@ -912,7 +919,6 @@ export default function BookScreen() {
             );
             return;
           }
-        }
       } catch (e) {
         console.warn('verification check error', e);
       }

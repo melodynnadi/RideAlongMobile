@@ -21,7 +21,7 @@ import {
   flagRide, groupPickup, groupComplete, groupFlag,
 } from '@/src/services/rideActions';
 import { getDownloadURL, ref as storageRef } from 'firebase/storage';
-import FlagRideModal from '@/components/FlagRideModal';
+import FlagRideModal, { FlaggedRideBanner } from '@/components/FlagRideModal';
 import { Button } from '@/components/ui/Button';
 import { computeFilteredAverageRating, hasUserRatedRide } from '@/src/services/ratings';
 import { PromotionDetailsModal } from '@/components/PromotionDetailsModal';
@@ -360,6 +360,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled }: { ride:
   const isConfirmedOnly = rawStatus === 'confirmed';
   const isInProgress    = rawStatus === 'in_progress';
   const isConfirmed     = isConfirmedOnly || isInProgress;
+  const isFlagged       = rawStatus === 'flagged';
   const isOfferSent     = rawStatus.includes('offer') || rawStatus === 'sent';
   const isPosting       = ride.type === 'ridePosting';
   const seatCount       = ride.seatCount ?? 1;
@@ -522,9 +523,13 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled }: { ride:
         </View>
       </TouchableOpacity>
 
+      {isFlagged && ride.confirmedId && (
+        <FlaggedRideBanner rideId={ride.confirmedId} role="driver" colors={colors} />
+      )}
+
       {/* Actions */}
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
-        {isConfirmedOnly && (
+        {!isFlagged && isConfirmedOnly && (
           <TouchableOpacity
             style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: pickingUp ? 0.6 : 1 }}
             onPress={handlePickup}
@@ -553,7 +558,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled }: { ride:
             <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '600' }}>Waiting for {groupWaitingCount} rider{groupWaitingCount === 1 ? '' : 's'} to confirm…</Text>
           </View>
         )}
-        {!isConfirmedOnly && !isInProgress && (
+        {!isConfirmedOnly && !isInProgress && !isFlagged && (
           <TouchableOpacity
             style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center' }}
             onPress={openRequest}
@@ -2079,9 +2084,9 @@ export default function HomeScreen() {
         const snap = await getDocs(query(
           collection(firestore, 'confirmedRides'),
           where('driverId', '==', uid),
-          where('status', '==', 'COMPLETED')
+          where('status', '==', 'COMPLETED'),
+          fsLimit(500) // cap for stats — adjust if drivers regularly exceed this
         ));
-        // Count all completed rides individually (not grouped by posting)
         setStats((s) => ({ ...s, totalRides: snap.size }));
       } catch {
         // ignore
@@ -2323,6 +2328,7 @@ export default function HomeScreen() {
           collection(firestore, 'confirmedRides'),
           where('driverId', '==', uid),
           where('status', '==', 'COMPLETED'),
+          fsLimit(500)
         ));
 
         let rides = 0;
@@ -2703,8 +2709,10 @@ export default function HomeScreen() {
 
       const driverSnap = await getDoc(doc(firestore, 'drivers', uid));
       const driver = driverSnap.exists() ? (driverSnap.data() as any) : {};
-      const driverName = [driver.firstName, driver.lastName].filter(Boolean).join(' ').trim()
-        || driver.personalInfo?.fullName || driver.displayName || driver.name || userName || 'Driver';
+      const driverName = driver.fullName
+        || driver.personalInfo?.fullName
+        || [driver.firstName, driver.lastName].filter(Boolean).join(' ').trim()
+        || driver.displayName || driver.name || userName || 'Driver';
       const driverEmail = driver.personalInfo?.email || driver.email || email || firebaseAuth.currentUser?.email || '';
       const base = getApiBaseUrl();
       const token = await firebaseAuth.currentUser?.getIdToken();
@@ -3601,11 +3609,11 @@ export default function HomeScreen() {
 
 
          {/* ══════════════════════════════════════════════════════════
-              UPCOMING RIDES
+              UPCOMING RIDES (additional rides beyond the hero card)
           ══════════════════════════════════════════════════════════ */}
-          {false && <View style={s.section}>
+          {displayUpcoming.length > 1 && <View style={s.section}>
             <View style={s.sectionHdrRow}>
-              <Text style={s.sectionTitle}>Upcoming Rides</Text>
+              <Text style={s.sectionTitle}>Also upcoming</Text>
               <TouchableOpacity onPress={() => router.push('/(driver)/settings/driver-ride-history')}>
                 <Text style={s.viewAll}>View All</Text>
               </TouchableOpacity>
@@ -3621,7 +3629,7 @@ export default function HomeScreen() {
               </View>
             )}
 
-             {!loading && displayUpcoming.map((r) => {
+             {!loading && displayUpcoming.slice(1).map((r) => {
               const statusKey = (r.status || '').toLowerCase();
               const offer = offersByRideId[r.id];
               const offerStatus = (offer?.status || '').toLowerCase();
@@ -3883,55 +3891,6 @@ export default function HomeScreen() {
             })}
           </View>}
 
-          {/* ══════════════════════════════════════════════════════════
-              POST AGAIN
-          ══════════════════════════════════════════════════════════ */}
-          <View style={[s.section, { marginBottom: 8 }]}>
-            <View style={s.sectionHdrRow}>
-              <Text style={s.sectionTitle}>{postAgainRoutes.length > 0 ? 'Post again' : 'Start here'}</Text>
-              <TouchableOpacity onPress={() => router.push('/(driver)/book' as any)}>
-                <Text style={s.viewAll}>Post a ride</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={{ gap: 8 }}>
-              {postAgainRoutes.length > 0 ? postAgainRoutes.map((route, idx) => (
-                <TouchableOpacity
-                  key={idx}
-                  style={[s.rideCard, { padding: 14 }]}
-                  onPress={() => router.push({ pathname: '/(driver)/book', params: { pickup: route.from, dropoff: route.to } } as any)}
-                  activeOpacity={0.75}
-                >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}>
-                      <Ionicons name="refresh-outline" size={18} color={colors.primary} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textPrimary }} numberOfLines={1}>{route.from} → {route.to}</Text>
-                      <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>{route.meta}</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-                  </View>
-                </TouchableOpacity>
-              )) : (
-                <TouchableOpacity
-                  style={[s.rideCard, { padding: 14 }]}
-                  onPress={() => router.push('/(driver)/book' as any)}
-                  activeOpacity={0.75}
-                >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}>
-                      <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textPrimary }}>Post your first ride</Text>
-                      <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>Riders near you are looking for drivers</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-                  </View>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
 
           {/* ══════════════════════════════════════════════════════════
               THIS MONTH SUMMARY
@@ -3979,6 +3938,56 @@ export default function HomeScreen() {
                 <View style={s.monthEmptyRow}>
                   <Text style={s.monthEmptyText}>No completed rides yet this month — get out there.</Text>
                 </View>
+              )}
+            </View>
+          </View>
+
+          {/* ══════════════════════════════════════════════════════════
+              POST AGAIN
+          ══════════════════════════════════════════════════════════ */}
+          <View style={[s.section, { marginTop: 28, marginBottom: 8 }]}>
+            <View style={s.sectionHdrRow}>
+              <Text style={s.sectionTitle}>{postAgainRoutes.length > 0 ? 'Post again' : 'Start here'}</Text>
+              <TouchableOpacity onPress={() => router.push('/(driver)/book' as any)}>
+                <Text style={s.viewAll}>Post a ride</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ gap: 8 }}>
+              {postAgainRoutes.length > 0 ? postAgainRoutes.map((route, idx) => (
+                <TouchableOpacity
+                  key={idx}
+                  style={[s.rideCard, { padding: 14 }]}
+                  onPress={() => router.push({ pathname: '/(driver)/book', params: { pickup: route.from, dropoff: route.to } } as any)}
+                  activeOpacity={0.75}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="refresh-outline" size={18} color={colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textPrimary }} numberOfLines={1}>{route.from} → {route.to}</Text>
+                      <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>{route.meta}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                  </View>
+                </TouchableOpacity>
+              )) : (
+                <TouchableOpacity
+                  style={[s.rideCard, { padding: 14 }]}
+                  onPress={() => router.push('/(driver)/book' as any)}
+                  activeOpacity={0.75}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textPrimary }}>Post your first ride</Text>
+                      <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>Riders near you are looking for drivers</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                  </View>
+                </TouchableOpacity>
               )}
             </View>
           </View>
@@ -4355,8 +4364,10 @@ async function ensureAcceptedPostingRequestConfirmation(requestId: string, reque
       riderEmail: request.riderEmail || request.userEmail || request.requesterEmail || null,
       riderPhone: request.riderPhone || request.userPhone || request.phone || null,
       driverId,
-      driverName: [driver.firstName, driver.lastName].filter(Boolean).join(' ').trim()
-        || driver.personalInfo?.fullName || driver.displayName || driver.name || request.driverName || 'Driver',
+      driverName: driver.fullName
+        || driver.personalInfo?.fullName
+        || [driver.firstName, driver.lastName].filter(Boolean).join(' ').trim()
+        || driver.displayName || driver.name || request.driverName || 'Driver',
       driverEmail: driver.personalInfo?.email || driver.email || request.driverEmail || null,
       driverPhone: driver.personalInfo?.phone || driver.phone || null,
       vehicleInfo: driver.vehicleInfo || posting.vehicleInfo || request.vehicleInfo || null,

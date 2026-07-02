@@ -1,12 +1,5 @@
-import React from 'react';
-import { router } from 'expo-router';
-import DynamicLegalDocument from '@/components/DynamicLegalDocument';
+import { LegalWebViewScreen } from '@/components/LegalWebViewScreen';
 
 export default function PrivacyScreen() {
-  return (
-    <DynamicLegalDocument 
-      documentType="privacy" 
-      onBack={() => router.back()}
-    />
-  );
+  return <LegalWebViewScreen title="Privacy policy" url="https://ridealongapp.com/pages/privacy" />;
 }

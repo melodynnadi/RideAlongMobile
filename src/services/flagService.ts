@@ -38,6 +38,7 @@ export async function submitDriverFlag(rideId: string, payload: FlagPayload) {
         where('driverId', '==', rideData?.driverId)
       );
       const groupSnap = await getDocs(groupQuery);
+      if (groupSnap.empty) throw new Error('No rides found in group');
       allRideIds = [];
       allRiderIds = [];
       allRiderNames = [];
@@ -48,7 +49,8 @@ export async function submitDriverFlag(rideId: string, payload: FlagPayload) {
         allRiderNames.push(data?.riderName ?? 'Passenger');
       });
     } catch (e) {
-      console.warn('Could not fetch group rides for flagging', e);
+      console.error('[submitDriverFlag] failed to fetch group rides:', e);
+      throw new Error('Could not flag all passengers in this group ride. Please try again.');
     }
   }
 
@@ -133,7 +135,7 @@ export async function submitDriverFlag(rideId: string, payload: FlagPayload) {
     console.warn('Failed to send driver notification', e);
   }
 
-  // Send notification to admin
+  // Send notification to admin — throw if this fails; flag is useless without admin visibility
   try {
     await addDoc(collection(firestore, 'adminNotifications'), {
       type: 'ride_flag',
@@ -155,7 +157,8 @@ export async function submitDriverFlag(rideId: string, payload: FlagPayload) {
       createdAt: serverTimestamp(),
     });
   } catch (e) {
-    console.warn('Failed to send admin notification', e);
+    console.error('[submitDriverFlag] CRITICAL: admin notification failed — flag may be invisible to admins:', e);
+    throw new Error('Flag submitted but admin notification failed. Contact support immediately.');
   }
 
   // If other passenger exists in group ride, optionally notify them

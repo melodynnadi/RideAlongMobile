@@ -1,6 +1,5 @@
-import React from 'react';
-import { DynamicLegalDocument } from '@/components/DynamicLegalDocument';
+import { LegalWebViewScreen } from '@/components/LegalWebViewScreen';
 
 export default function PrivacyScreen() {
-  return <DynamicLegalDocument documentId="privacy" title="Privacy Policy" onError={(error) => console.error(error)} />;
+  return <LegalWebViewScreen title="Privacy policy" url="https://ridealongapp.com/pages/privacy" />;
 }

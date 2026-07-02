@@ -1,6 +1,5 @@
-import React from 'react';
-import { DynamicLegalDocument } from '@/components/DynamicLegalDocument';
+import { LegalWebViewScreen } from '@/components/LegalWebViewScreen';
 
 export default function TermsScreen() {
-  return <DynamicLegalDocument documentId="terms" title="Terms of Service" onError={(error) => console.error(error)} />;
+  return <LegalWebViewScreen title="Terms of service" url="https://ridealongapp.com/pages/terms" />;
 }

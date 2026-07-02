@@ -241,9 +241,18 @@ export default function VehicleInfoScreen() {
         }
       }
 
+      // Backend may store vehicle as either 'vehicleInfo' (settings-saved) or 'vehicle'
+      // (created by verification engine), and application stores flat carMake/carModel fields.
       const applicationVehicle = applicationData.vehicleInfo || {};
-      const storedVehicle = data.vehicleInfo || {};
-      const vd = { ...applicationVehicle, ...storedVehicle };
+      const flatFromApp = {
+        make: applicationData.carMake,
+        model: applicationData.carModel,
+        year: applicationData.carYear,
+        color: applicationData.carColor,
+        licensePlate: applicationData.licensePlate,
+      };
+      const storedVehicle = data.vehicleInfo || (data.vehicle && typeof data.vehicle === 'object' ? data.vehicle : {});
+      const vd = { ...flatFromApp, ...applicationVehicle, ...storedVehicle };
       const makeModelParts = String(vd.makeModel || '').trim().split(/\s+/).filter(Boolean);
       const makeModelHasYear = /^\d{4}$/.test(makeModelParts[0] || '');
       const parsedYear = makeModelHasYear ? makeModelParts[0] : '';

@@ -200,7 +200,7 @@ function rideFromDoc(snapshot: QueryDocumentSnapshot<DocumentData>): MobileRideP
   const data = snapshot.data();
   const firstName = textValue(data.driverFirstName, data.driver?.firstName);
   const lastName = textValue(data.driverLastName, data.driver?.lastName);
-  const driverName = textValue(data.driverName, data.driver?.displayName, `${firstName} ${lastName}`) || 'RideAlong driver';
+  const driverName = textValue(data.driverName, data.driver?.fullName, data.driver?.displayName, data.driver?.name, `${firstName} ${lastName}`) || 'RideAlong driver';
   const make = textValue(data.vehicleMake, data.vehicle?.make);
   const model = textValue(data.vehicleModel, data.vehicle?.model);
 
@@ -370,7 +370,7 @@ export function subscribeRiderProfile(uid: string, onData: (profile: RiderProfil
       id: uid,
       firstName,
       lastName,
-      displayName: textValue(data.displayName, data.name, data.fullName, sharedData?.displayName, sharedData?.name, sharedData?.fullName, `${firstName} ${lastName}`) || firebaseAuth.currentUser?.displayName || 'Rider',
+      displayName: textValue(data.fullName, data.displayName, data.name, sharedData?.fullName, sharedData?.displayName, sharedData?.name, `${firstName} ${lastName}`) || firebaseAuth.currentUser?.displayName || 'Rider',
       email: textValue(data.email, sharedData?.email, firebaseAuth.currentUser?.email),
       // Do NOT fall back to firebaseAuth.currentUser?.photoURL — it could hold the driver's photo
       avatarUrl: textValue(data.avatarUrl, data.photoURL, data.profilePicture, sharedData?.avatarUrl, sharedData?.photoURL, sharedData?.profilePicture) || undefined,
@@ -507,8 +507,11 @@ export function subscribeRiderConversations(uid: string, onData: (items: MobileC
         }
         const name = textValue(
           profile?.displayName,
+          profile?.fullName,
           profile?.name,
-          `${textValue(profile?.firstName)} ${textValue(profile?.lastName)}`,
+          profile?.personalInfo?.fullName,
+          `${textValue(profile?.firstName)} ${textValue(profile?.lastName)}`.trim(),
+          data.driverName,
           data.otherUserName,
         ) || 'RideAlong member';
         const initials = name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();

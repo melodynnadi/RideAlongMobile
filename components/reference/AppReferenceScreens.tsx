@@ -1,4 +1,5 @@
 ﻿import React, { useContext, useEffect, useMemo, useState } from 'react';
+import * as WebBrowser from 'expo-web-browser';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Switch, Text as RNText, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,7 +21,8 @@ import { firebaseAuth, firestore } from '@/constants/services';
 import { AddCardModal } from '@/components/AddCardModal';
 import { deleteMessageThread, getDeleteMessageThreadErrorMessage } from '@/services/messageThreadsService';
 import { canSendMessages, isTerminalStatus, MESSAGING_DISABLED_MESSAGE } from '@/constants/rideStatusConstants';
-import { resolveChatAvailability } from '@/src/services/chatAvailability';
+import { resolveChatAvailability, getOrCreateRideChat } from '@/src/services/chatAvailability';
+import { PaymentModal } from '@/components/PaymentModal';
 import type { EmergencyContact } from '@/types';
 import {
   MobileConversation,
@@ -514,12 +516,77 @@ function RequestCard({ route, sub, price, live, offers }: { route: string; sub: 
 export function RiderRequestsReference() {
   return <ColorsProvider><RiderRequestsReferenceInner /></ColorsProvider>;
 }
+type OfferWithDriver = {
+  offerId: string;
+  driverId: string;
+  driverName: string | null;
+  driverAvatar: string | null;
+  driverRating: number | null;
+  offerPrice: number | null;
+  status: string;
+};
+
 function RiderRequestsReferenceInner() {
   const { colors, s } = useScreenCtx();
   const uid = firebaseAuth.currentUser?.uid;
   const [requests, setRequests] = useState<MobileRideRequest[]>([]);
   const [postingRequests, setPostingRequests] = useState<MobileRideRequest[]>([]);
-  const [filter, setFilter] = useState<'open' | 'matched' | 'past'>('open');
+  const [filter, setFilter] = useState<'open' | 'past'>('open');
+  // offersMap: requestId → array of offers with driver info
+  const [offersMap, setOffersMap] = useState<Record<string, OfferWithDriver[]>>({});
+  const [acceptingOffer, setAcceptingOffer] = useState<{ offer: OfferWithDriver; request: MobileRideRequest } | null>(null);
+  const [decliningOfferId, setDecliningOfferId] = useState<string | null>(null);
+
+  const handleDeclineOffer = async (offerId: string) => {
+    setDecliningOfferId(offerId);
+    try {
+      await updateDoc(doc(firestore, 'rideOffers', offerId), {
+        status: 'rejected',
+        rejectedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      Alert.alert('Error', 'Could not decline the offer. Please try again.');
+    } finally {
+      setDecliningOfferId(null);
+    }
+  };
+
+  const acceptOffer = async (offer: OfferWithDriver, request: MobileRideRequest, paymentIntentId: string) => {
+    if (!uid) return;
+    try {
+      await updateDoc(doc(firestore, 'rideRequests', request.id), {
+        paymentIntentId, paymentStatus: 'authorized',
+      });
+    } catch {}
+    try {
+      const { getApiBaseUrl } = await import('@/constants/services');
+      const res = await fetch(`${getApiBaseUrl()}/api/accept-ride-offer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ offerId: offer.offerId, riderId: uid, driverId: offer.driverId, paymentIntentId }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as any).error || `Server error ${res.status}`);
+      }
+      Alert.alert('Offer accepted!', 'Your ride is confirmed.');
+    } catch (e: any) {
+      try {
+        const { cancelRidePayment } = await import('@/services/payments');
+        await cancelRidePayment({ paymentIntentId, rideId: offer.offerId });
+      } catch {}
+      Alert.alert('Failed', e?.message || 'Could not accept the offer. Your payment was not charged.');
+    }
+  };
+
+  // Called by PaymentModal when a new payment is authorized
+  const handleOfferPaymentSuccess = async (paymentIntentId: string) => {
+    if (!acceptingOffer) return;
+    const { offer, request } = acceptingOffer;
+    setAcceptingOffer(null);
+    await acceptOffer(offer, request, paymentIntentId);
+  };
 
   useEffect(() => uid ? subscribeRiderRequests(uid, setRequests) : undefined, [uid]);
 
@@ -554,6 +621,41 @@ function RiderRequestsReferenceInner() {
       setPostingRequests([]);
       console.warn('[RiderRequestsReference] ridePostingRequests listener error:', error);
     });
+  }, [uid]);
+
+  // Subscribe to pending offers for this rider so we can show driver info inline
+  useEffect(() => {
+    if (!uid) return;
+    const q = query(collection(firestore, 'rideOffers'), where('riderId', '==', uid), where('status', '==', 'pending'));
+    return onSnapshot(q, async (snap) => {
+      const grouped: Record<string, OfferWithDriver[]> = {};
+      const driverIds = [...new Set(snap.docs.map((d) => d.data().driverId).filter(Boolean))];
+      // Fetch all driver profiles in one batch
+      const driverProfiles: Record<string, any> = {};
+      await Promise.all(driverIds.map(async (dId) => {
+        try {
+          const dSnap = await getDoc(doc(firestore, 'drivers', dId));
+          if (dSnap.exists()) driverProfiles[dId] = dSnap.data();
+        } catch {}
+      }));
+      snap.docs.forEach((d) => {
+        const o = d.data() as any;
+        const reqId = o.rideRequestId;
+        if (!reqId) return;
+        const dr = driverProfiles[o.driverId] || {};
+        const offer: OfferWithDriver = {
+          offerId: d.id,
+          driverId: o.driverId,
+          driverName: dr.fullName || dr.name || dr.displayName || dr.personalInfo?.fullName || [dr.firstName, dr.lastName].filter(Boolean).join(' ') || o.driverName || null,
+          driverAvatar: dr.avatarUrl || dr.photoURL || null,
+          driverRating: typeof dr.rating === 'number' ? dr.rating : null,
+          offerPrice: typeof o.offerPrice === 'number' ? o.offerPrice : typeof o.offerAmount === 'number' ? o.offerAmount : null,
+          status: String(o.status || 'pending'),
+        };
+        (grouped[reqId] = grouped[reqId] || []).push(offer);
+      });
+      setOffersMap(grouped);
+    }, () => {});
   }, [uid]);
 
   const allRequests = [...requests, ...postingRequests];
@@ -596,22 +698,24 @@ function RiderRequestsReferenceInner() {
   const filtered = allRequests.filter((request) => {
     const status = request.status;
     const expired = isDateExpired(request);
-    if (filter === 'open') return OPEN.has(status) && !expired;
-    if (filter === 'matched') return MATCHED.has(status) && !expired;
+    if (filter === 'open') return (OPEN.has(status) || MATCHED.has(status)) && !expired;
     return PAST.has(status) || expired;
   });
 
   return (
     <Phone title="My requests" back activeTab="rides">
       <View style={s.pillRow}>
-        <TouchableOpacity onPress={() => setFilter('open')}><Pill label={`Open · ${allRequests.filter((r) => OPEN.has(r.status) && !isDateExpired(r)).length}`} active={filter === 'open'} /></TouchableOpacity>
-        <TouchableOpacity onPress={() => setFilter('matched')}><Pill label={`Matched · ${allRequests.filter((r) => MATCHED.has(r.status) && !isDateExpired(r)).length}`} active={filter === 'matched'} /></TouchableOpacity>
+        <TouchableOpacity onPress={() => setFilter('open')}><Pill label={`Open · ${allRequests.filter((r) => (OPEN.has(r.status) || MATCHED.has(r.status)) && !isDateExpired(r)).length}`} active={filter === 'open'} /></TouchableOpacity>
         <TouchableOpacity onPress={() => setFilter('past')}><Pill label={`Past · ${allRequests.filter((r) => PAST.has(r.status) || isDateExpired(r)).length}`} active={filter === 'past'} /></TouchableOpacity>
       </View>
       {filtered.map((request) => {
         const expired = isDateExpired(request);
+        const offers = offersMap[request.id] || [];
+        const hasOffers = offers.length > 0;
         const statusLabel = expired && OPEN.has(request.status)
           ? 'Expired'
+          : hasOffers
+          ? `${offers.length} offer${offers.length === 1 ? '' : 's'} received`
           : request.status.includes('offer')
           ? 'Offer received'
           : request.status === 'completed' ? 'Completed'
@@ -619,10 +723,11 @@ function RiderRequestsReferenceInner() {
           : request.status === 'rejected' ? 'Rejected'
           : request.status.replace(/[_-]/g, ' ');
         return (
-        <TouchableOpacity key={request.id} style={s.requestCard} onPress={() => router.push(`/(rider)/ride/${request.id}` as any)} activeOpacity={0.86}>
+        <View key={request.id} style={s.requestCard}>
+          <TouchableOpacity onPress={() => router.push(`/(rider)/ride/${request.id}` as any)} activeOpacity={0.86}>
           <View style={s.requestCardTop}>
-            <View style={s.requestStatusBadge}>
-              <Text style={s.requestStatusText}>{statusLabel}</Text>
+            <View style={[s.requestStatusBadge, hasOffers && { backgroundColor: colors.primaryDim }]}>
+              <Text style={[s.requestStatusText, hasOffers && { color: colors.primary }]}>{statusLabel}</Text>
             </View>
             <Text style={s.requestPrice}>${request.price}</Text>
           </View>
@@ -648,9 +753,112 @@ function RiderRequestsReferenceInner() {
             <View style={s.requestMetaPill}><Ionicons name="calendar-outline" size={14} color={colors.textSecondary} /><Text style={s.requestMetaText}>{request.dateLabel || 'Date pending'}</Text></View>
             <View style={s.requestMetaPill}><Ionicons name="person-outline" size={14} color={colors.textSecondary} /><Text style={s.requestMetaText}>{request.seats} {request.seats === 1 ? 'seat' : 'seats'}</Text></View>
           </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+          {/* Driver offers expanded inline */}
+          {hasOffers && (
+            <View style={{ marginTop: 12, gap: 8 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: colors.textSecondary, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 2 }}>Drivers who offered</Text>
+              {offers.map((offer) => {
+                const initials = (offer.driverName || 'D').split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase();
+                return (
+                  <View key={offer.offerId} style={{ gap: 6 }}>
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, backgroundColor: colors.bgSecondary, borderRadius: 12 }}
+                    onPress={() => router.push({ pathname: '/(rider)/driver/[driverId]', params: { driverId: offer.driverId, returnTo: '/(rider)/requests' } } as any)}
+                    activeOpacity={0.75}
+                  >
+                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                      {offer.driverAvatar
+                        ? <Image source={{ uri: offer.driverAvatar }} style={{ width: 40, height: 40 }} contentFit="cover" />
+                        : <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>{initials}</Text>}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontWeight: '700', color: colors.textPrimary, fontSize: 14 }}>{offer.driverName || 'Driver'}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        {offer.driverRating != null && (
+                          <Text style={{ color: colors.textSecondary, fontSize: 12 }}>★ {offer.driverRating.toFixed(2)}</Text>
+                        )}
+                        {offer.offerPrice != null && (
+                          <Text style={{ color: colors.green, fontSize: 12, fontWeight: '600' }}>${offer.offerPrice.toFixed(0)}</Text>
+                        )}
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      onPress={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          const chatId = await getOrCreateRideChat({
+                            context: 'ride-offer',
+                            rideId: request.id,
+                            rideRequestId: request.id,
+                            rideOfferId: offer.offerId,
+                            driverId: offer.driverId,
+                            riderId: uid!,
+                          });
+                          router.push(`/(rider)/messages/${chatId}` as any);
+                        } catch { Alert.alert('Error', 'Could not open chat.'); }
+                      }}
+                    >
+                      <Ionicons name="chatbubble-outline" size={20} color={colors.primary} />
+                    </TouchableOpacity>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                  {/* Accept / Decline row */}
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+                    <TouchableOpacity
+                      style={{ flex: 1, backgroundColor: colors.bgCard, borderRadius: 20, paddingVertical: 8, alignItems: 'center', borderWidth: 1, borderColor: colors.border, opacity: decliningOfferId === offer.offerId ? 0.5 : 1 }}
+                      onPress={() => {
+                        Alert.alert('Decline offer?', `Decline the offer from ${offer.driverName || 'this driver'}?`, [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Decline', style: 'destructive', onPress: () => handleDeclineOffer(offer.offerId) },
+                        ]);
+                      }}
+                      disabled={!!decliningOfferId}
+                    >
+                      <Text style={{ color: colors.red, fontSize: 13, fontWeight: '700' }}>Decline</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={{ flex: 2, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 8, alignItems: 'center' }}
+                      onPress={() => {
+                        {
+                          const existingPaymentId = request.raw?.paymentIntentId;
+                          if (existingPaymentId) {
+                            // Payment was already authorized when the request was posted — use it directly.
+                            Alert.alert('Accept offer?', `Confirm the ride from ${offer.driverName || 'this driver'}?`, [
+                              { text: 'Cancel', style: 'cancel' },
+                              { text: 'Confirm', onPress: () => acceptOffer(offer, request, existingPaymentId) },
+                            ]);
+                          } else {
+                            Alert.alert('Accept offer?', `Accept the ride from ${offer.driverName || 'this driver'}? You'll need to authorize payment.`, [
+                              { text: 'Cancel', style: 'cancel' },
+                              { text: 'Continue to payment', onPress: () => setAcceptingOffer({ offer, request }) },
+                            ]);
+                          }
+                        }
+                      }}
+                    >
+                      <Text style={{ color: colors.textInverse, fontSize: 13, fontWeight: '700' }}>Accept</Text>
+                    </TouchableOpacity>
+                  </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </View>
         );
       })}
+      {acceptingOffer && (
+        <PaymentModal
+          visible
+          onClose={() => setAcceptingOffer(null)}
+          rideId={acceptingOffer.request.id}
+          driverId={acceptingOffer.offer.driverId}
+          baseFare={acceptingOffer.offer.offerPrice ?? acceptingOffer.request.price}
+          onPaymentSuccess={handleOfferPaymentSuccess}
+        />
+      )}
       {!filtered.length ? <View style={s.panel}><Text style={s.routeTitle}>Nothing here yet</Text><Text style={s.messagePreview}>Post a request or choose another status tab.</Text></View> : null}
     </Phone>
   );
@@ -713,7 +921,7 @@ function RiderHistoryReferenceInner() {
       });
       const mapped = await Promise.all(Array.from(merged.values()).map(async (ride): Promise<HistoryRide> => {
         const driverId = textValue(ride.driverId, ride.driverUid, ride.driverUID);
-        let driverName = textValue(ride.driverName, ride.driver?.name, ride.driver?.displayName) || (driverId ? 'Driver' : 'No driver assigned');
+        let driverName = textValue(ride.driverName, ride.driver?.fullName, ride.driver?.name, ride.driver?.displayName, ride.driver?.personalInfo?.fullName) || (driverId ? 'Driver' : 'No driver assigned');
         let driverAvatarUrl = textValue(ride.driverAvatarUrl, ride.driver?.avatarUrl, ride.driver?.photoURL) || undefined;
         if (driverId) {
           try {
@@ -957,7 +1165,23 @@ function DriverPublicProfileReferenceInner() {
           getDocs(query(collection(firestore, 'confirmedRides'), where('driverId', '==', id), where('status', '==', 'COMPLETED'))),
         ]);
         setTotalRides(ridesSnap.size);
-        const ratingDocs = ratingsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+        // Build the set of ride IDs where this person was the DRIVER so we can
+        // filter out ratings from rides where they acted as a rider (dual-role accounts).
+        const driverRideIds = new Set<string>();
+        ridesSnap.docs.forEach((rideDoc) => {
+          driverRideIds.add(rideDoc.id);
+          const rd = rideDoc.data() as any;
+          if (rd.rideRequestId) driverRideIds.add(String(rd.rideRequestId));
+          if (rd.ridePostingId) driverRideIds.add(String(rd.ridePostingId));
+          if (rd.ridePostingRequestId) driverRideIds.add(String(rd.ridePostingRequestId));
+        });
+        const allRatingDocs = ratingsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+        // Only keep ratings where the rideId matches a confirmed ride where this person
+        // was the driver — for dual-role accounts this filters out their rider-side ratings.
+        // If they have no completed driver rides yet, show nothing at all.
+        const ratingDocs = driverRideIds.size > 0
+          ? allRatingDocs.filter(r => driverRideIds.has(String(r.rideId || '')))
+          : [];
         setAllRatings(ratingDocs);
         const rideRiderIds = new Map<string, string>();
         ridesSnap.docs.forEach((rideDoc) => {
@@ -1009,10 +1233,19 @@ function DriverPublicProfileReferenceInner() {
     n,
     count: allRatings.filter(r => Math.round(typeof r.stars === 'number' ? r.stars : r.rating || 0) === n).length,
   }));
-  const vehicle = [driver?.vehicleYear, driver?.vehicleMake, driver?.vehicleModel].filter(Boolean).join(' ') ||
-    driver?.vehicle || driver?.car || '';
-  const vehicleColor = driver?.vehicleColor || driver?.color || '';
-  const seats = driver?.seats || driver?.vehicleSeats || driver?.numSeats || '';
+  // vehicleInfo is a nested object on the driver doc — extract string fields safely
+  const vi = driver?.vehicleInfo && typeof driver.vehicleInfo === 'object' ? driver.vehicleInfo : null;
+  const vehicle = [
+    driver?.vehicleYear || vi?.year,
+    driver?.vehicleMake || vi?.make,
+    driver?.vehicleModel || vi?.model,
+  ].filter((v) => v && typeof v === 'string').join(' ')
+    || vi?.makeModel
+    || (typeof driver?.vehicle === 'string' ? driver.vehicle : null)
+    || (typeof driver?.car === 'string' ? driver.car : null)
+    || '';
+  const vehicleColor = (typeof driver?.vehicleColor === 'string' ? driver.vehicleColor : null) || vi?.color || '';
+  const seats = driver?.seats || vi?.seats || driver?.vehicleSeats || driver?.numSeats || '';
   const bio = driver?.bio || driver?.about || driver?.description || '';
   const university = driver?.university || driver?.school || '';
 
@@ -1211,6 +1444,16 @@ function DriverPublicProfileReferenceInner() {
             </>
           )}
 
+          {driver && !loading && allRatings.length === 0 && reviews.length === 0 && (
+            <View style={{ alignItems: 'center', paddingVertical: 36, gap: 8 }}>
+              <Ionicons name="ribbon-outline" size={40} color={BDR} />
+              <Text style={{ color: DNVY, fontSize: 15, fontWeight: '700' }}>New to RideAlong</Text>
+              <Text style={{ color: MUT, fontSize: 13, textAlign: 'center', lineHeight: 19 }}>
+                This driver is just getting started — no ratings or reviews yet.
+              </Text>
+            </View>
+          )}
+
           {!driver && (
             <View style={{ alignItems: 'center', paddingVertical: 48, gap: 10 }}>
               <Ionicons name="person-circle-outline" size={48} color={BDR} />
@@ -1299,7 +1542,12 @@ function RateTripReferenceInner() {
         const oSnap = await getDoc(doc(firestore, otherColl, otherId)).catch(() => null);
         if (oSnap?.exists()) {
           const od = oSnap.data() as any;
-          const name = [od.firstName, od.lastName].filter(Boolean).join(' ').trim() || od.displayName || od.name || (isRider ? 'Driver' : 'Rider');
+          const name = [od.firstName, od.lastName].filter(Boolean).join(' ').trim()
+            || od.fullName
+            || od.displayName
+            || od.name
+            || od.personalInfo?.fullName
+            || (isRider ? 'Driver' : 'Rider');
           setOtherName(name);
           setOtherPhoto(od.photoURL || od.avatarUrl || null);
           setOtherInitials(name.split(/\s+/).map((p: string) => p[0]).join('').slice(0, 2).toUpperCase());
@@ -2021,9 +2269,10 @@ function MenuRow({ icon, title, sub, href, returnTo }: { icon: keyof typeof Ioni
 
     if (href.startsWith('http')) {
       try {
-        await Linking.openURL(href);
+        await WebBrowser.openBrowserAsync(href);
       } catch {
-        Alert.alert('Unable to open Help', 'Please visit ridealongapp.com/pages/help in your browser.');
+        // Fall back to system browser
+        await Linking.openURL(href).catch(() => Alert.alert('Unable to open link', 'Please try again.'));
       }
       return;
     }
@@ -2127,8 +2376,9 @@ function RiderSettingsReferenceInner() {
       <Text style={s.settingsSectionLabel}>HELP & LEGAL</Text>
       <View style={[s.menuCard, s.settingsMenuCard, s.settingsMenuCardLast]}>
         <MenuRow icon="help-circle" title="Help & support" href="https://ridealongapp.com/pages/help" />
-        <MenuRow icon="shield-checkmark" title="Privacy policy" href="/(rider)/legal/privacy" returnTo="/(rider)/settings" />
-        <MenuRow icon="document-text" title="Terms of service" href="/(rider)/legal/terms" returnTo="/(rider)/settings" />
+        <MenuRow icon="chatbubble-ellipses" title="Report a bug / Feedback" href="https://ridealongapp.com/pages/feedback" />
+        <MenuRow icon="shield-checkmark" title="Privacy policy" href="https://ridealongapp.com/pages/privacy" />
+        <MenuRow icon="document-text" title="Terms of service" href="https://ridealongapp.com/pages/terms" />
       </View>
     </Phone>
   );

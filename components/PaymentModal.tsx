@@ -241,12 +241,18 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
 
       // Cancel any PI left over from a previous failed attempt before creating a new one
       if (pendingIntentId) {
-        fetch(`${baseUrl}/api/payments/cancel-intent`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ paymentIntentId: pendingIntentId }),
-        }).catch(() => {});
-        setPendingIntentId(null);
+        try {
+          const cancelResp = await fetch(`${baseUrl}/api/payments/cancel-intent`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paymentIntentId: pendingIntentId }),
+          });
+          if (cancelResp.ok) setPendingIntentId(null);
+          else log('cancel-intent non-ok (keeping id for retry):', cancelResp.status);
+        } catch (cancelErr) {
+          log('cancel-intent failed (keeping id for retry):', cancelErr);
+          // Do NOT clear pendingIntentId — keep it so we can retry cancellation later
+        }
       }
       if (!selectedMethod) {
         Alert.alert('Select a method', 'Please select a payment method.');
@@ -286,7 +292,10 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           return;
         }
       } catch (dupErr) {
-        log('Duplicate check failed (continuing):', dupErr);
+        log('Duplicate check failed:', dupErr);
+        // Fail safe — don't proceed if we can't confirm no duplicate exists
+        Alert.alert('Error', 'Could not verify your request status. Please try again.');
+        return;
       }
 
       // 0) Ensure/refresh Stripe customer to get customerId

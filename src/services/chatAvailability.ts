@@ -1,4 +1,4 @@
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 
 import { firestore } from '@/constants/services';
 import { canSendMessages, isTerminalStatus, MESSAGING_DISABLED_MESSAGE } from '@/constants/rideStatusConstants';
@@ -115,7 +115,29 @@ export async function resolveChatAvailability(chatData: Record<string, any>): Pr
   for (const [collectionName, id] of candidates) {
     const result = await loadStatus(collectionName, id);
     if (!result) continue;
-    const status = result.status;
+    let status = result.status;
+
+    // If the request/offer appears still active, cross-check the associated
+    // confirmedRides doc — the ride may have since completed.
+    if (status && !isTerminalStatus(status) && collectionName !== 'confirmedRides') {
+      try {
+        const field = collectionName === 'rideRequests' ? 'rideRequestId'
+          : collectionName === 'rideOffers' ? 'rideOfferId'
+          : collectionName === 'ridePostingRequests' ? 'ridePostingRequestId'
+          : collectionName === 'ridePostings' ? 'ridePostingId'
+          : null;
+        if (field && id) {
+          const confSnap = await getDocs(query(collection(firestore, 'confirmedRides'), where(field, '==', id), limit(1)));
+          if (!confSnap.empty) {
+            const confStatus = textValue(confSnap.docs[0].data()?.status) || null;
+            if (confStatus && (isTerminalStatus(confStatus) || !canSendMessages(confStatus))) {
+              status = confStatus;
+            }
+          }
+        }
+      } catch {}
+    }
+
     const available = canSendMessages(status) && !isTerminalStatus(status);
     return {
       status,

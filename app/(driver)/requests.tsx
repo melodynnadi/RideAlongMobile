@@ -589,8 +589,19 @@ export default function RequestsInboxScreen() {
         return;
       }
 
-      const driverDoc = await getDoc(doc(firestore, 'drivers', uid));
-      const isVerified = driverDoc.exists() && driverDoc.data()?.isVerified === true;
+      // Check both collections — a driver upgraded from a rider-only account
+      // may only have verification on the riders side.
+      const [driverDoc, riderDocForVerif] = await Promise.all([
+        getDoc(doc(firestore, 'drivers', uid)),
+        getDoc(doc(firestore, 'riders', uid)),
+      ]);
+      const dData = driverDoc.exists() ? driverDoc.data() : null;
+      const rData = riderDocForVerif.exists() ? riderDocForVerif.data() : null;
+      const isVerified =
+        dData?.isVerified === true ||
+        rData?.isVerified === true ||
+        ['approved','auto-approved'].includes(String(dData?.verificationStatus||'').toLowerCase()) ||
+        ['approved','auto-approved'].includes(String(rData?.verificationStatus||'').toLowerCase());
 
       if (!isVerified) {
         Alert.alert('Verification Required', 'You must verify your student status before sending ride offers.', [

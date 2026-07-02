@@ -27,7 +27,7 @@ import { badgeLabel, useRiderUnreadCounts } from '@/hooks/useRiderUnreadCounts';
 import { riderCompleteRide } from '@/src/services/rideActions';
 import { hasUserRatedRide } from '@/src/services/ratings';
 import { useRideBrowseStore, type RiderRideFilter } from '@/stores/rideBrowseStore';
-import { FlagRideModal } from '@/components/FlagRideModal';
+import { FlagRideModal, FlaggedRideBanner } from '@/components/FlagRideModal';
 import { CityAutocomplete } from '@/components/CityAutocomplete';
 import { DatePickerModal, TimePickerModal, formatDateLabel } from '@/components/DateTimePickerModals';
 import { computeRiderSuggestedPrice, formatContributionRange, getRideType } from '@/src/utils/pricing';
@@ -474,7 +474,7 @@ export function RiderHomeReference() {
   const [profile, setProfile] = useState<RiderProfile | null>(null);
   const [confirmed, setConfirmed] = useState<MobileRidePosting[]>([]);
   const [activeRequests, setActiveRequests] = useState<any[]>([]);
-  const [requestsWithOffers, setRequestsWithOffers] = useState<Map<string, { offerId: string; driverId?: string; offerPrice?: number }>>(new Map());
+  const [requestsWithOffers, setRequestsWithOffers] = useState<Map<string, { offerId: string; driverId?: string; offerPrice?: number; offerCount: number }>>(new Map());
   const [confirmedRideStatus, setConfirmedRideStatus] = useState<string | null>(null);
   const [confirmedRideId, setConfirmedRideId] = useState<string | null>(null);
   const [completedRideSourceKeys, setCompletedRideSourceKeys] = useState<Set<string>>(new Set());
@@ -590,15 +590,18 @@ export function RiderHomeReference() {
       where('riderId', '==', uid),
     );
     return onSnapshot(q, (snap) => {
-      const map = new Map<string, { offerId: string; driverId?: string; offerPrice?: number }>();
+      const map = new Map<string, { offerId: string; driverId?: string; offerPrice?: number; offerCount: number }>();
       snap.docs.forEach((d) => {
         const data = d.data() as any;
         const status = String(data.status || '').toLowerCase();
         if (activeOfferStatuses.includes(status) && data.rideRequestId) {
-          map.set(String(data.rideRequestId), {
+          const key = String(data.rideRequestId);
+          const existing = map.get(key);
+          map.set(key, {
             offerId: d.id,
             driverId: data.driverId,
             offerPrice: Number(data.offerPrice ?? data.price ?? data.amount ?? 0) || undefined,
+            offerCount: (existing?.offerCount ?? 0) + 1,
           });
         }
       });
@@ -1014,7 +1017,7 @@ async function openRiderRatingIfNeeded(confirmedRideId: string) {
   }
 }
 
-function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedRideId }: { request: any; offerInfo?: { offerId: string; driverId?: string; offerPrice?: number } | null; confirmedRideStatus?: string | null; confirmedRideId?: string | null }) {
+function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedRideId }: { request: any; offerInfo?: { offerId: string; driverId?: string; offerPrice?: number; offerCount?: number } | null; confirmedRideStatus?: string | null; confirmedRideId?: string | null }) {
   const styles = useRiderStyles();
   const { colors } = useAppTheme();
   const pickup = request.pickupAddress || request.pickup || request.from || 'Pickup pending';
@@ -1023,6 +1026,7 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
   const reqStatus       = normalizeStatus(request.status ?? request.state);
   const isConfirmed     = reqStatus === 'ACCEPTED' || reqStatus === 'CONFIRMED';
   const confirmedNorm   = normalizeStatus(confirmedRideStatus);
+  const isFlagged       = confirmedNorm === 'FLAGGED' || normalizeStatus(request.status) === 'FLAGGED';
   const isInProgress    = ['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED'].includes(confirmedNorm);
   const isDriverCompleted = confirmedNorm === 'DRIVER_COMPLETED';
   const hasOffer = !isConfirmed && !!offerInfo;
@@ -1057,8 +1061,22 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
   }, [driverId]);
 
   const openChat = async () => {
+    const riderId = firebaseAuth.currentUser?.uid;
+    if (!riderId || !driverId) return;
     try {
-      await openChatForConfirmedRide(request.id, (chatId) => router.push(`/(rider)/messages/${chatId}` as any));
+      // Use the same key as the pre-confirmation chat so we don't open a second thread.
+      const ridePostingRequestId = (request as any)._isPostingRequest
+        ? request.id
+        : (request.raw?.ridePostingRequestId || null);
+      const chatId = await getOrCreateRideChat({
+        context: ridePostingRequestId ? 'booking-request' : 'confirmed-ride',
+        rideId: confirmedRideId || request.id,
+        driverId,
+        riderId,
+        ridePostingId: request.raw?.ridePostingId || null,
+        ridePostingRequestId,
+      });
+      router.push(`/(rider)/messages/${chatId}` as any);
     } catch {
       Alert.alert('Error', 'Could not open chat. Please try again.');
     }
@@ -1214,6 +1232,9 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
           </Text>
         </View>
       )}
+      {isFlagged && confirmedRideId && (
+        <FlaggedRideBanner rideId={confirmedRideId} role="rider" colors={colors} />
+      )}
 
       {/* Actions */}
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
@@ -1273,20 +1294,30 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
           <>
             <TouchableOpacity
               style={styles.actionBtnSecondary}
-              onPress={openOfferChat}
-              disabled={acting || !offerInfo?.driverId}
+              onPress={() => router.push('/(rider)/requests' as any)}
               activeOpacity={0.75}
             >
-              <Text style={styles.actionBtnSecondaryText}>Message Driver</Text>
+              <Text style={styles.actionBtnSecondaryText}>View Offers</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionBtnPrimary, acting && { opacity: 0.6 }]}
-              onPress={handleAccept}
-              disabled={acting}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.actionBtnPrimaryText}>{acting ? 'Accepting…' : 'Accept'}</Text>
-            </TouchableOpacity>
+            {(offerInfo?.offerCount ?? 1) > 1 ? (
+              // Multiple offers — send rider to choose rather than accepting an arbitrary one
+              <TouchableOpacity
+                style={styles.actionBtnPrimary}
+                onPress={() => router.push('/(rider)/requests' as any)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.actionBtnPrimaryText}>Choose ({offerInfo!.offerCount})</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.actionBtnPrimary, acting && { opacity: 0.6 }]}
+                onPress={handleAccept}
+                disabled={acting}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.actionBtnPrimaryText}>{acting ? 'Accepting…' : 'Accept'}</Text>
+              </TouchableOpacity>
+            )}
           </>
         ) : (
           <TouchableOpacity
@@ -1652,18 +1683,27 @@ export function RiderRequestReference() {
     if (!user) return Alert.alert('Sign in required', 'Please sign in again.');
     if (!pickup.trim() || !dropoff.trim() || !date.trim()) return Alert.alert('Missing details', 'Add pickup, destination, and date.');
     try {
-      const riderDoc = await getDoc(doc(firestore, 'riders', user.uid));
-      if (riderDoc.exists()) {
-        const vData = riderDoc.data() as any;
-        const isVerified = vData?.isVerified === true;
-        const deadline = vData?.verificationDeadline;
-        const isPastDeadline = deadline
-          ? new Date() > (typeof deadline?.toDate === 'function' ? deadline.toDate() : new Date(deadline))
-          : false;
-        if (!isVerified && isPastDeadline) {
-          Alert.alert(
-            'Verification Required',
-            'Your verification deadline has passed. Please verify your student status to post ride requests.',
+      // Check both rider and driver docs — dual-role users verified on the driver
+      // side should not be blocked on the rider side.
+      const [riderDoc, driverDoc] = await Promise.all([
+        getDoc(doc(firestore, 'riders', user.uid)),
+        getDoc(doc(firestore, 'drivers', user.uid)),
+      ]);
+      const riderData = riderDoc.exists() ? (riderDoc.data() as any) : null;
+      const driverData = driverDoc.exists() ? (driverDoc.data() as any) : null;
+      const isVerified =
+        riderData?.isVerified === true ||
+        driverData?.isVerified === true ||
+        ['approved', 'auto-approved'].includes(String(driverData?.verificationStatus || '').toLowerCase()) ||
+        ['approved', 'auto-approved'].includes(String(riderData?.verificationStatus || '').toLowerCase());
+      const deadline = riderData?.verificationDeadline ?? driverData?.verificationDeadline;
+      const isPastDeadline = deadline
+        ? new Date() > (typeof deadline?.toDate === 'function' ? deadline.toDate() : new Date(deadline))
+        : false;
+      if (!isVerified && isPastDeadline) {
+        Alert.alert(
+          'Verification Required',
+          'Your verification deadline has passed. Please verify your student status to post ride requests.',
             [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Verify Now', onPress: async () => {
@@ -1679,7 +1719,6 @@ export function RiderRequestReference() {
           );
           return;
         }
-      }
     } catch {}
     try {
       setSubmitting(true);
@@ -2293,18 +2332,25 @@ export function RiderDetailReference() {
     }
     try {
       setCheckingVerification(true);
-      const riderDoc = await getDoc(doc(firestore, 'riders', user.uid));
-      if (riderDoc.exists()) {
-        const vData = riderDoc.data() as any;
-        const isVerified = vData?.isVerified === true;
-        const deadline = vData?.verificationDeadline;
-        const isPastDeadline = deadline
-          ? new Date() > (typeof deadline?.toDate === 'function' ? deadline.toDate() : new Date(deadline))
-          : false;
-        if (!isVerified && isPastDeadline) {
-          Alert.alert(
-            'Verification Required',
-            'Your verification deadline has passed. Please verify your student status to book rides.',
+      const [riderDoc2, driverDoc2] = await Promise.all([
+        getDoc(doc(firestore, 'riders', user.uid)),
+        getDoc(doc(firestore, 'drivers', user.uid)),
+      ]);
+      const riderData2 = riderDoc2.exists() ? (riderDoc2.data() as any) : null;
+      const driverData2 = driverDoc2.exists() ? (driverDoc2.data() as any) : null;
+      const isVerified2 =
+        riderData2?.isVerified === true ||
+        driverData2?.isVerified === true ||
+        ['approved', 'auto-approved'].includes(String(driverData2?.verificationStatus || '').toLowerCase()) ||
+        ['approved', 'auto-approved'].includes(String(riderData2?.verificationStatus || '').toLowerCase());
+      const deadline2 = riderData2?.verificationDeadline ?? driverData2?.verificationDeadline;
+      const isPastDeadline2 = deadline2
+        ? new Date() > (typeof deadline2?.toDate === 'function' ? deadline2.toDate() : new Date(deadline2))
+        : false;
+      if (!isVerified2 && isPastDeadline2) {
+        Alert.alert(
+          'Verification Required',
+          'Your verification deadline has passed. Please verify your student status to book rides.',
             [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Verify Now', onPress: async () => {
@@ -2320,7 +2366,6 @@ export function RiderDetailReference() {
           );
           return;
         }
-      }
 
       // Guard: ensure rider has at least one saved payment method
       const { listPaymentMethods } = await import('@/services/payments');
@@ -2556,15 +2601,27 @@ export function RiderDetailReference() {
     const currentStatus = statusMeta[rideStatus] || { label: rideStatus.replace(/_/g, ' '), color: colors.textPrimary, bg: colors.bgSecondary };
 
     const openDriverChat = async () => {
+      const riderId = firebaseAuth.currentUser?.uid;
+      if (!riderId || !driverId) return;
       try {
-        if (confirmedRideDocId) {
-          const chatSnap = await getDocs(query(collection(firestore, 'chats'), where('rideId', '==', confirmedRideDocId)));
-          if (!chatSnap.empty) {
-            router.push(`/(rider)/messages/${chatSnap.docs[0].id}` as any);
-            return;
-          }
-        }
-        await openChatForConfirmedRide(linkedRideRequestId!, (chatId) => router.push(`/(rider)/messages/${chatId}` as any));
+        // Choose the same context/scopeId used when the original pre-confirmation
+        // chat was created, so we reuse that thread instead of making a duplicate.
+        const rideOfferId = confirmedRequest.confirmed?.rideOfferId || null;
+        const ridePostingRequestId = confirmedRequest.confirmed?.ridePostingRequestId || null;
+        const context = ridePostingRequestId ? 'booking-request'
+          : rideOfferId ? 'ride-offer'
+          : 'confirmed-ride';
+        const chatId = await getOrCreateRideChat({
+          context,
+          rideId: confirmedRideDocId || linkedRideRequestId || '',
+          rideRequestId: confirmedRequest.confirmed?.rideRequestId || null,
+          rideOfferId,
+          driverId,
+          riderId,
+          ridePostingId: confirmedRequest.confirmed?.ridePostingId || null,
+          ridePostingRequestId,
+        });
+        router.push(`/(rider)/messages/${chatId}` as any);
       } catch {
         Alert.alert('Error', 'Could not open chat. Please try again.');
       }
@@ -2582,9 +2639,17 @@ export function RiderDetailReference() {
     };
 
     const cancelRide = () => {
+      // Block cancellation once the ride has started
+      if (['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED', 'COMPLETED'].includes(rideStatus)) {
+        Alert.alert('Cannot cancel', 'You cannot cancel a ride that is already in progress or completed.');
+        return;
+      }
+      const isConfirmed = rideStatus === 'CONFIRMED';
       Alert.alert(
         'Cancel ride?',
-        'Cancelling a confirmed ride may result in a cancellation fee. Your payment hold will be released within 3–5 business days.',
+        isConfirmed
+          ? 'Cancelling a confirmed ride incurs a 50% cancellation fee. The remaining balance will be released to your card within 3–5 business days.'
+          : 'Your request will be cancelled and any payment hold fully released.',
         [
           { text: 'Keep ride', style: 'cancel' },
           {
@@ -2592,8 +2657,6 @@ export function RiderDetailReference() {
             style: 'destructive',
             onPress: async () => {
               try {
-                // Cancel via the backend so the parent posting's seat count is
-                // released/reopened and any payment hold is voided server-side.
                 const { getApiBaseUrl } = await import('@/constants/services');
                 const targetCollection = confirmedRideDocId ? 'confirmedRides' : 'rideRequests';
                 const targetId = confirmedRideDocId || rideId!;
@@ -2602,11 +2665,23 @@ export function RiderDetailReference() {
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ collection: targetCollection, cancelledBy: 'rider' }),
                 });
-                if (!res.ok) throw new Error(`Server error ${res.status}`);
+                if (!res.ok) {
+                  const body = await res.json().catch(() => ({}));
+                  if (body.code === 'ride_in_progress') {
+                    Alert.alert('Cannot cancel', 'You cannot cancel a ride that is already in progress.');
+                    return;
+                  }
+                  throw new Error(body.error || `Server error ${res.status}`);
+                }
                 goBackFromDetails();
-                Alert.alert('Ride cancelled', 'Your ride has been cancelled. Any payment hold will be released within 3–5 business days.');
-              } catch {
-                Alert.alert('Failed', 'Could not cancel the ride. Please try again.');
+                Alert.alert(
+                  'Ride cancelled',
+                  isConfirmed
+                    ? 'Your ride has been cancelled. A 50% cancellation fee was charged; the rest will be released within 3–5 business days.'
+                    : 'Your ride has been cancelled and your payment hold fully released.',
+                );
+              } catch (e: any) {
+                Alert.alert('Failed', e?.message || 'Could not cancel the ride. Please try again.');
               }
             },
           },
