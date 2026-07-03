@@ -349,7 +349,7 @@ function DriverHomePostRideCard() {
   );
 }
 
-function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled }: { ride: UpcomingRideCard; hasOfferReceived?: boolean; seatsFilled?: number }) {
+function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRequestId, onAcceptRequest, onRejectRequest }: { ride: UpcomingRideCard; hasOfferReceived?: boolean; seatsFilled?: number; pendingRequestId?: string; onAcceptRequest?: () => void; onRejectRequest?: () => void }) {
   const { colors } = useAppTheme();
   const s = useDriverHomeStyles();
   const [pickingUp,   setPickingUp]   = React.useState(false);
@@ -401,8 +401,13 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled }: { ride:
     : undefined;
 
   const openRequest = () => {
-    if (ride.type === 'ridePosting' || ride.type === 'groupRide') router.push('/(driver)/my-postings' as any);
-    else router.push({ pathname: '/(driver)/request/[id]', params: { id: ride.id, returnTo: '/(driver)' } } as any);
+    if (pendingRequestId) {
+      router.push({ pathname: '/(driver)/request/[id]', params: { id: pendingRequestId, returnTo: '/(driver)' } } as any);
+    } else if (ride.type === 'ridePosting' || ride.type === 'groupRide') {
+      router.push('/(driver)/my-postings' as any);
+    } else {
+      router.push({ pathname: '/(driver)/request/[id]', params: { id: ride.id, returnTo: '/(driver)' } } as any);
+    }
   };
 
   const handlePickup = async () => {
@@ -558,7 +563,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled }: { ride:
             <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '600' }}>Waiting for {groupWaitingCount} rider{groupWaitingCount === 1 ? '' : 's'} to confirm…</Text>
           </View>
         )}
-        {!isConfirmedOnly && !isInProgress && !isFlagged && (
+        {!isConfirmedOnly && !isInProgress && !isFlagged && !hasOfferReceived && (
           <TouchableOpacity
             style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center' }}
             onPress={openRequest}
@@ -566,6 +571,24 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled }: { ride:
           >
             <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>View Details</Text>
           </TouchableOpacity>
+        )}
+        {!isConfirmedOnly && !isInProgress && !isFlagged && hasOfferReceived && (
+          <>
+            <TouchableOpacity
+              style={{ flex: 1, borderRadius: 20, paddingVertical: 10, alignItems: 'center', borderWidth: 1.5, borderColor: colors.border }}
+              onPress={onRejectRequest}
+              activeOpacity={0.8}
+            >
+              <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: '700' }}>Decline</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center' }}
+              onPress={onAcceptRequest}
+              activeOpacity={0.8}
+            >
+              <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>Accept</Text>
+            </TouchableOpacity>
+          </>
         )}
       </View>
 
@@ -706,6 +729,9 @@ export default function HomeScreen() {
   const [recentConfirmed, setRecentConfirmed] = useState<ConfirmedRide[]>([]);
 
 
+
+  // Stores all future recurring instances per schedule so we can reactively pick the right one
+  const recurringPoolRef = useRef<Record<string, { id: string; r: any; dt: Date }[]>>({});
 
   const [flagModalVisible, setFlagModalVisible] = useState(false);
   const [flaggingRideRef, setFlaggingRideRef] = useState<any | null>(null);
@@ -1966,6 +1992,8 @@ export default function HomeScreen() {
       const postingsQ = query(collection(firestore, 'ridePostings'), where('driverId', '==', uid));
       const unsubPostings = onSnapshot(postingsQ, (snap) => {
         const items: UpcomingRideCard[] = [];
+        const recurringBySchedule: Record<string, { id: string; r: any; dt: Date }[]> = {};
+        const now = Date.now();
         snap.forEach((d) => {
           const r = d.data() as any;
           const dt = composeDateTime(r?.date, r?.time) || getRideDateTime(r);
@@ -1975,7 +2003,16 @@ export default function HomeScreen() {
           const durationText = getDurationText(r);
           const rawStatus = String(r?.status || '').toLowerCase();
           if (rawStatus === 'confirmed') {
-            // Do not surface confirmed posting cards here; confirmed rides should come from confirmedRides only
+            return;
+          }
+          if (r?.isRecurring) {
+            // Collect recurring instances; we'll add only the nearest future one per schedule below
+            const inactive = new Set(['completed', 'cancelled', 'canceled', 'expired']);
+            if (!inactive.has(rawStatus) && dt && dt.getTime() > now - 2 * 60 * 60 * 1000) {
+              const sid = r.scheduleId || d.id;
+              if (!recurringBySchedule[sid]) recurringBySchedule[sid] = [];
+              recurringBySchedule[sid].push({ id: d.id, r, dt });
+            }
             return;
           }
           items.push({
@@ -1994,43 +2031,35 @@ export default function HomeScreen() {
               : (typeof r?.seats === 'number' ? r.seats : (typeof r?.availableSeats === 'number' ? r.availableSeats : undefined)),
           });
         });
-  const next: Record<string, UpcomingRideCard> = {};
-  items.forEach((it) => { next[it.id] = it; });
-  setUpcPostingsDriver(next);
-  setCombinedUpcoming({ postingsDriver: next });
+        // Sort each schedule's instances by date and store in ref for reactive re-selection
+        Object.values(recurringBySchedule).forEach((insts) => insts.sort((a, b) => a.dt.getTime() - b.dt.getTime()));
+        recurringPoolRef.current = recurringBySchedule;
 
-  // Also query ridePostingRequests by ridePostingId directly — more reliable
-  // than relying on driverId being set, since the rider writes that field
-  const activeIds = items.map((it) => it.id).filter(Boolean);
-  if (activeIds.length > 0) {
-    const chunks: string[][] = [];
-    for (let i = 0; i < activeIds.length; i += 30) chunks.push(activeIds.slice(i, i + 30));
-    Promise.all(
-      chunks.map((chunk) =>
-        getDocs(query(
-          collection(firestore, 'ridePostingRequests'),
-          where('ridePostingId', 'in', chunk),
-        )).catch(() => null)
-      )
-    ).then((snaps) => {
-      const byPosting: Record<string, { id: string; status: string }> = {};
-      const inactive = new Set(['rejected','declined','cancelled','canceled','completed','accepted','confirmed']);
-      snaps.forEach((reqSnap) => {
-        if (!reqSnap) return;
-        reqSnap.forEach((d) => {
-          const r = d.data() as any;
-          const status = String(r?.status || 'pending').toLowerCase();
-          const pid = String(r?.ridePostingId || r?.rideId || '');
-          if (pid && !inactive.has(status)) {
-            byPosting[pid] = { id: d.id, status };
-          }
+        // Add the nearest instance per schedule as the default (reactive effect will swap if needed)
+        Object.values(recurringBySchedule).forEach((instances) => {
+          const { id, r, dt } = instances[0];
+          const price = r?.pricePerSeat ?? r?.contributionAmount ?? r?.price ?? r?.estimatedFare;
+          items.push({
+            id,
+            type: 'ridePosting',
+            status: normalizeStatusForDisplay(r?.status),
+            from: extractAddress(r, 'pickup'),
+            to: extractAddress(r, 'dropoff'),
+            dateTime: dt,
+            durationText: getDurationText(r),
+            priceText: typeof price === 'number' ? `$${price.toFixed(2)}` : (typeof price === 'string' ? price : undefined),
+            distanceText: extractDistance(r),
+            seatCount: typeof r?.seatsAvailable === 'number'
+              ? r.seatsAvailable
+              : (typeof r?.seats === 'number' ? r.seats : (typeof r?.availableSeats === 'number' ? r.availableSeats : undefined)),
+            raw: r,
+          });
         });
-      });
-      if (Object.keys(byPosting).length > 0) {
-        setPostingReqByPostingId((prev) => ({ ...prev, ...byPosting }));
-      }
-    }).catch(() => {});
-  }
+
+        const next: Record<string, UpcomingRideCard> = {};
+        items.forEach((it) => { next[it.id] = it; });
+        setUpcPostingsDriver(next);
+        setCombinedUpcoming({ postingsDriver: next });
       }, (err) => console.warn('ridePostings(driverId) listener error', err));
       unsubs.push(unsubPostings);
     } catch (e) {
@@ -2042,6 +2071,8 @@ export default function HomeScreen() {
         const postingsEmailQ = query(collection(firestore, 'ridePostings'), where('driverEmail', '==', email));
         const unsubPostingsEmail = onSnapshot(postingsEmailQ, (snap) => {
           const items: UpcomingRideCard[] = [];
+          const recurringBySchedule: Record<string, { id: string; r: any; dt: Date }[]> = {};
+          const now = Date.now();
           snap.forEach((d) => {
             const r = d.data() as any;
             const dt = composeDateTime(r?.date, r?.time) || getRideDateTime(r);
@@ -2051,7 +2082,15 @@ export default function HomeScreen() {
             const durationText = getDurationText(r);
             const rawStatus = String(r?.status || '').toLowerCase();
             if (rawStatus === 'confirmed') {
-              // Do not surface confirmed posting cards here; confirmed rides should come from confirmedRides only
+              return;
+            }
+            if (r?.isRecurring) {
+              const inactive = new Set(['completed', 'cancelled', 'canceled', 'expired']);
+              if (!inactive.has(rawStatus) && dt && dt.getTime() > now - 2 * 60 * 60 * 1000) {
+                const sid = r.scheduleId || d.id;
+                if (!recurringBySchedule[sid]) recurringBySchedule[sid] = [];
+                recurringBySchedule[sid].push({ id: d.id, r, dt });
+              }
               return;
             }
             items.push({
@@ -2065,6 +2104,28 @@ export default function HomeScreen() {
               priceText: typeof price === 'number' ? `$${price.toFixed(2)}` : (typeof price === 'string' ? price : undefined),
               distanceText: extractDistance(r),
               seatCount: typeof r?.availableSeats === 'number' ? r.availableSeats : (typeof r?.seats === 'number' ? r.seats : undefined),
+            });
+          });
+          // Merge email-based recurring instances into the shared pool ref
+          Object.entries(recurringBySchedule).forEach(([sid, insts]) => {
+            insts.sort((a, b) => a.dt.getTime() - b.dt.getTime());
+            if (!recurringPoolRef.current[sid]) recurringPoolRef.current[sid] = insts;
+          });
+          Object.values(recurringBySchedule).forEach((instances) => {
+            const { id, r, dt } = instances[0];
+            const price = r?.pricePerSeat ?? r?.contributionAmount ?? r?.price ?? r?.estimatedFare;
+            items.push({
+              id,
+              type: 'ridePosting',
+              status: normalizeStatusForDisplay(r?.status),
+              from: extractAddress(r, 'pickup') || 'Pickup',
+              to: extractAddress(r, 'dropoff') || 'Dropoff',
+              dateTime: dt,
+              durationText: getDurationText(r),
+              priceText: typeof price === 'number' ? `$${price.toFixed(2)}` : (typeof price === 'string' ? price : undefined),
+              distanceText: extractDistance(r),
+              seatCount: typeof r?.availableSeats === 'number' ? r.availableSeats : (typeof r?.seats === 'number' ? r.seats : undefined),
+              raw: r,
             });
           });
           const next: Record<string, UpcomingRideCard> = {};
@@ -2332,6 +2393,7 @@ export default function HomeScreen() {
         ));
 
         let rides = 0;
+        let earnings = 0;
         const monthlyRideIds: string[] = [];
 
         snap.forEach((d) => {
@@ -2340,6 +2402,21 @@ export default function HomeScreen() {
           if (!rideDate || rideDate < startOfMonth) return;
           rides++;
           monthlyRideIds.push(d.id);
+          earnings += parseCurrency(
+            r.driverEarnings ??
+            r.driverPayout ??
+            r.driverAmount ??
+            r.netDriverAmount ??
+            r.netAmount ??
+            r.payoutAmount ??
+            r.contributionAmount ??
+            r.paymentAmount ??
+            r.pricePerSeat ??
+            r.price ??
+            r.fare ??
+            r.estimatedFare?.total ??
+            r.estimatedFare
+          ) ?? 0;
         });
 
         // Fetch ratings for this month's rides
@@ -2365,7 +2442,7 @@ export default function HomeScreen() {
           }
         }
 
-        if (mounted) setMonthlyStats((current) => ({ ...current, rides, rating: monthlyRating, loaded: true }));
+        if (mounted) setMonthlyStats((current) => ({ ...current, rides, earnings, rating: monthlyRating, loaded: true }));
       } catch {
         if (mounted) setMonthlyStats((s) => ({ ...s, loaded: true }));
       }
@@ -2498,6 +2575,42 @@ export default function HomeScreen() {
     confirmedCountByPostingId,
     historyOnlySourceKeys,
   ]);
+
+  // Reactively swap displayed recurring instance when a rider books a future date.
+  // Runs whenever postingReqByPostingId changes (e.g. rider books July 3 while July 2 is shown).
+  useEffect(() => {
+    const pool = recurringPoolRef.current;
+    if (Object.keys(pool).length === 0) return;
+
+    setUpcPostingsDriver((prev) => {
+      // Collect all recurring instance IDs across all schedules
+      const allPoolIds = new Set(Object.values(pool).flatMap((insts) => insts.map((i) => i.id)));
+      // Remove all currently-displayed recurring instances
+      const base = Object.fromEntries(Object.entries(prev).filter(([id]) => !allPoolIds.has(id)));
+      // Re-add the correct instance per schedule
+      Object.values(pool).forEach((instances) => {
+        const withReq = instances.find(({ id }) => postingReqByPostingId[id]);
+        const { id, r, dt } = withReq || instances[0];
+        const price = r?.pricePerSeat ?? r?.contributionAmount ?? r?.price ?? r?.estimatedFare;
+        base[id] = {
+          id,
+          type: 'ridePosting',
+          status: normalizeStatusForDisplay(r?.status),
+          from: extractAddress(r, 'pickup'),
+          to: extractAddress(r, 'dropoff'),
+          dateTime: dt,
+          durationText: getDurationText(r),
+          priceText: typeof price === 'number' ? `$${price.toFixed(2)}` : (typeof price === 'string' ? price : undefined),
+          distanceText: extractDistance(r),
+          seatCount: typeof r?.seatsAvailable === 'number'
+            ? r.seatsAvailable
+            : (typeof r?.seats === 'number' ? r.seats : (typeof r?.availableSeats === 'number' ? r.availableSeats : undefined)),
+          raw: r,
+        };
+      });
+      return base;
+    });
+  }, [postingReqByPostingId]);
 
   function sortByDate(arr: UpcomingRideCard[]) {
     return [...arr].sort((a, b) => {
@@ -3309,7 +3422,7 @@ export default function HomeScreen() {
       }
       return '';
     };
-    const byKey = new Map<string, { from: string; to: string; meta: string; updatedAt: number }>();
+    const byKey = new Map<string, { from: string; to: string; meta: string; price?: number | null; updatedAt: number }>();
     recentConfirmed.forEach((cr) => {
       const from = routeText(cr.pickup);
       const to = routeText(cr.dropoff);
@@ -3317,7 +3430,20 @@ export default function HomeScreen() {
       const key = `${from.toLowerCase()}::${to.toLowerCase()}`;
       if (!byKey.has(key)) {
         const ts = (cr as any).completedAt?.toMillis?.() || (cr as any).completedAt?.toDate?.()?.getTime?.() || 0;
-        byKey.set(key, { from, to, meta: 'Driven before', updatedAt: ts });
+        const price = parseCurrency(
+          (cr as any).driverEarnings ??
+          (cr as any).driverPayout ??
+          (cr as any).driverAmount ??
+          (cr as any).netDriverAmount ??
+          (cr as any).netAmount ??
+          (cr as any).payoutAmount ??
+          (cr as any).contributionAmount ??
+          (cr as any).paymentAmount ??
+          (cr as any).pricePerSeat ??
+          (cr as any).price ??
+          (cr as any).fare
+        ) ?? null;
+        byKey.set(key, { from, to, meta: 'Driven before', price, updatedAt: ts });
       }
     });
     return Array.from(byKey.values())
@@ -3401,6 +3527,15 @@ export default function HomeScreen() {
                     : false
                 }
                 seatsFilled={confirmedCountByPostingId[displayUpcoming[0].id]}
+                pendingRequestId={postingReqByPostingId[displayUpcoming[0].id]?.id}
+                onAcceptRequest={() => {
+                  const reqId = postingReqByPostingId[displayUpcoming[0].id]?.id;
+                  if (reqId) acceptPostingRequest(reqId);
+                }}
+                onRejectRequest={() => {
+                  const reqId = postingReqByPostingId[displayUpcoming[0].id]?.id;
+                  if (reqId) rejectPostingRequest(reqId);
+                }}
               />
             ) : (
               <DriverHomePostRideCard />
@@ -3745,147 +3880,18 @@ export default function HomeScreen() {
                 );
               }
 
-              // ── Standard Ride Card ──
-              const bp = badgeProps(
-                isIncomingPendingOffer || isOfferReceivedForPosting,
-                isOwnPendingOffer || isOfferSent,
-                isPosted,
-                isConfirmed && !isInProgress,
-                isInProgress,
-                isFlagged,
-              );
-              const badgeLabel = (isIncomingPendingOffer || isOfferReceivedForPosting) ? 'Offer Received'
-                : (isOwnPendingOffer || isOfferSent) ? 'Offer Sent'
-                : isFlagged ? 'Flagged'
-                : isInProgress ? 'In Progress'
-                : isConfirmed ? 'Confirmed'
-                : isPosted ? 'Posted'
-                : prettyStatus(r.status);
-
+              // ── Standard Ride Card — same component as hero ──
+              const reqId = isOfferReceivedForPosting ? postingReqByPostingId[r.id]?.id : undefined;
               return (
-                <View key={`${r.type}-${r.id}`} style={s.rideCard}>
-                  <View style={s.rideCardInner}>
-                    <View style={s.rideCardTop}>
-                      <View style={[s.statusBadge, { backgroundColor: bp.bg }]}>
-                        <Text style={[s.statusBadgeText, { color: bp.txt }]}>{badgeLabel}</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        {r.type === 'ridePosting' && ((r as any).seatCount ?? 1) > 1 && (
-                          <Text style={s.rideMeta}>{(confirmedCountByPostingId[r.id] || 0)}/{(r as any).seatCount} pax</Text>
-                        )}
-                        <Text style={s.rideDateText}>{dateText}</Text>
-                      </View>
-                    </View>
-
-                    {(r.from || r.to) && (
-                      <View style={s.routeWrap}>
-                        {r.from && <View style={s.routeRow}><View style={s.dotOrange}/><Text style={s.routeFrom} numberOfLines={1}>{r.from}</Text></View>}
-                        <View style={s.routeConnector}/>
-                        {r.to && <View style={s.routeRow}><View style={s.dotGray}/><Text style={s.routeTo} numberOfLines={1}>{r.to}</Text></View>}
-                      </View>
-                    )}
-
-                    <View style={s.rideFooter}>
-                      <Text style={s.ridePrice}>{offer?.priceText ?? r.priceText ?? ''}</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        {(offer?.durationText ?? r.durationText) && (
-                          <Text style={s.rideMeta}>{offer?.durationText ?? r.durationText}</Text>
-                        )}
-                        {r.type === 'ridePosting' && (
-                          <TouchableOpacity onPress={() => {
-                            const p = new URLSearchParams();
-                            const n = (userName || '').split(' ')[0]; if (n) p.set('name', n);
-                            if (r.from) p.set('from', r.from); if (r.to) p.set('to', r.to);
-                            const url = `https://ridealongapp.com/ride/${r.id}${p.toString() ? '?' + p.toString() : ''}`;
-                            Share.share({ message: `I'm offering a ride on RideAlong!\n${url}`, url }).catch(() => {});
-                          }}>
-                            <Ionicons name="share-outline" size={16} color={colors.primary} />
-                          </TouchableOpacity>
-                        )}
-                        <TouchableOpacity style={s.detailsBtn} onPress={() => openRideDetails(r)}>
-                          <Text style={s.detailsBtnText}>Details</Text>
-                          <Ionicons name="chevron-forward" size={14} color={colors.primary} />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-
-                    {hasConfirmedRide && confirmedStatusKey === 'CONFIRMED' && !isIncomingPendingOffer && !isOfferReceivedForPosting && !isOwnPendingOffer && !waitingAfterPickup[cardKey] && !waitingAfterComplete[cardKey] && (
-                      <View style={s.actionRow}>
-                        <TouchableOpacity onPress={() => { setFlaggingRideRef(r); setFlagModalVisible(true); }} style={s.iconBtn}><Ionicons name="flag-outline" size={16} color={colors.red}/></TouchableOpacity>
-                        <TouchableOpacity onPress={() => openChatForRide(r)} style={s.iconBtn}><Ionicons name="chatbubble-outline" size={16} color={colors.primary}/></TouchableOpacity>
-                        <Button size="sm" variant="primary"
-                          loading={!!rideActionLoading[`pickup-${r.type}-${r.id}`]}
-                          disabled={!!rideActionLoading[`pickup-${r.type}-${r.id}`]}
-                          onPress={async () => {
-                            const key = `pickup-${r.type}-${r.id}`;
-                            setRideActionLoading((m) => ({ ...m, [key]: true }));
-                            try {
-                              const ok = await actionConfirmPickup({ confirmedId: r.confirmedId, rideRequestId: r.type === 'rideRequest' ? r.id : undefined, ridePostingId: r.type === 'ridePosting' ? r.id : undefined, riderId: r.riderId });
-                              if (ok) setWaitingAfterPickup((prev) => ({ ...prev, [cardKey]: true }));
-                            } finally { setRideActionLoading((m) => ({ ...m, [key]: false })); }
-                          }}>Pick Up</Button>
-                      </View>
-                    )}
-
-                    {waitingAfterPickup[cardKey] && confirmedStatusKey === 'CONFIRMED' && (
-                      <Text style={s.waitingText}>Waiting for rider to confirm pickup…</Text>
-                    )}
-
-                    {hasConfirmedRide && isInProgress && !isIncomingPendingOffer && !isOfferReceivedForPosting && !isOwnPendingOffer && !isWaiting && (
-                      <View style={s.actionRow}>
-                        <TouchableOpacity onPress={() => { setFlaggingRideRef(r); setFlagModalVisible(true); }} style={s.iconBtn}><Ionicons name="flag-outline" size={16} color={colors.red}/></TouchableOpacity>
-                        <TouchableOpacity onPress={() => openChatForRide(r)} style={s.iconBtn}><Ionicons name="chatbubble-outline" size={16} color={colors.primary}/></TouchableOpacity>
-                        <Button size="sm" variant="primary"
-                          loading={!!rideActionLoading[`complete-${r.type}-${r.id}`]}
-                          disabled={!!rideActionLoading[`complete-${r.type}-${r.id}`]}
-                          onPress={async () => {
-                            const key = `complete-${r.type}-${r.id}`;
-                            setRideActionLoading((m) => ({ ...m, [key]: true }));
-                            try {
-                              const ok = await actionCompleteRide({ confirmedId: r.confirmedId, rideRequestId: r.type === 'rideRequest' ? r.id : undefined, ridePostingId: r.type === 'ridePosting' ? r.id : undefined, riderId: r.riderId });
-                              if (ok) setWaitingAfterComplete((prev) => ({ ...prev, [cardKey]: true }));
-                            } finally { setRideActionLoading((m) => ({ ...m, [key]: false })); }
-                          }}>Complete Ride</Button>
-                      </View>
-                    )}
-
-                    {hasConfirmedRide && isWaiting && (
-                      <Text style={s.waitingText}>Waiting for rider to confirm completion…</Text>
-                    )}
-
-                    {(isIncomingPendingOffer || isOfferReceivedForPosting) && (
-                      <View style={[s.actionRow, { justifyContent: 'flex-end' }]}>
-                        <Button size="sm" variant="outline"
-                          onPress={() => r.type === 'ridePostingRequest' ? rejectPostingRequest(r.id) : (isOfferReceivedForPosting ? rejectPostingRequest(postingReqByPostingId[r.id].id) : rejectOffer(r.id))}>
-                          Reject
-                        </Button>
-                        <Button size="sm" variant="primary"
-                          onPress={() => r.type === 'ridePostingRequest' ? acceptPostingRequest(r.id) : (isOfferReceivedForPosting ? acceptPostingRequest(postingReqByPostingId[r.id].id) : acceptOffer(r.id))}>
-                          Accept
-                        </Button>
-                      </View>
-                    )}
-
-                    {(isOwnPendingOffer || isOfferSent) && !isConfirmed && (
-                      <View style={[s.actionRow, { justifyContent: 'flex-end' }]}>
-                        <Button size="sm" variant="outline" onPress={() => cancelOffer(r.id)}>Cancel Offer</Button>
-                      </View>
-                    )}
-
-                    {isPosted && r.type === 'ridePosting' && (
-                      <View style={[s.actionRow, { justifyContent: 'flex-end' }]}>
-                        <Button size="sm" variant="outline" onPress={() => {
-                          Alert.alert('Cancel Posting', 'Are you sure you want to cancel this ride posting?', [
-                            { text: 'No', style: 'cancel' },
-                            { text: 'Yes', style: 'destructive', onPress: async () => {
-                              try { await updateDoc(doc(firestore, 'ridePostings', r.id), { status: 'cancelled', cancelledAt: serverTimestamp() }); Alert.alert('Success', 'Ride posting cancelled'); }
-                              catch { Alert.alert('Error', 'Failed to cancel posting'); }
-                            }},
-                          ]);
-                        }}>Cancel Posting</Button>
-                      </View>
-                    )}
-                  </View>
+                <View key={`${r.type}-${r.id}`} style={{ marginBottom: 14 }}>
+                  <DriverHomeActivityCard
+                    ride={r}
+                    hasOfferReceived={isIncomingPendingOffer || isOfferReceivedForPosting}
+                    seatsFilled={confirmedCountByPostingId[r.id]}
+                    pendingRequestId={reqId}
+                    onAcceptRequest={reqId ? () => acceptPostingRequest(reqId) : undefined}
+                    onRejectRequest={reqId ? () => rejectPostingRequest(reqId) : undefined}
+                  />
                 </View>
               );
             })}
@@ -3897,7 +3903,7 @@ export default function HomeScreen() {
           ══════════════════════════════════════════════════════════ */}
           <View style={[s.section, { marginBottom: 8 }]}>
             <View style={s.sectionHdrRow}>
-              <Text style={s.sectionTitle}>Driver summary</Text>
+              <Text style={s.sectionTitle}>Driver summary (month)</Text>
               <TouchableOpacity onPress={() => router.push('/(driver)/earnings' as any)}>
                 <Text style={s.viewAll}>View earnings</Text>
               </TouchableOpacity>
@@ -3919,7 +3925,7 @@ export default function HomeScreen() {
                     <Ionicons name="cash-outline" size={18} color={colors.primary} />
                   </View>
                   <Text style={s.monthStatValue}>
-                    {monthlyStats.loaded ? `$${Math.round(stats.totalEarnings)}` : '—'}
+                    {monthlyStats.loaded ? `$${Math.round(monthlyStats.earnings)}` : '—'}
                   </Text>
                   <Text style={s.monthStatLabel}>Total earned</Text>
                 </View>
@@ -3952,40 +3958,42 @@ export default function HomeScreen() {
                 <Text style={s.viewAll}>Post a ride</Text>
               </TouchableOpacity>
             </View>
-            <View style={{ gap: 8 }}>
+            <View style={s.postAgainList}>
               {postAgainRoutes.length > 0 ? postAgainRoutes.map((route, idx) => (
                 <TouchableOpacity
                   key={idx}
-                  style={[s.rideCard, { padding: 14 }]}
+                  style={s.postAgainCard}
                   onPress={() => router.push({ pathname: '/(driver)/book', params: { pickup: route.from, dropoff: route.to } } as any)}
                   activeOpacity={0.75}
+                  accessibilityRole="button"
                 >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}>
+                  <View style={s.postAgainRow}>
+                    <View style={s.postAgainIcon}>
                       <Ionicons name="refresh-outline" size={18} color={colors.primary} />
                     </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textPrimary }} numberOfLines={1}>{route.from} → {route.to}</Text>
-                      <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>{route.meta}</Text>
+                    <View style={s.postAgainCopy}>
+                      <Text style={s.postAgainTitle} numberOfLines={1}>{route.from} {'->'} {route.to}</Text>
+                      <Text style={s.postAgainMeta}>{route.meta}</Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                    {route.price ? <Text style={s.postAgainPrice}>${Math.round(route.price)}</Text> : <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />}
                   </View>
                 </TouchableOpacity>
               )) : (
                 <TouchableOpacity
-                  style={[s.rideCard, { padding: 14 }]}
+                  style={s.postAgainCard}
                   onPress={() => router.push('/(driver)/book' as any)}
                   activeOpacity={0.75}
+                  accessibilityRole="button"
                 >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}>
+                  <View style={s.postAgainRow}>
+                    <View style={s.postAgainIcon}>
                       <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
                     </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textPrimary }}>Post your first ride</Text>
-                      <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>Riders near you are looking for drivers</Text>
+                    <View style={s.postAgainCopy}>
+                      <Text style={s.postAgainTitle}>Post your first ride</Text>
+                      <Text style={s.postAgainMeta}>Riders near you are looking for drivers</Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                    <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                   </View>
                 </TouchableOpacity>
               )}
@@ -4957,6 +4965,15 @@ function useDriverHomeStyles() {
   actionRow:        { flexDirection:'row', justifyContent:'flex-end', alignItems:'center', gap:8, marginTop:12, flexWrap:'wrap' },
   iconBtn:          { width:36, height:36, borderRadius:18, alignItems:'center', justifyContent:'center', backgroundColor:colors.bgSecondary },
   waitingText:      { fontSize:12, color:colors.textSecondary, textAlign:'right', marginTop:8, fontStyle:'italic' },
+
+  postAgainList:    { gap:10 },
+  postAgainCard:    { minHeight:66, borderRadius:18, borderWidth:1, borderColor:colors.border, backgroundColor:colors.bgCard, paddingHorizontal:14, paddingVertical:12, shadowColor:colors.textPrimary, shadowOffset:{width:0,height:3}, shadowOpacity:0.04, shadowRadius:8, elevation:1 },
+  postAgainRow:     { flexDirection:'row', alignItems:'center', gap:12 },
+  postAgainIcon:    { width:38, height:38, borderRadius:14, backgroundColor:colors.primaryDim, alignItems:'center', justifyContent:'center', flexShrink:0 },
+  postAgainCopy:    { flex:1, minWidth:0 },
+  postAgainTitle:   { color:colors.textPrimary, fontSize:15, fontWeight:'700' },
+  postAgainMeta:    { color:colors.textSecondary, fontSize:12, fontWeight:'600', marginTop:3 },
+  postAgainPrice:   { color:colors.primary, fontSize:20, fontWeight:'500' },
 
   // ── Campus Activity ───────────────────────────────────────────────────────
   activityCard:     { borderRadius:18, borderWidth:1, borderColor:colors.border, overflow:'hidden', marginTop:2, backgroundColor:colors.bgCard },

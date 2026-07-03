@@ -415,7 +415,7 @@ export default function RequestsInboxScreen() {
     chip: {
       minWidth: 72,
       height: 42,
-      borderRadius: 21,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.bgCard,

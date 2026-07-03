@@ -14,7 +14,8 @@ import {
   Platform,
   KeyboardAvoidingView,
   Share,
-  ActivityIndicator,     // ← ADD
+  Switch,
+  ActivityIndicator,
   StatusBar,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -782,6 +783,10 @@ export default function BookScreen() {
   const [showCapBanner, setShowCapBanner] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Recurring ride state
+  const [isRecurring, setIsRecurring] = useState(false);
+  const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+  const [recurringDays, setRecurringDays] = useState<number[]>([]);
   const [showDateSug, setShowDateSug] = useState(false);
   const [showTimeSug, setShowTimeSug] = useState(false);
   const [locLoading, setLocLoading] = useState(false);
@@ -926,6 +931,14 @@ export default function BookScreen() {
       // Basic validation
       if (!pickupLocation.trim() || !dropoffLocation.trim()) {
         Alert.alert('Missing info', 'Please enter both pickup and dropoff locations.');
+        return;
+      }
+      if (isRecurring && recurringDays.length === 0) {
+        Alert.alert('Select days', 'Please select at least one day of the week for the recurring schedule.');
+        return;
+      }
+      if (!isRecurring && !date.trim()) {
+        Alert.alert('Missing date', 'Please select a date for this ride.');
         return;
       }
 
@@ -1073,9 +1086,36 @@ export default function BookScreen() {
         if (payload[k] === undefined) payload[k] = null;
       });
 
-      // Call backend API to create ride posting and trigger preferred route notifications
+      // Call backend API
       const apiUrl = getApiBaseUrl();
       try {
+        // Recurring schedule path
+        if (isRecurring) {
+          const token = await firebaseAuth.currentUser?.getIdToken();
+          const schedulePayload = {
+            from: pickupLocation,
+            to: dropoffLocation,
+            fromCoords: submitPickupCoords,
+            toCoords: submitDropoffCoords,
+            departureTime: time ? to24h(time) : '09:00',
+            daysOfWeek: recurringDays,
+            seats: seatsNum,
+            pricePerSeat: resolvedPriceNum,
+            notes: notes.trim() || null,
+            vehicleInfo: payload.vehicleInfo || null,
+          };
+          const scheduleRes = await fetch(`${apiUrl}/api/ride-schedules`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+            body: JSON.stringify(schedulePayload),
+          });
+          const scheduleResult = await scheduleRes.json();
+          if (!scheduleRes.ok) throw new Error(scheduleResult.error || 'Failed to create recurring schedule');
+          Alert.alert('Recurring ride scheduled!', `Your ride will repeat on selected days. ${scheduleResult.instancesCreated} upcoming rides have been posted.`, [{ text: 'OK', onPress: () => router.replace('/(driver)' as any) }]);
+          return;
+        }
+
+        // One-time posting path
         const response = await fetch(`${apiUrl}/api/ride-postings`, {
           method: 'POST',
           headers: {
@@ -1323,7 +1363,7 @@ export default function BookScreen() {
 
           <FlatList
             style={{ flex: 1 }}
-            contentContainerStyle={{ paddingBottom: 130 + insets.bottom }}
+            contentContainerStyle={{ paddingBottom: 88 + insets.bottom }}
             data={[0]}
             ListHeaderComponent={(
               <View>
@@ -1446,6 +1486,66 @@ export default function BookScreen() {
                   </View>
                 ) : null}
 
+                {/* ── Recurring ride ── */}
+                <Text style={styles.fieldGroupLabel}>REPEAT WEEKLY</Text>
+                <View style={{ marginHorizontal: 20, borderRadius: 18, borderWidth: 1, borderColor: isRecurring ? colors.primary : colors.border, backgroundColor: colors.bgCard, overflow: 'hidden', marginBottom: 4 }}>
+                  {/* Toggle row */}
+                  <TouchableOpacity
+                    activeOpacity={0.75}
+                    onPress={() => { setIsRecurring(v => !v); if (isRecurring) setRecurringDays([]); }}
+                    style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 }}
+                  >
+                    <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: isRecurring ? colors.primaryDim : colors.bgSecondary, alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="repeat-outline" size={18} color={isRecurring ? colors.primary : colors.textSecondary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: '700' }}>Post this ride every week</Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                        {isRecurring && recurringDays.length > 0
+                          ? `Every ${recurringDays.map(d => DAY_LABELS[d]).join(', ')} · 8 weeks ahead`
+                          : 'Automatically create instances 8 weeks out'}
+                      </Text>
+                    </View>
+                    <Switch
+                      value={isRecurring}
+                      onValueChange={v => { setIsRecurring(v); if (!v) setRecurringDays([]); }}
+                      trackColor={{ false: colors.border, true: colors.primaryDim }}
+                      thumbColor={isRecurring ? colors.primary : '#fff'}
+                    />
+                  </TouchableOpacity>
+
+                  {/* Day picker — only visible when toggled on */}
+                  {isRecurring && (
+                    <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: 16, paddingVertical: 14 }}>
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 1.3, marginBottom: 12 }}>REPEATS ON</Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        {(['Su','Mo','Tu','We','Th','Fr','Sa'] as const).map((abbr, idx) => {
+                          const selected = recurringDays.includes(idx);
+                          return (
+                            <TouchableOpacity
+                              key={idx}
+                              onPress={() => setRecurringDays(prev => selected ? prev.filter(d => d !== idx) : [...prev, idx].sort())}
+                              activeOpacity={0.7}
+                              style={{
+                                width: 38, height: 38, borderRadius: 19,
+                                alignItems: 'center', justifyContent: 'center',
+                                backgroundColor: selected ? colors.primary : colors.bgSecondary,
+                                borderWidth: selected ? 0 : 1,
+                                borderColor: colors.border,
+                              }}
+                            >
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: selected ? colors.textInverse : colors.textSecondary }}>{abbr}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                      {recurringDays.length === 0 && (
+                        <Text style={{ color: colors.red, fontSize: 12, marginTop: 10, fontWeight: '600' }}>Select at least one day</Text>
+                      )}
+                    </View>
+                  )}
+                </View>
+
                 <Text style={styles.fieldGroupLabel}>NOTE FOR RIDERS (OPTIONAL)</Text>
                 <TextInput
                   value={notes}
@@ -1464,11 +1564,11 @@ export default function BookScreen() {
                   {submitting ? (
                     <ActivityIndicator color="#FFFFFF" />
                   ) : (
-                    <Text style={styles.continueText}>{'Post ride ->'}</Text>
+                    <Text style={styles.continueText}>{isRecurring ? `Schedule recurring ride →` : `Post ride →`}</Text>
                   )}
                 </TouchableOpacity>
 
-                <View style={{ height: 20 }} />
+                <View style={{ height: 4 }} />
               </View>
             )}
             renderItem={() => null}

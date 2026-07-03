@@ -2174,27 +2174,32 @@ export function RiderAvailableReference() {
             pathname: '/(rider)/ride/[id]',
             params: { id: ride.id, returnTo: '/(rider)/available-rides' },
           } as any)}>
-            <View style={styles.availableTop}>
-              <View style={styles.navyDot} />
-              <Text style={[styles.availableRoute, { flex: 1 }]} numberOfLines={1}>{ride.from} → {ride.to}</Text>
-              {isBooked ? (
+            {/* Date/time — very top of card */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14, gap: 8 }}>
+              <Text style={{ flex: 1, color: colors.textPrimary, fontSize: 15, fontWeight: '700' }}>{formatRideTime(ride.date) || 'Date TBD'}</Text>
+              {ride.isFull && !isBooked && (
+                <View style={{ backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 }}>
+                  <Text style={{ color: '#DC2626', fontSize: 10, fontWeight: '800' }}>FULL</Text>
+                </View>
+              )}
+              {ride.isRecurring && (
+                <View style={{ backgroundColor: colors.primaryDim, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 }}>
+                  <Text style={{ color: colors.primary, fontSize: 10, fontWeight: '800' }}>↻ Recurring</Text>
+                </View>
+              )}
+              {isBooked && (
                 <View style={{ backgroundColor: 'rgba(34,197,94,0.12)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(34,197,94,0.35)', paddingHorizontal: 8, paddingVertical: 3 }}>
                   <Text style={{ color: '#16a34a', fontSize: 10, fontWeight: '800' }}>Booked</Text>
                 </View>
-              ) : (
-                <Text style={styles.availableTime}>{formatRideTime(ride.date)}</Text>
               )}
             </View>
             <View style={styles.availableLocationsBlock}>
-              {formatRideTime(ride.date) ? (
-                <Text style={styles.availableLocationsTime}>{formatRideTime(ride.date)}</Text>
-              ) : null}
               <View style={styles.availableRouteRail}>
                 <View style={styles.availablePickupDot} />
                 <View style={styles.availableRouteLine} />
                 <View style={styles.availableDropoffDot} />
               </View>
-              <View style={styles.availableLocationCopy}>
+              <View style={[styles.availableLocationCopy, { paddingRight: 0 }]}>
                 <View style={styles.availableLocationTextWrap}>
                   <Text style={styles.availableRouteLabel}>Pickup</Text>
                   <Text style={styles.availableLocationText} numberOfLines={2}>{ride.from || 'Pickup pending'}</Text>
@@ -2323,6 +2328,10 @@ export function RiderDetailReference() {
   const [paymentVisible, setPaymentVisible] = useState(false);
   const [checkingVerification, setCheckingVerification] = useState(false);
   const [postingVehicleImageUrl, setPostingVehicleImageUrl] = useState<string | null>(null);
+  const [scheduleInstances, setScheduleInstances] = useState<{ id: string; date: Date }[]>([]);
+  const [loadingInstances, setLoadingInstances] = useState(false);
+  const [myWaitlistEntry, setMyWaitlistEntry] = useState<import('@/src/services/waitlistService').WaitlistEntry | null>(null);
+  const [joiningWaitlist, setJoiningWaitlist] = useState(false);
 
   const handleRequestSeat = async () => {
     const user = firebaseAuth.currentUser;
@@ -2511,6 +2520,80 @@ export function RiderDetailReference() {
       finally { setLoading(false); }
     })();
   }, [rideId]);
+
+  // Fetch all future instances of a recurring schedule so rider can pick a date
+  useEffect(() => {
+    if (!ride?.isRecurring || !ride?.scheduleId) { setScheduleInstances([]); return; }
+    setLoadingInstances(true);
+    const now = new Date();
+    const activeStatuses = new Set(['available', 'open', 'posted', 'active']);
+    getDocs(query(
+      collection(firestore, 'ridePostings'),
+      where('scheduleId', '==', ride.scheduleId),
+    )).then((snap) => {
+      const instances = snap.docs
+        .map((d) => {
+          const r = d.data() as any;
+          if (!activeStatuses.has(String(r.status || '').toLowerCase())) return null;
+          const dateStr = r.date || r.scheduleDate || '';
+          const timeStr = r.time || r.departureTime || '';
+          const dt = dateStr ? new Date(`${dateStr}T${timeStr || '00:00'}`) : null;
+          return dt && !isNaN(dt.getTime()) ? { id: d.id, date: dt } : null;
+        })
+        .filter((x): x is { id: string; date: Date } => x !== null && x.date > now)
+        .sort((a, b) => a.date.getTime() - b.date.getTime());
+      setScheduleInstances(instances);
+    }).catch(() => setScheduleInstances([])).finally(() => setLoadingInstances(false));
+  }, [ride?.scheduleId, ride?.isRecurring]);
+
+  const selectInstance = async (instanceId: string) => {
+    if (instanceId === ride?.id) return;
+    try {
+      const { getRidePosting: fetchPosting } = await import('@/src/services/riderData');
+      const posting = await fetchPosting(instanceId);
+      if (posting) setRide(posting);
+    } catch {}
+  };
+
+  // Subscribe to my waitlist entry for this ride
+  useEffect(() => {
+    if (!ride?.id || !ride?.isFull) { setMyWaitlistEntry(null); return; }
+    const uid = firebaseAuth.currentUser?.uid;
+    if (!uid) return;
+    import('@/src/services/waitlistService').then(({ subscribeMyWaitlistEntry }) => {
+      const unsub = subscribeMyWaitlistEntry(ride.id, uid, setMyWaitlistEntry);
+      return unsub;
+    }).catch(() => {});
+  }, [ride?.id, ride?.isFull]);
+
+  const handleJoinWaitlist = async () => {
+    if (!ride) return;
+    setJoiningWaitlist(true);
+    try {
+      const { joinWaitlist } = await import('@/src/services/waitlistService');
+      const { position } = await joinWaitlist(ride.id);
+      Alert.alert('You\'re on the waitlist!', `You're #${position} in line. We'll notify you if a seat opens.`);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not join waitlist. Please try again.');
+    } finally {
+      setJoiningWaitlist(false);
+    }
+  };
+
+  const handleLeaveWaitlist = async () => {
+    if (!ride) return;
+    Alert.alert('Leave waitlist?', 'You\'ll lose your spot.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Leave', style: 'destructive', onPress: async () => {
+        try {
+          const { leaveWaitlist } = await import('@/src/services/waitlistService');
+          await leaveWaitlist(ride.id);
+        } catch (e: any) {
+          Alert.alert('Error', e?.message || 'Could not leave waitlist.');
+        }
+      }},
+    ]);
+  };
 
   useEffect(() => {
     setPostingVehicleImageUrl(null);
@@ -2856,7 +2939,37 @@ export function RiderDetailReference() {
             <Ionicons name="share-outline" size={18} color={colors.primary} />
           </TouchableOpacity>
         }
-        bottomAction={<TouchableOpacity style={[styles.primaryBtnFull, (checkingVerification || paymentVisible) && { opacity: 0.6 }]} onPress={handleRequestSeat} disabled={checkingVerification || paymentVisible}><Text style={styles.primaryText}>{checkingVerification ? 'Checking...' : `Request seat - $${ride.price.toFixed(2)}`}</Text></TouchableOpacity>}
+        bottomAction={
+          ride.isFull ? (
+            myWaitlistEntry ? (
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={[styles.primaryBtnFull, { flex: 1.4, backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border, justifyContent: 'center', alignItems: 'center', borderRadius: 27, paddingVertical: 16 }]}>
+                  <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 15 }}>#{myWaitlistEntry.position} in line</Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.primaryBtnFull, { flex: 1, backgroundColor: colors.bgCard, borderWidth: 1.5, borderColor: '#DC2626', justifyContent: 'center', alignItems: 'center', borderRadius: 27, paddingVertical: 16 }]}
+                  onPress={handleLeaveWaitlist}
+                  activeOpacity={0.8}
+                >
+                  <Text style={{ color: '#DC2626', fontWeight: '700', fontSize: 15 }}>Leave</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[styles.primaryBtnFull, { opacity: joiningWaitlist ? 0.6 : 1 }]}
+                onPress={handleJoinWaitlist}
+                disabled={joiningWaitlist}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.primaryText}>{joiningWaitlist ? 'Joining...' : 'Join Waitlist'}</Text>
+              </TouchableOpacity>
+            )
+          ) : (
+            <TouchableOpacity style={[styles.primaryBtnFull, (checkingVerification || paymentVisible) && { opacity: 0.6 }]} onPress={handleRequestSeat} disabled={checkingVerification || paymentVisible}>
+              <Text style={styles.primaryText}>{checkingVerification ? 'Checking...' : `Request seat - $${ride.price.toFixed(2)}`}</Text>
+            </TouchableOpacity>
+          )
+        }
       >
         <View style={styles.detailCard}>
           <TouchableOpacity
@@ -2875,7 +2988,7 @@ export function RiderDetailReference() {
             </View>
             <View style={styles.detailDriverCopy}>
               <Text style={styles.detailName} numberOfLines={1}>{ride.driverName}</Text>
-              <Text style={styles.detailMeta}>{ride.driverRating ? `★ ${ride.driverRating.toFixed(2)} · ` : ''}{ride.seats} seats available</Text>
+              <Text style={styles.detailMeta}>{ride.driverRating ? `★ ${ride.driverRating.toFixed(2)} · ` : ''}{ride.seats} seats available{ride.isRecurring ? ' · Recurring' : ''}</Text>
             </View>
             {ride.driverId ? <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} /> : null}
           </TouchableOpacity>
@@ -2893,6 +3006,42 @@ export function RiderDetailReference() {
             </View>
           </View>
         </View>
+
+        {ride.isRecurring && scheduleInstances.length > 0 && (
+          <View style={{ marginTop: 14, marginBottom: 6 }}>
+            <Text style={[styles.eyebrow, { marginBottom: 10 }]}>PICK A DATE</Text>
+            {loadingInstances ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 10 }}>
+                {scheduleInstances.map((inst) => {
+                  const isSelected = inst.id === ride.id;
+                  const label = inst.date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+                  const timeLabel = inst.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                  return (
+                    <TouchableOpacity
+                      key={inst.id}
+                      onPress={() => selectInstance(inst.id)}
+                      activeOpacity={0.75}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 10,
+                        borderRadius: 14,
+                        borderWidth: 1.5,
+                        borderColor: isSelected ? colors.primary : colors.border,
+                        backgroundColor: isSelected ? colors.primaryDim : colors.bgCard,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Text style={{ color: isSelected ? colors.primary : colors.textPrimary, fontSize: 13, fontWeight: '700' }}>{label}</Text>
+                      <Text style={{ color: isSelected ? colors.primary : colors.textSecondary, fontSize: 11, marginTop: 2 }}>{timeLabel}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </View>
+        )}
 
         <View style={[styles.detailCard, styles.detailInfoRow]}>
           <View style={[styles.detailInfoIcon, postingVehicleImageUrl && styles.detailVehicleImageWrap]}>
@@ -2922,7 +3071,7 @@ export function RiderDetailReference() {
       <PaymentModal
         visible={paymentVisible}
         onClose={() => setPaymentVisible(false)}
-        rideId={rideId}
+        rideId={ride.id}
         driverId={ride.driverId || null}
         baseFare={ride.price}
         onPaymentSuccess={async (paymentIntentId: string) => {
@@ -2966,9 +3115,13 @@ export function RiderDetailReference() {
               || dd.displayName || rawStr(raw.driverName) || ride.driverName || 'Driver';
             const driverEmail = dd.email || rawStr(raw.driverEmail) || '';
 
+            // Use ride.id (the currently selected instance) — may differ from the URL rideId
+            // if the rider picked a different date from the recurring schedule.
+            const targetPostingId = ride.id;
+
             const reqData: Record<string, any> = {
-              ridePostingId: rideId,
-              rideId,
+              ridePostingId: targetPostingId,
+              rideId: targetPostingId,
               riderId,
               riderName,
               riderEmail: user?.email || '',
@@ -2996,7 +3149,7 @@ export function RiderDetailReference() {
             };
 
             // Deterministic doc ID prevents duplicate requests from double-taps or retries
-            const reqDocId = `${riderId}_${rideId}`;
+            const reqDocId = `${riderId}_${targetPostingId}`;
             const reqRef = doc(firestore, 'ridePostingRequests', reqDocId);
 
             // Cancel any stale pending docs for this (rider, posting) pair
@@ -3011,7 +3164,7 @@ export function RiderDetailReference() {
                     if (d.id === reqDocId) return false;
                     const r = d.data() as any;
                     const pid = r.ridePostingId || r.rideId || '';
-                    return pid === rideId && !terminal.has(String(r.status || '').toLowerCase());
+                    return pid === targetPostingId && !terminal.has(String(r.status || '').toLowerCase());
                   })
                   .map((d) => updateDoc(doc(firestore, 'ridePostingRequests', d.id), {
                     status: 'cancelled',
@@ -3026,7 +3179,7 @@ export function RiderDetailReference() {
             try {
               const { getApiBaseUrl } = await import('@/constants/services');
               const base = getApiBaseUrl();
-              await fetch(`${base}/api/rides/${rideId}/request`, {
+              await fetch(`${base}/api/rides/${targetPostingId}/request`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ paymentIntentId, riderId, driverId }),
@@ -3040,7 +3193,7 @@ export function RiderDetailReference() {
                 message: 'A rider requested a seat on your posted ride.',
                 driverId,
                 riderId,
-                ridePostingId: rideId,
+                ridePostingId: targetPostingId,
                 ridePostingRequestId: reqDocId,
                 dedupeId: `posting-request-${reqDocId}-driver`,
               }).catch(() => {});
@@ -3049,7 +3202,7 @@ export function RiderDetailReference() {
             // Only navigate to confirmed screen after the booking is persisted
             router.replace({
               pathname: '/(rider)/booking-confirmed',
-              params: { rideId, driverId: ride.driverId || '', driverName: ride.driverName || '', ridePostingRequestId: reqDocId },
+              params: { rideId: targetPostingId, driverId: ride.driverId || '', driverName: ride.driverName || '', ridePostingRequestId: reqDocId },
             } as any);
           } catch (e: any) {
             // Booking creation failed — void the authorized payment so the rider is not charged
@@ -3317,7 +3470,7 @@ function makeStyles(colors: AppColors) {
   primaryBtn: { height: 54, borderRadius: 27, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 34 },
   searchPrimaryBtn: { height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
   primaryBtnFull: { height: 56, borderRadius: 28, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  requestSubmitButton: { marginTop: 22, marginBottom: 12 },
+  requestSubmitButton: { marginTop: 22, marginBottom: 0 },
   primaryText: { fontFamily: FONT_SANS, color: colors.textInverse, fontSize: 17, fontWeight: '700' },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   sectionTitle: { fontFamily: FONT_SANS, flex: 1, color: colors.textPrimary, fontSize: 17, fontWeight: '700' },
@@ -3428,11 +3581,11 @@ function makeStyles(colors: AppColors) {
   seatBadgeText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
   availableRouteBlock: { flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.border, paddingVertical: 12 },
   availableTop: { display: 'none' },
-  availableLocationsBlock: { position: 'relative', flexDirection: 'row', alignItems: 'stretch', gap: 10 },
-  availableLocationsTime: { position: 'absolute', top: 0, right: 0, maxWidth: 92, fontFamily: FONT_MONO, color: colors.textPrimary, fontSize: 10, lineHeight: 14, fontWeight: '700', textAlign: 'right' },
-  availableRouteRail: { width: 12, alignItems: 'center', paddingTop: 18, paddingBottom: 7 },
+  availableLocationsBlock: { flexDirection: 'row', alignItems: 'stretch', gap: 10 },
+  availableLocationsTime: { display: 'none' },
+  availableRouteRail: { width: 12, alignItems: 'center', paddingTop: 4, paddingBottom: 4 },
   availableRouteLine: { width: 2, flex: 1, minHeight: 28, backgroundColor: colors.border, marginVertical: 4 },
-  availableLocationCopy: { flex: 1, minWidth: 0, gap: 10, paddingRight: 100 },
+  availableLocationCopy: { flex: 1, minWidth: 0, gap: 10 },
   availableLocationTextWrap: { flex: 1, minWidth: 0 },
   availableRouteLabel: { color: colors.textSecondary, fontSize: 9, lineHeight: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
   availableDropoffLabel: { color: colors.primary },

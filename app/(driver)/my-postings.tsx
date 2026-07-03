@@ -193,15 +193,64 @@ export default function MyPostingsScreen() {
     },
     tabs: {
       height: 46, flexDirection: 'row', marginBottom: 20,
-      backgroundColor: colors.bgSecondary, borderRadius: 14, padding: 3,
+      backgroundColor: colors.bgSecondary, borderRadius: 18, padding: 3,
     },
-    tab: { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 11 },
+    tab: { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 15 },
     tabActive: {
       backgroundColor: colors.bgCard, shadowColor: colors.textPrimary, shadowOpacity: 0.06,
       shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2,
     },
     tabText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
     tabTextActive: { color: colors.textPrimary, fontWeight: '700' },
+    scheduleList: { gap: 14 },
+    scheduleCard: {
+      backgroundColor: colors.bgCard, borderRadius: 18, padding: 16, marginBottom: 0,
+      borderWidth: 1, borderColor: colors.border,
+      shadowColor: colors.textPrimary, shadowOpacity: 0.05, shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 }, elevation: 2,
+    },
+    scheduleCardPaused: { opacity: 0.78 },
+    scheduleTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 },
+    scheduleIcon: {
+      width: 34, height: 34, borderRadius: 11, backgroundColor: colors.primaryDim,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    scheduleTitleWrap: { flex: 1, minWidth: 0 },
+    scheduleTitle: { color: colors.textPrimary, fontSize: 15, lineHeight: 19, fontWeight: '800' },
+    scheduleSub: { color: colors.textSecondary, fontSize: 12, lineHeight: 16, fontWeight: '600', marginTop: 2 },
+    scheduleBadge: { borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4, backgroundColor: colors.primaryDim },
+    scheduleBadgePaused: { backgroundColor: colors.bgSecondary },
+    scheduleBadgeText: { color: colors.primary, fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
+    scheduleBadgeTextPaused: { color: colors.textSecondary },
+    scheduleRoute: { flexDirection: 'row', gap: 12, marginBottom: 14 },
+    scheduleDots: { alignItems: 'center', paddingTop: 3 },
+    scheduleDotStart: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.textPrimary },
+    scheduleLine: { width: 1.5, height: 22, backgroundColor: colors.border, marginVertical: 2 },
+    scheduleDotEnd: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },
+    scheduleRouteTextWrap: { flex: 1, gap: 6 },
+    scheduleRouteText: { color: colors.textPrimary, fontSize: 14, lineHeight: 18, fontWeight: '700' },
+    scheduleMeta: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 14 },
+    scheduleMetaChip: {
+      flexDirection: 'row', alignItems: 'center', gap: 5,
+      backgroundColor: colors.bgSecondary, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 6,
+    },
+    scheduleMetaText: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
+    scheduleActions: {
+      flexDirection: 'row', gap: 8, paddingTop: 14,
+      borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
+    },
+    scheduleSecondaryBtn: {
+      minHeight: 42, flex: 1, flexDirection: 'row', alignItems: 'center',
+      justifyContent: 'center', gap: 6, backgroundColor: colors.bgSecondary,
+      borderRadius: 21, borderWidth: 1, borderColor: colors.border,
+    },
+    scheduleSecondaryText: { color: colors.textPrimary, fontSize: 13, fontWeight: '800' },
+    scheduleDangerBtn: {
+      minHeight: 42, flex: 1, flexDirection: 'row', alignItems: 'center',
+      justifyContent: 'center', gap: 6, backgroundColor: colors.redDim,
+      borderRadius: 21, borderWidth: 1, borderColor: colors.redBorder,
+    },
+    scheduleDangerText: { color: colors.red, fontSize: 13, fontWeight: '800' },
     loadingWrap: { minHeight: 300, alignItems: 'center', justifyContent: 'center' },
     emptyState: {
       minHeight: 280, alignItems: 'center', justifyContent: 'center',
@@ -224,7 +273,10 @@ export default function MyPostingsScreen() {
   const [postings, setPostings] = useState<Posting[]>([]);
   const [loading, setLoading]   = useState(true);
   const [cancelling, setCancelling] = useState<string | null>(null);
-  const [tab, setTab]           = useState<'active' | 'past'>('active');
+  const [tab, setTab]           = useState<'active' | 'past' | 'schedules'>('active');
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [schedulesLoading, setSchedulesLoading] = useState(false);
+  const [actingSchedule, setActingSchedule] = useState<string | null>(null);
   const [requestsByPostingId, setRequestsByPostingId] = useState<Record<string, BookingRequest[]>>({});
   const [actingOnRequest, setActingOnRequest] = useState<string | null>(null);
   const [confirmedIdByPostingId, setConfirmedIdByPostingId] = useState<Record<string, string>>({});
@@ -346,6 +398,61 @@ export default function MyPostingsScreen() {
       console.warn('[MyPostings] confirmedRides listener error:', error);
     });
   }, []);
+
+  // Load recurring schedules when Schedules tab is opened
+  useEffect(() => {
+    if (tab !== 'schedules') return;
+    const uid = firebaseAuth.currentUser?.uid;
+    if (!uid) return;
+    setSchedulesLoading(true);
+    (async () => {
+      try {
+        const token = await firebaseAuth.currentUser?.getIdToken();
+        const res = await fetch(`${getApiBaseUrl()}/api/ride-schedules/driver/${uid}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setSchedules(data.schedules || []);
+        }
+      } catch (e) { console.warn('fetch schedules error', e); }
+      finally { setSchedulesLoading(false); }
+    })();
+  }, [tab]);
+
+  const handleScheduleAction = async (scheduleId: string, action: 'pause' | 'resume' | 'cancel') => {
+    if (action === 'cancel') {
+      Alert.alert('Cancel schedule?', 'All future unbooked rides in this schedule will be cancelled. Riders who already booked a seat are unaffected.', [
+        { text: 'Keep it', style: 'cancel' },
+        { text: 'Cancel schedule', style: 'destructive', onPress: () => doScheduleAction(scheduleId, 'cancel') },
+      ]);
+    } else {
+      doScheduleAction(scheduleId, action);
+    }
+  };
+
+  const doScheduleAction = async (scheduleId: string, action: 'pause' | 'resume' | 'cancel') => {
+    setActingSchedule(scheduleId);
+    try {
+      const token = await firebaseAuth.currentUser?.getIdToken();
+      const res = await fetch(`${getApiBaseUrl()}/api/ride-schedules/${scheduleId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed');
+      }
+      setSchedules(prev => action === 'cancel'
+        ? prev.filter(s => s.id !== scheduleId)
+        : prev.map(s => s.id === scheduleId ? { ...s, status: action === 'pause' ? 'paused' : 'active' } : s));
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not update schedule. Please try again.');
+    } finally {
+      setActingSchedule(null);
+    }
+  };
 
   const acceptRequest = useCallback(async (req: BookingRequest) => {
     setActingOnRequest(req.id);
@@ -526,8 +633,8 @@ export default function MyPostingsScreen() {
     const incoming = (requestsByPostingId[p.id] || []).filter((req) => isPendingBookingRequest(req) && !confirmedRequestIds.has(req.id));
     return incoming.length > 0 || Boolean(confirmedIdByPostingId[p.id]);
   };
-  const active = postings.filter((p) => !postingFullyCompleted.has(p.id) && ACTIVE_STATUSES.has(p.status) && !isPostingOutdated(p, now, hasPostingActivity(p)));
-  const past = postings.filter((p) => postingFullyCompleted.has(p.id) || INACTIVE_STATUSES.has(p.status) || isPostingOutdated(p, now, hasPostingActivity(p)));
+  const active = postings.filter((p) => !postingFullyCompleted.has(p.id) && ACTIVE_STATUSES.has(p.status) && !isPostingOutdated(p, now, hasPostingActivity(p)) && !p.raw?.isRecurring);
+  const past = postings.filter((p) => (postingFullyCompleted.has(p.id) || INACTIVE_STATUSES.has(p.status) || isPostingOutdated(p, now, hasPostingActivity(p))) && !p.raw?.isRecurring);
   const shown  = tab === 'active' ? active : past;
 
   return (
@@ -562,7 +669,7 @@ export default function MyPostingsScreen() {
           </View>
 
           <View style={s.tabs}>
-            {(['active', 'past'] as const).map((t) => (
+            {(['active', 'past', 'schedules'] as const).map((t) => (
               <TouchableOpacity
                 key={t}
                 style={[s.tab, tab === t && s.tabActive]}
@@ -570,13 +677,102 @@ export default function MyPostingsScreen() {
                 activeOpacity={0.75}
               >
                 <Text style={[s.tabText, tab === t && s.tabTextActive]}>
-                  {t === 'active' ? 'Active (' + active.length + ')' : 'Past (' + past.length + ')'}
+                  {t === 'active' ? `Active (${active.length})` : t === 'past' ? `Past (${past.length})` : '↻ Recurring'}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          {loading ? (
+          {tab === 'schedules' ? (
+            schedulesLoading ? (
+              <View style={s.loadingWrap}><ActivityIndicator color={colors.primary} size="large" /></View>
+            ) : schedules.length === 0 ? (
+              <View style={s.emptyState}>
+                <Ionicons name="calendar-outline" size={32} color={colors.primary} style={{ marginBottom: 12 }} />
+                <Text style={s.emptyTitle}>No recurring schedules</Text>
+                <Text style={s.emptyText}>Use Post a ride and turn on Repeat weekly to create one.</Text>
+              </View>
+            ) : (
+              <View style={s.scheduleList}>
+                {schedules.map(schedule => {
+                  const DAY_LABELS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+                  const days = (schedule.daysOfWeek || []).map((d: number) => DAY_LABELS[d]).join(', ') || 'Weekly';
+                  const isPaused = schedule.status === 'paused';
+                  const isActing = actingSchedule === schedule.id;
+                  return (
+                    <View key={schedule.id} style={[s.scheduleCard, isPaused && s.scheduleCardPaused]}>
+                      <View style={s.scheduleTop}>
+                        <View style={s.scheduleIcon}>
+                          <Ionicons name="repeat-outline" size={17} color={isPaused ? colors.textSecondary : colors.primary} />
+                        </View>
+                        <View style={s.scheduleTitleWrap}>
+                          <Text style={s.scheduleTitle} numberOfLines={1}>Recurring ride</Text>
+                          <Text style={s.scheduleSub} numberOfLines={1}>Every {days}</Text>
+                        </View>
+                        <View style={[s.scheduleBadge, isPaused && s.scheduleBadgePaused]}>
+                          <Text style={[s.scheduleBadgeText, isPaused && s.scheduleBadgeTextPaused]}>
+                            {isPaused ? 'PAUSED' : 'ACTIVE'}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={s.scheduleRoute}>
+                        <View style={s.scheduleDots}>
+                          <View style={s.scheduleDotStart} />
+                          <View style={s.scheduleLine} />
+                          <View style={s.scheduleDotEnd} />
+                        </View>
+                        <View style={s.scheduleRouteTextWrap}>
+                          <Text style={s.scheduleRouteText} numberOfLines={1}>{schedule.from || 'Pickup not set'}</Text>
+                          <Text style={s.scheduleRouteText} numberOfLines={1}>{schedule.to || 'Dropoff not set'}</Text>
+                        </View>
+                      </View>
+
+                      <View style={s.scheduleMeta}>
+                        <View style={s.scheduleMetaChip}>
+                          <Ionicons name="time-outline" size={13} color={colors.textSecondary} />
+                          <Text style={s.scheduleMetaText}>{schedule.departureTime || 'Time TBD'}</Text>
+                        </View>
+                        <View style={s.scheduleMetaChip}>
+                          <Ionicons name="people-outline" size={13} color={colors.textSecondary} />
+                          <Text style={s.scheduleMetaText}>{schedule.seats || 1} seat{schedule.seats === 1 ? '' : 's'}</Text>
+                        </View>
+                        <View style={s.scheduleMetaChip}>
+                          <Ionicons name="cash-outline" size={13} color={colors.textSecondary} />
+                          <Text style={s.scheduleMetaText}>${schedule.pricePerSeat || 0}/seat</Text>
+                        </View>
+                      </View>
+
+                      <View style={s.scheduleActions}>
+                        <TouchableOpacity
+                          disabled={isActing}
+                          onPress={() => handleScheduleAction(schedule.id, isPaused ? 'resume' : 'pause')}
+                          style={s.scheduleSecondaryBtn}
+                        >
+                          {isActing ? (
+                            <ActivityIndicator size="small" color={colors.primary} />
+                          ) : (
+                            <>
+                              <Ionicons name={isPaused ? 'play-outline' : 'pause-outline'} size={15} color={colors.textPrimary} />
+                              <Text style={s.scheduleSecondaryText}>{isPaused ? 'Resume' : 'Pause'}</Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          disabled={isActing}
+                          onPress={() => handleScheduleAction(schedule.id, 'cancel')}
+                          style={s.scheduleDangerBtn}
+                        >
+                          <Ionicons name="trash-outline" size={15} color={colors.red} />
+                          <Text style={s.scheduleDangerText}>Cancel</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )
+          ) : loading ? (
             <View style={s.loadingWrap}>
               <ActivityIndicator color={colors.primary} size="large" />
             </View>

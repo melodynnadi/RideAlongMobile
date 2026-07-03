@@ -532,10 +532,18 @@ function RiderRequestsReferenceInner() {
   const [requests, setRequests] = useState<MobileRideRequest[]>([]);
   const [postingRequests, setPostingRequests] = useState<MobileRideRequest[]>([]);
   const [filter, setFilter] = useState<'open' | 'past'>('open');
-  // offersMap: requestId → array of offers with driver info
   const [offersMap, setOffersMap] = useState<Record<string, OfferWithDriver[]>>({});
   const [acceptingOffer, setAcceptingOffer] = useState<{ offer: OfferWithDriver; request: MobileRideRequest } | null>(null);
   const [decliningOfferId, setDecliningOfferId] = useState<string | null>(null);
+  const [waitlistEntries, setWaitlistEntries] = useState<import('@/src/services/waitlistService').WaitlistEntry[]>([]);
+  const [leavingWaitlistId, setLeavingWaitlistId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!uid) return;
+    import('@/src/services/waitlistService').then(({ subscribeMyWaitlistEntries }) => {
+      return subscribeMyWaitlistEntries(uid, setWaitlistEntries);
+    }).catch(() => {});
+  }, [uid]);
 
   const handleDeclineOffer = async (offerId: string) => {
     setDecliningOfferId(offerId);
@@ -860,6 +868,59 @@ function RiderRequestsReferenceInner() {
         />
       )}
       {!filtered.length ? <View style={s.panel}><Text style={s.routeTitle}>Nothing here yet</Text><Text style={s.messagePreview}>Post a request or choose another status tab.</Text></View> : null}
+
+      {/* Waitlist section */}
+      {waitlistEntries.length > 0 && (
+        <View style={{ marginTop: 8 }}>
+          <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginBottom: 10, textTransform: 'uppercase' }}>
+            Waitlisted
+          </Text>
+          {waitlistEntries.map((entry) => {
+            const isNotified = entry.status === 'notified';
+            const expiresMs = entry.expiresAt?.toMillis?.() ?? 0;
+            const minutesLeft = expiresMs ? Math.max(0, Math.ceil((expiresMs - Date.now()) / 60000)) : 0;
+            return (
+              <View key={entry.id} style={[s.requestCard, { borderColor: isNotified ? colors.primary : colors.border }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: isNotified ? colors.primaryDim : colors.bgSecondary, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 }}>
+                    <Text style={{ color: isNotified ? colors.primary : colors.textSecondary, fontSize: 11, fontWeight: '800' }}>
+                      {isNotified ? `⚡ Seat available! ${minutesLeft}m left` : `#${entry.position} in line`}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={async () => {
+                      if (leavingWaitlistId) return;
+                      Alert.alert('Leave waitlist?', 'You\'ll lose your spot.', [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Leave', style: 'destructive', onPress: async () => {
+                          setLeavingWaitlistId(entry.id);
+                          try {
+                            const { leaveWaitlist } = await import('@/src/services/waitlistService');
+                            await leaveWaitlist(entry.ridePostingId);
+                          } catch { Alert.alert('Error', 'Could not leave waitlist.'); }
+                          finally { setLeavingWaitlistId(null); }
+                        }},
+                      ]);
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={{ color: colors.textSecondary, fontSize: 12 }}>✕ Leave</Text>
+                  </TouchableOpacity>
+                </View>
+                {isNotified && (
+                  <TouchableOpacity
+                    style={{ backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 12, alignItems: 'center', marginBottom: 10 }}
+                    onPress={() => router.push({ pathname: '/(rider)/ride/[id]', params: { id: entry.ridePostingId, returnTo: '/(rider)/requests' } } as any)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>Claim Your Seat</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          })}
+        </View>
+      )}
     </Phone>
   );
 }
@@ -1156,49 +1217,31 @@ function DriverPublicProfileReferenceInner() {
     if (!id) { setLoading(false); return; }
     (async () => {
       try {
+        // Load driver doc first — it has cached ride count and rating
         const snap = await getDoc(doc(firestore, 'drivers', id));
         const data = snap.exists() ? snap.data() as any : null;
         setDriver(data);
 
-        const [ratingsSnap, ridesSnap] = await Promise.all([
-          getDocs(query(collection(firestore, 'rideRatings'), where('rateeId', '==', id))),
-          getDocs(query(collection(firestore, 'confirmedRides'), where('driverId', '==', id), where('status', '==', 'COMPLETED'))),
-        ]);
-        setTotalRides(ridesSnap.size);
-        // Build the set of ride IDs where this person was the DRIVER so we can
-        // filter out ratings from rides where they acted as a rider (dual-role accounts).
-        const driverRideIds = new Set<string>();
-        ridesSnap.docs.forEach((rideDoc) => {
-          driverRideIds.add(rideDoc.id);
-          const rd = rideDoc.data() as any;
-          if (rd.rideRequestId) driverRideIds.add(String(rd.rideRequestId));
-          if (rd.ridePostingId) driverRideIds.add(String(rd.ridePostingId));
-          if (rd.ridePostingRequestId) driverRideIds.add(String(rd.ridePostingRequestId));
-        });
-        const allRatingDocs = ratingsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
-        // Only keep ratings where the rideId matches a confirmed ride where this person
-        // was the driver — for dual-role accounts this filters out their rider-side ratings.
-        // If they have no completed driver rides yet, show nothing at all.
-        const ratingDocs = driverRideIds.size > 0
-          ? allRatingDocs.filter(r => driverRideIds.has(String(r.rideId || '')))
-          : [];
+        // Use server-maintained cached count (avoids needing a composite Firestore index)
+        const cachedRideCount = data?.ridesCompleted ?? data?.totalRides ?? data?.rideCount ?? data?.ridesCount;
+        setTotalRides(typeof cachedRideCount === 'number' ? cachedRideCount : 0);
+      } catch {}
+
+      // Ratings — server filters to driver-role only (admin SDK bypasses Firestore rules
+      // that would block a viewing rider from querying this driver's confirmedRides).
+      try {
+        const { getApiBaseUrl } = await import('@/constants/services');
+        const resp = await fetch(`${getApiBaseUrl()}/api/drivers/${encodeURIComponent(id)}/public-ratings`);
+        if (!resp.ok) throw new Error(`ratings fetch failed: ${resp.status}`);
+        const { ratings: ratingDocs } = await resp.json() as { ratings: any[] };
         setAllRatings(ratingDocs);
-        const rideRiderIds = new Map<string, string>();
-        ridesSnap.docs.forEach((rideDoc) => {
-          const rideData = rideDoc.data() as any;
-          const riderId = rideData.riderId || rideData.userId || rideData.requesterId;
-          if (!riderId) return;
-          [rideDoc.id, rideData.rideRequestId, rideData.ridePostingId]
-            .filter(Boolean)
-            .forEach((rideKey) => rideRiderIds.set(String(rideKey), String(riderId)));
-        });
+
         const commentedRatings = ratingDocs
           .filter(r => r.comment && String(r.comment).trim())
           .slice(0, 5);
         const enrichedReviews = await Promise.all(commentedRatings.map(async (rating) => {
           const reviewerId = rating.raterId || rating.rater || rating.reviewerId || rating.reviewer ||
-            rating.riderId || rating.userId || rating.authorId || rating.uid ||
-            rideRiderIds.get(String(rating.rideId || ''));
+            rating.riderId || rating.userId || rating.authorId || rating.uid;
           const embeddedName = rating.reviewerName || rating.raterName || rating.riderName || rating.userName;
           const embeddedAvatar = rating.reviewerAvatarUrl || rating.raterAvatarUrl || rating.riderAvatarUrl ||
             rating.avatarUrl || rating.photoURL;
@@ -1217,15 +1260,21 @@ function DriverPublicProfileReferenceInner() {
         }));
         setReviews(enrichedReviews);
       } catch {}
-      finally { setLoading(false); }
+
+      setLoading(false);
     })();
   }, [id]);
 
   const DNVY = colors.textPrimary, ORG = colors.primary, BG2 = colors.bg, BDR = colors.border, MUT = colors.textSecondary;
 
-  const name = driver?.fullName || driver?.name || driver?.displayName || 'Driver';
+  const pi = driver?.personalInfo && typeof driver.personalInfo === 'object' ? driver.personalInfo : null;
+  const name = driver?.fullName
+    || (pi?.firstName && pi?.lastName ? `${pi.firstName} ${pi.lastName}`.trim() : null)
+    || (pi?.firstName || pi?.lastName || null)
+    || (driver?.firstName && driver?.lastName ? `${driver.firstName} ${driver.lastName}`.trim() : null)
+    || driver?.firstName || driver?.name || driver?.displayName || 'Driver';
   const initials = name.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase();
-  const avatarUrl = driver?.avatarUrl || driver?.photoURL || driver?.avatarUrl1 || null;
+  const avatarUrl = driver?.avatarUrl || driver?.photoURL || driver?.photoUrl || driver?.avatarUrl1 || pi?.avatarUrl || null;
   const avgRating = allRatings.length
     ? allRatings.reduce((s, r) => s + (typeof r.stars === 'number' ? r.stars : r.rating || 0), 0) / allRatings.length
     : (driver?.rating ?? 0);
@@ -1233,26 +1282,25 @@ function DriverPublicProfileReferenceInner() {
     n,
     count: allRatings.filter(r => Math.round(typeof r.stars === 'number' ? r.stars : r.rating || 0) === n).length,
   }));
-  // vehicleInfo is a nested object on the driver doc — extract string fields safely
-  const vi = driver?.vehicleInfo && typeof driver.vehicleInfo === 'object' ? driver.vehicleInfo : null;
-  const vehicle = [
-    driver?.vehicleYear || vi?.year,
-    driver?.vehicleMake || vi?.make,
-    driver?.vehicleModel || vi?.model,
-  ].filter((v) => v && typeof v === 'string').join(' ')
+  // vehicleInfo is nested — also handle legacy 'vehicle' object path
+  const vi = (driver?.vehicleInfo && typeof driver.vehicleInfo === 'object' ? driver.vehicleInfo : null)
+           || (driver?.vehicle && typeof driver.vehicle === 'object' ? driver.vehicle : null);
+  const vehicle = [vi?.year, vi?.make, vi?.model]
+    .filter((v) => v && typeof v === 'string' && v.trim())
+    .join(' ')
     || vi?.makeModel
     || (typeof driver?.vehicle === 'string' ? driver.vehicle : null)
-    || (typeof driver?.car === 'string' ? driver.car : null)
     || '';
-  const vehicleColor = (typeof driver?.vehicleColor === 'string' ? driver.vehicleColor : null) || vi?.color || '';
-  const seats = driver?.seats || vi?.seats || driver?.vehicleSeats || driver?.numSeats || '';
-  const bio = driver?.bio || driver?.about || driver?.description || '';
-  const university = driver?.university || driver?.school || '';
+  const vehicleColor = vi?.color || (typeof driver?.vehicleColor === 'string' ? driver.vehicleColor : '') || '';
+  const licensePlate = vi?.licensePlate || vi?.plate || '';
+  const seats = vi?.seats || driver?.vehicleSeats || driver?.numSeats || '';
+  const bio = driver?.bio || driver?.about || driver?.description || pi?.bio || pi?.about || '';
+  const university = driver?.university || pi?.university || driver?.school || pi?.school || '';
 
   const prefRows: { icon: string; label: string; value: string }[] = [
     driver?.talkativeness && { icon: 'chatbubble-outline', label: 'Conversation', value: driver.talkativeness },
     driver?.personality && { icon: 'musical-notes-outline', label: 'Vibe', value: driver.personality },
-    driver?.smokingPreference && { icon: 'ban-outline', label: 'Smoking', value: driver.smokingPreference },
+    driver?.smokingPreference && driver.smokingPreference !== 'No preference' && { icon: 'ban-outline', label: 'Smoking', value: driver.smokingPreference },
     driver?.musicPreferences?.length && { icon: 'headset-outline', label: 'Music', value: (driver.musicPreferences as string[]).slice(0, 3).join(', ') },
     driver?.maxPassengers && { icon: 'people-outline', label: 'Max passengers', value: String(driver.maxPassengers) },
   ].filter(Boolean) as { icon: string; label: string; value: string }[];
@@ -1310,8 +1358,8 @@ function DriverPublicProfileReferenceInner() {
               </View>
               <View style={{ width: 1, height: 32, backgroundColor: BDR }} />
               <View style={{ alignItems: 'center', paddingHorizontal: 20 }}>
-                <Text style={{ color: DNVY, fontSize: 20, fontWeight: '800', lineHeight: 24 }}>{reviews.length}</Text>
-                <Text style={{ color: MUT, fontSize: 11, fontWeight: '600', marginTop: 2 }}>reviews</Text>
+                <Text style={{ color: DNVY, fontSize: 20, fontWeight: '800', lineHeight: 24 }}>{allRatings.length}</Text>
+                <Text style={{ color: MUT, fontSize: 11, fontWeight: '600', marginTop: 2 }}>ratings</Text>
               </View>
               {avgRating > 0 && (
                 <>
@@ -1326,18 +1374,22 @@ function DriverPublicProfileReferenceInner() {
           </View>
 
           {/* Vehicle */}
-          {(vehicle || seats) ? (
+          {(vehicle || seats || vehicleColor || licensePlate) ? (
             <>
               <Text style={{ color: MUT, fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginBottom: 8 }}>VEHICLE</Text>
               <View style={{ backgroundColor: colors.bgCard, borderRadius: 18, borderWidth: 1, borderColor: BDR, padding: 16, marginBottom: 20 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-                  <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}>
-                    <Ionicons name="car-sport-outline" size={22} color={ORG} />
+                  <View style={{ width: 56, height: 56, borderRadius: 12, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                    {vi?.imageUrl ? (
+                      <Image source={{ uri: vi.imageUrl }} style={{ width: 56, height: 56 }} contentFit="cover" />
+                    ) : (
+                      <Ionicons name="car-sport-outline" size={24} color={ORG} />
+                    )}
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: DNVY, fontSize: 15, fontWeight: '700' }}>{vehicle || 'Vehicle info unavailable'}</Text>
                     <Text style={{ color: MUT, fontSize: 13, marginTop: 2 }}>
-                      {[vehicleColor, seats ? `${seats} seats` : ''].filter(Boolean).join(' · ')}
+                      {[vehicleColor, seats ? `${seats} seats` : '', licensePlate].filter(Boolean).join(' · ')}
                     </Text>
                   </View>
                 </View>

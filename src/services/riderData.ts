@@ -66,6 +66,13 @@ export type MobileRidePosting = {
   driverRating?: number;
   vehicle: string;
   raw: DocumentData;
+  // Recurring schedule fields
+  isRecurring?: boolean;
+  scheduleId?: string;
+  scheduleDate?: string;
+  // Waitlist
+  isFull?: boolean;
+  availableSeats?: number;
 };
 
 export type MobileConversation = {
@@ -228,6 +235,12 @@ function rideFromDoc(snapshot: QueryDocumentSnapshot<DocumentData>): MobileRideP
     driverAvatarUrl: textValue(data.driverAvatarUrl, data.avatarUrl, data.photoURL, data.photoUrl, data.profilePicture, data.driver?.avatarUrl, data.driver?.photoURL, data.driver?.photoUrl, data.driver?.profilePicture, data.avatarUrl1, data.driver?.avatarUrl1) || undefined,
     driverRating: Number(data.driverRating ?? data.rating) || undefined,
     vehicle: textValue(data.vehicleText, `${make} ${model}`) || 'Vehicle details pending',
+    isRecurring: data.isRecurring === true,
+    scheduleId: textValue(data.scheduleId) || undefined,
+    scheduleDate: textValue(data.scheduleDate) || undefined,
+    availableSeats: typeof data.availableSeats === 'number' ? data.availableSeats : undefined,
+    isFull: (typeof data.availableSeats === 'number' && data.availableSeats <= 0)
+         || String(data.status || '').toLowerCase() === 'confirmed',
     raw: data,
   };
 }
@@ -332,14 +345,40 @@ export function subscribeAvailableRides(
     collection(firestore, 'ridePostings'),
     async (snapshot) => {
       const currentUid = firebaseAuth.currentUser?.uid;
-      const rides = snapshot.docs
+      const cutoff = Date.now() - 2 * 60 * 60 * 1000; // 2 hours ago
+      const allRides = snapshot.docs
         .map(rideFromDoc)
-        .filter((ride) => (
-          ['available', 'open', 'posted', 'active'].includes(ride.status)
-          && ride.seats > 0
-          // Dual-role users must not see their own driver postings as a rider
-          && (!currentUid || ride.driverId !== currentUid)
-        ))
+        .filter((ride) => {
+          // Never show the rider their own driver postings
+          if (currentUid && ride.driverId === currentUid) return false;
+          // Never show rides whose scheduled time is more than 2 hours in the past
+          if (ride.date && ride.date.getTime() < cutoff) return false;
+          const status = ride.status;
+          // Full/confirmed rides: keep visible so riders can join the waitlist
+          if (status === 'confirmed') return true;
+          // Open rides: must still have seats available
+          return ['available', 'open', 'posted', 'active'].includes(status) && ride.seats > 0;
+        });
+
+      // For recurring instances, only show the nearest future one per schedule
+      const now = Date.now();
+      const recurringBySchedule: Record<string, MobileRidePosting[]> = {};
+      const nonRecurring: MobileRidePosting[] = [];
+      for (const ride of allRides) {
+        if (ride.isRecurring && ride.scheduleId) {
+          if (!recurringBySchedule[ride.scheduleId]) recurringBySchedule[ride.scheduleId] = [];
+          recurringBySchedule[ride.scheduleId].push(ride);
+        } else {
+          nonRecurring.push(ride);
+        }
+      }
+      const nextRecurring = Object.values(recurringBySchedule).map((instances) => {
+        const future = instances.filter((r) => (r.date?.getTime() ?? 0) > now - 2 * 60 * 60 * 1000);
+        future.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
+        return future[0];
+      }).filter(Boolean) as MobileRidePosting[];
+
+      const rides = [...nonRecurring, ...nextRecurring]
         .sort((a, b) => (a.date?.getTime() ?? Number.MAX_SAFE_INTEGER) - (b.date?.getTime() ?? Number.MAX_SAFE_INTEGER));
       const enriched = await Promise.all(rides.map(enrichRideWithDriver));
       if (active) onData(enriched);

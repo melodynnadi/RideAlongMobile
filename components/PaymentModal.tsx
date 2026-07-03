@@ -239,6 +239,11 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       setErrorMsg(null);
       setConfirming(true);
 
+      const authToken = await firebaseAuth.currentUser?.getIdToken().catch(() => null);
+      const authHeaders = authToken
+        ? { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }
+        : { 'Content-Type': 'application/json' };
+
       // Cancel any PI left over from a previous failed attempt before creating a new one
       if (pendingIntentId) {
         try {
@@ -305,7 +310,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       log('Refresh customer', { custUrl, riderId });
       const custResp = await fetch(custUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({ userId: riderId, email, name }),
       });
       if (!custResp.ok) {

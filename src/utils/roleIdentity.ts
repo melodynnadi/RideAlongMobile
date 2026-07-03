@@ -51,6 +51,9 @@ const driverOnlyNotificationPatterns = [
   /\brequest received\b/,
   /\brequested (a seat|your ride|to join)\b/,
   /\bpassengers?\b/,
+  /a rider has cancelled\b/,
+  /\bwaitlist(ed)? (rider|person|user)\b/,
+  /\bjoined your waitlist\b/,
 ];
 
 const riderOnlyNotificationPatterns = [
@@ -120,6 +123,7 @@ const knownDriverNotificationTypes = new Set([
   'driver_application_approved', 'driver_application_rejected', 'driver_approved', 'driver_rejected',
   'ride_request_received', 'ride_request_canceled', 'two_passenger_mode_reminder',
   'ride_fully_booked', 'ride_seats_filled_driver', 'ride_posting_expired',
+  'waitlist_joined',
 ]);
 
 // Notification types that exclusively target riders
@@ -132,6 +136,7 @@ const knownRiderNotificationTypes = new Set([
   'email_verification_reminder', 'email_verified', 'password_changed',
   'preferred_route_match', 'ride_offer', 'driver_on_the_way', 'driver_arrived',
   'ride_updated',
+  'waitlist_seat_available', 'waitlist_ride_unavailable',
 ]);
 
 export function notificationTypeIsRiderOnly(data: Record<string, any>): boolean {

@@ -45,7 +45,18 @@ const PREF_LABELS: Record<string, string> = {
 function fmtDate(val: any): string {
   if (!val) return '';
   try {
-    const d = val?.toDate ? val.toDate() : (val instanceof Date ? val : new Date(val));
+    let d: Date;
+    if (val?.toDate) {
+      d = val.toDate();
+    } else if (val instanceof Date) {
+      d = val;
+    } else if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      // Date-only string: parse as local noon to avoid UTC-midnight timezone shift
+      const [y, m, day] = val.split('-').map(Number);
+      d = new Date(y, m - 1, day, 12, 0, 0);
+    } else {
+      d = new Date(val);
+    }
     if (isNaN(d.getTime())) return String(val);
     return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
   } catch { return String(val); }
@@ -134,6 +145,8 @@ export default function RequestDeepLinkScreen() {
   const [submitting, setSubmitting]   = useState(false);
   const [alreadyOffered, setAlreadyOffered] = useState(false);
   const [offerDocId, setOfferDocId]   = useState<string | null>(null);
+  // True when the loaded doc is a ridePostingRequest (rider booked driver's posting)
+  const [isPostingRequest, setIsPostingRequest] = useState(false);
 
   const [riderProfile, setRiderProfile] = useState<{
     name?: string; rating?: number; avatarUrl?: string | null;
@@ -142,10 +155,17 @@ export default function RequestDeepLinkScreen() {
 
   useEffect(() => {
     if (!requestId) { setNotFound(true); setLoading(false); return; }
+    // Try rideRequests first, then ridePostingRequests (for rider-to-driver posting requests)
+    const tryPostingRequests = async () => {
+      const prSnap = await getDoc(doc(firestore, 'ridePostingRequests', requestId));
+      if (prSnap.exists()) { setIsPostingRequest(true); return { id: prSnap.id, ...prSnap.data() } as any; }
+      return null;
+    };
     getDoc(doc(firestore, 'rideRequests', requestId))
       .then(async (snap) => {
-        if (snap.exists()) {
-          const data = { id: snap.id, ...snap.data() } as any;
+        const rawSnap = snap.exists() ? { id: snap.id, ...snap.data() } as any : await tryPostingRequests();
+        if (rawSnap) {
+          const data = rawSnap;
           setRequest(data);
           const uid = firebaseAuth.currentUser?.uid;
           if (uid) {
@@ -191,6 +211,60 @@ export default function RequestDeepLinkScreen() {
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
   }, [requestId]);
+
+  const acceptRequest = async () => {
+    if (!requestId || !request) return;
+    setSubmitting(true);
+    try {
+      const postingId = request.ridePostingId || request.rideId;
+      if (!postingId) throw new Error('Missing posting ID');
+      const user = firebaseAuth.currentUser;
+      if (!user) throw new Error('Not signed in');
+      const token = await user.getIdToken();
+      const { getApiBaseUrl } = await import('@/constants/services');
+      const base = getApiBaseUrl();
+      const driverSnap = await getDoc(doc(firestore, 'drivers', user.uid));
+      const driver = driverSnap.exists() ? (driverSnap.data() as any) : {};
+      const driverName = driver.fullName || [driver.firstName, driver.lastName].filter(Boolean).join(' ').trim() || driver.displayName || 'Driver';
+      const driverEmail = driver.personalInfo?.email || driver.email || user.email || '';
+      const resp = await fetch(`${base}/api/ride-postings/${encodeURIComponent(postingId)}/requests/${encodeURIComponent(requestId)}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ driverId: user.uid, driverName, driverEmail }),
+      });
+      if (!resp.ok) {
+        const j = await resp.json().catch(() => ({}));
+        throw new Error(j?.error || 'Failed to accept request');
+      }
+      Alert.alert('Accepted!', 'The rider has been confirmed for this ride.', [
+        { text: 'OK', onPress: () => goBack() },
+      ]);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not accept. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const rejectRequest = async () => {
+    if (!requestId) return;
+    Alert.alert('Decline request?', 'The rider will be notified.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Decline', style: 'destructive', onPress: async () => {
+        setSubmitting(true);
+        try {
+          const { updateDoc } = await import('firebase/firestore');
+          const { serverTimestamp } = await import('firebase/firestore');
+          await updateDoc(doc(firestore, 'ridePostingRequests', requestId), { status: 'rejected', updatedAt: serverTimestamp() });
+          goBack();
+        } catch {
+          Alert.alert('Error', 'Could not decline. Please try again.');
+        } finally {
+          setSubmitting(false);
+        }
+      }},
+    ]);
+  };
 
   const shareRequest = async () => {
     if (!requestId) return;
@@ -481,7 +555,23 @@ export default function RequestDeepLinkScreen() {
         </ScrollView>
 
         <View style={s.footer}>
-          {(() => {
+          {isPostingRequest ? (
+            // Rider booked the driver's posting — show Accept / Decline
+            ['confirmed', 'accepted', 'completed', 'cancelled', 'canceled', 'rejected', 'declined'].includes(String(request?.status || '').toLowerCase()) ? (
+              <TouchableOpacity style={[s.btn, { backgroundColor: colors.bgSecondary }]} disabled activeOpacity={1}>
+                <Text style={[s.btnText, { color: colors.textSecondary }]}>{String(request?.status || '').toUpperCase()}</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <TouchableOpacity style={[s.btn, { flex: 1, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.bgCard, opacity: submitting ? 0.6 : 1 }]} onPress={rejectRequest} disabled={submitting} activeOpacity={0.8}>
+                  <Text style={[s.btnText, { color: colors.textPrimary }]}>Decline</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[s.btn, { flex: 1, backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]} onPress={acceptRequest} disabled={submitting} activeOpacity={0.85}>
+                  <Text style={s.btnText}>{submitting ? 'Accepting…' : 'Accept'}</Text>
+                </TouchableOpacity>
+              </View>
+            )
+          ) : (() => {
             const openRiderChat = async () => {
               if (!requestId) return;
               try {
