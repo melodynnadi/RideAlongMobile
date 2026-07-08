@@ -126,6 +126,10 @@ export default function EditPostingScreen() {
       Alert.alert('Invalid seats', 'Enter at least one available seat.');
       return;
     }
+    if (seatsNum > 2) {
+      Alert.alert('Too many seats', 'Maximum 2 seats per ride.');
+      return;
+    }
     if (!Number.isFinite(priceNum) || priceNum <= 0) {
       Alert.alert('Invalid price', 'Enter a valid price per seat.');
       return;
@@ -229,10 +233,13 @@ export default function EditPostingScreen() {
               </View>
             </View>
             <Field
-              label="Seats available"
+              label="Seats available (max 2)"
               icon="people-outline"
               value={seats}
-              onChangeText={setSeats}
+              onChangeText={(v) => {
+                const n = Number.parseInt(v, 10);
+                if (v === '' || (Number.isFinite(n) && n <= 2)) setSeats(v);
+              }}
               placeholder="1"
               keyboardType="number-pad"
             />

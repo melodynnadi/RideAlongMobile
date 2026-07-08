@@ -54,7 +54,7 @@ export const DriverPreferredRoutesManager: React.FC<PreferredRoutesManagerProps>
   return (
     <View style={styles.container}>
       <Text style={styles.heading}>Preferred Routes</Text>
-      <Text style={styles.subheading}>{role === 'driver' ? 'We notify you when riders request matching routes.' : 'We notify you when drivers post matching routes.'}</Text>
+      <Text style={styles.subheading}>{role === 'driver' ? 'Get notified for matching ride requests.' : 'Get notified for matching ride postings.'}</Text>
 
       {/* Origin input */}
       <View style={styles.inputGroup}>
@@ -188,7 +188,7 @@ function makeStyles(colors: AppColors) {
     justifyContent: 'center',
     gap: 6,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 25,
     backgroundColor: colors.primary,
   },
   saveBtnText: {
@@ -203,7 +203,7 @@ function makeStyles(colors: AppColors) {
     gap: 4,
     paddingVertical: 12,
     paddingHorizontal: 16,
-    borderRadius: 8,
+    borderRadius: 25,
     backgroundColor: colors.bgSecondary,
   },
   cancelBtnText: {
@@ -220,7 +220,7 @@ function makeStyles(colors: AppColors) {
     alignItems: 'center',
     padding: 12,
     backgroundColor: colors.bgSecondary,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
   },

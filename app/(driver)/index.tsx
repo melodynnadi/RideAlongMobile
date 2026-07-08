@@ -405,10 +405,10 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
   const activeConfirmedRideId = ride.confirmedId || groupRideTripId || null;
   const firstGroupPassenger = groupPassengers?.[0];
   const openRequest = () => {
-    if (pendingRequestId) {
-      router.push({ pathname: '/(driver)/request/[id]', params: { id: pendingRequestId, returnTo: '/(driver)' } } as any);
-    } else if (ride.type === 'ridePosting' || ride.type === 'groupRide') {
+    if (ride.type === 'ridePosting' || ride.type === 'groupRide') {
       router.push('/(driver)/my-postings' as any);
+    } else if (pendingRequestId) {
+      router.push({ pathname: '/(driver)/request/[id]', params: { id: pendingRequestId, returnTo: '/(driver)' } } as any);
     } else {
       router.push({ pathname: '/(driver)/request/[id]', params: { id: ride.id, returnTo: '/(driver)' } } as any);
     }
@@ -594,11 +594,11 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
               <TouchableOpacity
                 style={{ flex: 1, borderRadius: 20, paddingVertical: 10, alignItems: 'center', borderWidth: 1.5, borderColor: colors.primary, opacity: sendingEnRoute ? 0.6 : 1 }}
                 onPress={async () => {
-                  if (sendingEnRoute) return;
+                  if (sendingEnRoute || !activeConfirmedRideId) return;
                   setSendingEnRoute(true);
                   try {
                     const token = await firebaseAuth.currentUser?.getIdToken();
-                    const res = await fetch(`${getApiBaseUrl()}/api/rides/${ride.confirmedId}/driver-en-route`, {
+                    const res = await fetch(`${getApiBaseUrl()}/api/rides/${activeConfirmedRideId}/driver-en-route`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
                     });
@@ -2186,7 +2186,7 @@ export default function HomeScreen() {
           if (r?.isRecurring) {
             // Collect recurring instances; we'll add only the nearest future one per schedule below
             const inactive = new Set(['completed', 'cancelled', 'canceled', 'expired']);
-            if (!inactive.has(rawStatus) && dt && dt.getTime() > now - 2 * 60 * 60 * 1000) {
+            if (!inactive.has(rawStatus) && !r?.schedulePaused && dt && dt.getTime() > now - 2 * 60 * 60 * 1000) {
               const sid = r.scheduleId || d.id;
               if (!recurringBySchedule[sid]) recurringBySchedule[sid] = [];
               recurringBySchedule[sid].push({ id: d.id, r, dt });
@@ -2264,7 +2264,7 @@ export default function HomeScreen() {
             }
             if (r?.isRecurring) {
               const inactive = new Set(['completed', 'cancelled', 'canceled', 'expired']);
-              if (!inactive.has(rawStatus) && dt && dt.getTime() > now - 2 * 60 * 60 * 1000) {
+              if (!inactive.has(rawStatus) && !r?.schedulePaused && dt && dt.getTime() > now - 2 * 60 * 60 * 1000) {
                 const sid = r.scheduleId || d.id;
                 if (!recurringBySchedule[sid]) recurringBySchedule[sid] = [];
                 recurringBySchedule[sid].push({ id: d.id, r, dt });

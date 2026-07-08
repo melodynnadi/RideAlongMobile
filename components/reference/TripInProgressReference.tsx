@@ -695,10 +695,10 @@ export function DriverTripInProgressReference() {
   useEffect(() => {
     if (!trip?.ridePostingId || trip.totalSeats <= 1) { setGroupPendingCount(1); setGroupRiders([]); return; }
     const qy = query(collection(firestore, 'confirmedRides'), where('ridePostingId', '==', trip.ridePostingId));
-    const unsub = onSnapshot(qy, (snap) => {
+    const unsub = onSnapshot(qy, async (snap) => {
       const pending = snap.docs.filter((d) => String(d.data()?.status || '').toUpperCase() !== 'COMPLETED').length;
       setGroupPendingCount(pending);
-      setGroupRiders(snap.docs.map((d) => {
+      const base = snap.docs.map((d) => {
         const data = d.data() || {};
         return {
           confirmedRideId: d.id,
@@ -708,7 +708,22 @@ export function DriverTripInProgressReference() {
           photoURL: data.riderAvatarUrl || data.userAvatarUrl || data.profilePicture || data.photoURL || null,
           status: String(data.status || '').toUpperCase(),
         };
+      });
+      // Enrich riders missing a photo by fetching from riders collection
+      const enriched = await Promise.all(base.map(async (r) => {
+        if (r.photoURL || !r.riderId) return r;
+        try {
+          const snap = await getDoc(doc(firestore, 'riders', r.riderId));
+          if (snap.exists()) {
+            const d = snap.data();
+            const photo = d.avatarUrl || d.avatarUrl1 || d.photoURL || d.profilePicture || null;
+            const name = [d.firstName, d.lastName].filter(Boolean).join(' ').trim() || d.displayName || r.name;
+            return { ...r, photoURL: photo, name: name || r.name };
+          }
+        } catch {}
+        return r;
       }));
+      setGroupRiders(enriched);
     }, () => {});
     return unsub;
   }, [trip?.ridePostingId, trip?.totalSeats]);

@@ -146,9 +146,9 @@ function Phone({
                   style={s.circle}
                   onPress={() => {
                     if (onBack) { onBack(); return; }
-                    if (router.canGoBack()) { router.back(); return; }
                     const dest = returnTo || backTarget || backHref;
-                    if (dest) router.navigate(dest as any);
+                    if (dest) { router.navigate(dest as any); return; }
+                    if (router.canGoBack()) router.back();
                   }}
                   accessibilityRole="button"
                   accessibilityLabel="Go back"
@@ -2839,8 +2839,8 @@ function RiderPreferencesReferenceInner() {
   );
 
   return (
-    <Phone title="Ride preferences" back backHref="/(rider)/profile" compactContent bottom={preferences ? saveButton : undefined} bottomOffset={4}>
-      <Text style={s.preferenceIntro}>Set the ride environment you are most comfortable with. Drivers can review these details before accepting your request.</Text>
+    <Phone title="Ride preferences" back backHref="/(rider)/profile" compactContent headerGap={0} bottom={preferences ? saveButton : undefined} bottomOffset={4}>
+      <Text style={s.preferenceIntro}>Set your preferred ride environment for drivers to review.</Text>
       <View style={s.riderPreferredRoutes}><DriverPreferredRoutesManager role="rider" /></View>
 
       {isLoading && !preferences ? (

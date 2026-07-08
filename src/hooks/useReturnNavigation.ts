@@ -6,12 +6,14 @@ export function useReturnNavigation(fallbackRoute: string) {
   const returnTo = Array.isArray(returnToParam) ? returnToParam[0] : returnToParam;
 
   const goBack = useCallback(() => {
-    // Prefer router.back() for the correct pop animation.
-    // Only use replace() when there is no back history (e.g. deep-linked directly).
-    if (router.canGoBack()) {
+    const dest = returnTo || fallbackRoute;
+    // When an explicit returnTo is provided, always use it.
+    // router.back() goes to the wrong screen when the navigation was a tab
+    // switch rather than a stack push (e.g. Tabs.Screen destinations).
+    if (dest) {
+      router.navigate(dest as any);
+    } else if (router.canGoBack()) {
       router.back();
-    } else {
-      router.replace((returnTo || fallbackRoute) as any);
     }
   }, [fallbackRoute, returnTo]);
 

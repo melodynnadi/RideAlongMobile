@@ -109,7 +109,7 @@ function notificationTargetsDriver(data: Record<string, any>, uid: string): bool
 
 export default function NotificationsScreen() {
   const { colors } = useAppTheme();
-  const { goBack } = useReturnNavigation('/(driver)');
+  const { goBack } = useReturnNavigation('/(driver)/profile');
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 

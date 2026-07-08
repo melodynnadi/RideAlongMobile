@@ -351,6 +351,8 @@ export function subscribeAvailableRides(
         .filter((ride) => {
           // Never show the rider their own driver postings
           if (currentUid && ride.driverId === currentUid) return false;
+          // Hide paused recurring rides
+          if ((ride.raw as any)?.schedulePaused) return false;
           // Completed/cancelled/expired postings should only live in history.
           if (isInactiveRide(ride)) return false;
           // Never show rides whose scheduled time is more than 2 hours in the past

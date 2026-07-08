@@ -256,6 +256,7 @@ export default function DriverProfileScreen() {
 
           <View style={styles.menuCard}>
             <MenuRow icon="car" title="Vehicle info" sub={vehicleLabel} href="/(driver)/settings/vehicle-info" returnTo="/(driver)/profile" />
+            <MenuRow icon="list" title="My postings" sub="Active rides & recurring schedules" href="/(driver)/my-postings" returnTo="/(driver)/profile" />
             <MenuRow icon="wallet" title="Earnings & payouts" sub="View payout history" href="/(driver)/earnings" returnTo="/(driver)/profile" />
             <MenuRow icon="time" title="Ride history" href="/(driver)/settings/driver-ride-history" returnTo="/(driver)/profile" />
             <MenuRow icon="notifications" title="Notifications" href="/(driver)/notifications" returnTo="/(driver)/profile" />

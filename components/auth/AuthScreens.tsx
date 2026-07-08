@@ -125,7 +125,7 @@ function useStyles(colors: AppColors) {
           gap: 8,
         },
         inputError: { borderColor: colors.red },
-        input: { flex: 1, minWidth: 0, minHeight: 48, color: colors.textPrimary, fontSize: 16, lineHeight: 22, paddingVertical: 0 },
+        input: { flex: 1, minWidth: 0, color: colors.textPrimary, fontSize: 16, paddingVertical: 0, textAlignVertical: 'center' },
         errorText: { color: colors.red, fontSize: 12, lineHeight: 17, marginTop: 5 },
 
         // Buttons

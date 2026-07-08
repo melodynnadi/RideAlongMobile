@@ -8,8 +8,8 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import {
-  collection, query, where, onSnapshot, doc, getDoc,
-  updateDoc, serverTimestamp, Timestamp,
+  collection, query, where, onSnapshot, doc, getDoc, getDocs,
+  updateDoc, writeBatch, serverTimestamp, Timestamp,
 } from 'firebase/firestore';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
@@ -234,6 +234,13 @@ export default function MyPostingsScreen() {
       backgroundColor: colors.bgSecondary, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 6,
     },
     scheduleMetaText: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
+    scheduleManageDaysBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.border, marginTop: 4 },
+    scheduleManageDaysText: { flex: 1, color: colors.primary, fontSize: 13, fontWeight: '600' },
+    instanceList: { paddingBottom: 10 },
+    instanceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7 },
+    instanceDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary },
+    instanceDate: { flex: 1, color: colors.textPrimary, fontSize: 14, fontWeight: '500' },
+    instanceEmpty: { color: colors.textSecondary, fontSize: 13, paddingVertical: 8 },
     scheduleActions: {
       flexDirection: 'row', gap: 8, paddingTop: 14,
       borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
@@ -268,7 +275,7 @@ export default function MyPostingsScreen() {
     },
     postBtnText: { color: colors.textInverse, fontSize: 14, fontWeight: '700' },
   }), [colors]);
-  const { goBack: handleBack } = useReturnNavigation('/(driver)');
+  const { goBack: handleBack } = useReturnNavigation('/(driver)/profile');
   const [postings, setPostings] = useState<Posting[]>([]);
   const [loading, setLoading]   = useState(true);
   const [cancelling, setCancelling] = useState<string | null>(null);
@@ -276,6 +283,10 @@ export default function MyPostingsScreen() {
   const [schedules, setSchedules] = useState<any[]>([]);
   const [schedulesLoading, setSchedulesLoading] = useState(false);
   const [actingSchedule, setActingSchedule] = useState<string | null>(null);
+  const [expandedSchedule, setExpandedSchedule] = useState<string | null>(null);
+  const [scheduleInstances, setScheduleInstances] = useState<Record<string, { id: string; date: string; status: string }[]>>({});
+  const [loadingInstances, setLoadingInstances] = useState<string | null>(null);
+  const [cancellingInstance, setCancellingInstance] = useState<string | null>(null);
   const [requestsByPostingId, setRequestsByPostingId] = useState<Record<string, BookingRequest[]>>({});
   const [actingOnRequest, setActingOnRequest] = useState<string | null>(null);
   const [confirmedIdByPostingId, setConfirmedIdByPostingId] = useState<Record<string, string>>({});
@@ -406,14 +417,15 @@ export default function MyPostingsScreen() {
     setSchedulesLoading(true);
     (async () => {
       try {
-        const token = await firebaseAuth.currentUser?.getIdToken();
-        const res = await fetch(`${getApiBaseUrl()}/api/ride-schedules/driver/${uid}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setSchedules(data.schedules || []);
-        }
+        const snap = await getDocs(query(
+          collection(firestore, 'rideSchedules'),
+          where('driverId', '==', uid),
+        ));
+        const data = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter((s: any) => s.status !== 'cancelled')
+          .sort((a: any, b: any) => (a.createdAt?._seconds ?? 0) - (b.createdAt?._seconds ?? 0));
+        setSchedules(data);
       } catch (e) { console.warn('fetch schedules error', e); }
       finally { setSchedulesLoading(false); }
     })();
@@ -433,24 +445,95 @@ export default function MyPostingsScreen() {
   const doScheduleAction = async (scheduleId: string, action: 'pause' | 'resume' | 'cancel') => {
     setActingSchedule(scheduleId);
     try {
-      const token = await firebaseAuth.currentUser?.getIdToken();
-      const res = await fetch(`${getApiBaseUrl()}/api/ride-schedules/${scheduleId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ action }),
+      const today = new Date().toISOString().slice(0, 10);
+      const inactive = new Set(['cancelled', 'canceled', 'completed', 'expired']);
+      const newStatus = action === 'cancel' ? 'cancelled' : action === 'pause' ? 'paused' : 'active';
+
+      // 1. Update the schedule doc (separate from the postings batch so one failure doesn't block the other)
+      await updateDoc(doc(firestore, 'rideSchedules', scheduleId), {
+        status: newStatus,
+        updatedAt: serverTimestamp(),
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'Failed');
-      }
+
+      // 2. Fetch all upcoming postings and update them in a batch
+      const postingsSnap = await getDocs(query(
+        collection(firestore, 'ridePostings'),
+        where('scheduleId', '==', scheduleId),
+      ));
+
+      const batch = writeBatch(firestore);
+      let hasUpdates = false;
+      postingsSnap.docs.forEach(d => {
+        const data = d.data();
+        if (inactive.has(String(data.status || '').toLowerCase())) return;
+        if ((data.date || '') < today) return;
+        hasUpdates = true;
+        if (action === 'cancel') {
+          batch.update(d.ref, { status: 'cancelled', cancelledAt: serverTimestamp(), updatedAt: serverTimestamp() });
+        } else {
+          batch.update(d.ref, { schedulePaused: action === 'pause', updatedAt: serverTimestamp() });
+        }
+      });
+      if (hasUpdates) await batch.commit();
+
       setSchedules(prev => action === 'cancel'
         ? prev.filter(s => s.id !== scheduleId)
-        : prev.map(s => s.id === scheduleId ? { ...s, status: action === 'pause' ? 'paused' : 'active' } : s));
+        : prev.map(s => s.id === scheduleId ? { ...s, status: newStatus } : s));
+
+      setScheduleInstances(prev => { const n = { ...prev }; delete n[scheduleId]; return n; });
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Could not update schedule. Please try again.');
     } finally {
       setActingSchedule(null);
     }
+  };
+
+  const toggleScheduleInstances = async (scheduleId: string) => {
+    if (expandedSchedule === scheduleId) { setExpandedSchedule(null); return; }
+    setExpandedSchedule(scheduleId);
+    if (scheduleInstances[scheduleId]) return; // already loaded
+    setLoadingInstances(scheduleId);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const snap = await getDocs(query(
+        collection(firestore, 'ridePostings'),
+        where('scheduleId', '==', scheduleId),
+      ));
+      const inactive = new Set(['cancelled', 'canceled', 'completed', 'expired']);
+      const instances = snap.docs
+        .map(d => ({ id: d.id, date: String(d.data().date || ''), status: String(d.data().status || 'available') }))
+        .filter(i => i.date >= today && !inactive.has(i.status))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      setScheduleInstances(prev => ({ ...prev, [scheduleId]: instances }));
+    } catch { Alert.alert('Error', 'Could not load upcoming dates.'); }
+    finally { setLoadingInstances(null); }
+  };
+
+  const cancelInstance = async (scheduleId: string, postingId: string, date: string) => {
+    Alert.alert(
+      'Cancel this day?',
+      `Remove the ride on ${new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}? Riders who already booked are unaffected.`,
+      [
+        { text: 'Keep it', style: 'cancel' },
+        { text: 'Cancel day', style: 'destructive', onPress: async () => {
+          setCancellingInstance(postingId);
+          try {
+            await updateDoc(doc(firestore, 'ridePostings', postingId), {
+              status: 'cancelled',
+              cancelledAt: serverTimestamp(),
+              cancelReason: 'driver_unavailable',
+              updatedAt: serverTimestamp(),
+            });
+            setScheduleInstances(prev => ({
+              ...prev,
+              [scheduleId]: (prev[scheduleId] || []).filter(i => i.id !== postingId),
+            }));
+          } catch (e: any) {
+            Alert.alert('Error', e?.message || 'Could not cancel this day. Try again.');
+          } finally { setCancellingInstance(null); }
+        }},
+      ]
+    );
   };
 
   const acceptRequest = useCallback(async (req: BookingRequest) => {
@@ -770,6 +853,46 @@ export default function MyPostingsScreen() {
                         </View>
                       </View>
 
+                      {/* Manage days — expandable upcoming instances */}
+                      <TouchableOpacity
+                        onPress={() => toggleScheduleInstances(schedule.id)}
+                        style={s.scheduleManageDaysBtn}
+                        activeOpacity={0.75}
+                      >
+                        <Ionicons name="calendar-outline" size={14} color={colors.primary} />
+                        <Text style={s.scheduleManageDaysText}>Manage days</Text>
+                        <Ionicons name={expandedSchedule === schedule.id ? 'chevron-up' : 'chevron-down'} size={14} color={colors.textSecondary} />
+                      </TouchableOpacity>
+
+                      {expandedSchedule === schedule.id && (
+                        <View style={s.instanceList}>
+                          {loadingInstances === schedule.id ? (
+                            <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 8 }} />
+                          ) : (scheduleInstances[schedule.id] || []).length === 0 ? (
+                            <Text style={s.instanceEmpty}>No upcoming days to manage.</Text>
+                          ) : (scheduleInstances[schedule.id] || []).map(instance => {
+                            const d = new Date(instance.date + 'T12:00:00');
+                            const label = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                            const isCancelling = cancellingInstance === instance.id;
+                            return (
+                              <View key={instance.id} style={s.instanceRow}>
+                                <View style={s.instanceDot} />
+                                <Text style={s.instanceDate}>{label}</Text>
+                                <TouchableOpacity
+                                  onPress={() => cancelInstance(schedule.id, instance.id, instance.date)}
+                                  disabled={isCancelling}
+                                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                >
+                                  {isCancelling
+                                    ? <ActivityIndicator size="small" color={colors.red} />
+                                    : <Ionicons name="close-circle-outline" size={20} color={colors.red} />}
+                                </TouchableOpacity>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
+
                       <View style={s.scheduleActions}>
                         <TouchableOpacity
                           disabled={isActing}
@@ -791,7 +914,7 @@ export default function MyPostingsScreen() {
                           style={s.scheduleDangerBtn}
                         >
                           <Ionicons name="trash-outline" size={15} color={colors.red} />
-                          <Text style={s.scheduleDangerText}>Cancel</Text>
+                          <Text style={s.scheduleDangerText}>Cancel all</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
