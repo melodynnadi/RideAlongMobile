@@ -13,6 +13,7 @@ import { useVerificationStore } from '@/stores/verificationStore';
 import { useAuthStore } from '@/stores/authStore';
 import { hitSlop, layout } from '@/theme/designSystem';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { DriverBottomNav } from '@/components/DriverBottomNav';
 import type { AppColors } from '@/constants/theme';
 
 const FONT_SANS = Platform.OS === 'web' ? '"Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, sans-serif' : undefined;
@@ -191,17 +192,13 @@ export default function DriverProfileScreen() {
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={[styles.content, { paddingBottom: 90 }]}
+          contentContainerStyle={[styles.content, { paddingBottom: 14 + 58 + 16 + insets.bottom }]}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.circleBtn} onPress={() => router.replace('/(driver)' as any)} hitSlop={hitSlop}>
-              <Ionicons name="arrow-back" size={18} color={colors.textPrimary} />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Profile</Text>
-            <View style={{ flex: 1 }} />
-            <TouchableOpacity style={styles.circleBtn} onPress={() => router.push({ pathname: '/(driver)/settings', params: { returnTo: '/(driver)/profile' } } as any)} hitSlop={hitSlop}>
-              <Ionicons name="settings-outline" size={18} color={colors.textPrimary} />
+          <View style={styles.pageHeader}>
+            <Text style={styles.pageTitle}>Profile</Text>
+            <TouchableOpacity style={styles.settingsBtn} onPress={() => router.push({ pathname: '/(driver)/settings', params: { returnTo: '/(driver)/profile' } } as any)} hitSlop={hitSlop}>
+              <Ionicons name="settings-outline" size={20} color={colors.textPrimary} />
             </TouchableOpacity>
           </View>
 
@@ -261,18 +258,15 @@ export default function DriverProfileScreen() {
             <MenuRow icon="car" title="Vehicle info" sub={vehicleLabel} href="/(driver)/settings/vehicle-info" returnTo="/(driver)/profile" />
             <MenuRow icon="wallet" title="Earnings & payouts" sub="View payout history" href="/(driver)/earnings" returnTo="/(driver)/profile" />
             <MenuRow icon="time" title="Ride history" href="/(driver)/settings/driver-ride-history" returnTo="/(driver)/profile" />
-
             <MenuRow icon="notifications" title="Notifications" href="/(driver)/notifications" returnTo="/(driver)/profile" />
-
-
           </View>
 
-        </ScrollView>
-        <View style={[styles.logoutContainer, { paddingBottom: insets.bottom + 8 }]}>
           <TouchableOpacity style={styles.logoutBtn} onPress={signOut} activeOpacity={0.85}>
             <Text style={styles.logoutText}>Log out</Text>
           </TouchableOpacity>
-        </View>
+
+        </ScrollView>
+        <DriverBottomNav activeTab="profile" />
       </SafeAreaView>
     </View>
   );
@@ -286,10 +280,11 @@ function makeStyles(colors: AppColors) {
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText: { color: colors.textSecondary, fontSize: 14 },
   scroll: { flex: 1 },
-  header: { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-  headerTitle: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+  pageHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  pageTitle: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1 },
+  settingsBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   circleBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border},
-  content: { flexGrow: 1, width: '100%', maxWidth: layout.contentMaxWidth, alignSelf: 'center', paddingHorizontal: layout.screenPadding, paddingTop: 4 },
+  content: { flexGrow: 1, width: '100%', maxWidth: layout.contentMaxWidth, alignSelf: 'center', paddingHorizontal: layout.screenPadding, paddingTop: 0 },
   profileTopRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
   profileIdentityHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   editProfileButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
@@ -322,8 +317,7 @@ function makeStyles(colors: AppColors) {
   menuIcon: { width: 22, alignItems: 'center', justifyContent: 'center' },
   menuTitle: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
   menuSub: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
-  logoutContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 20, paddingTop: 10, backgroundColor: colors.bgOverlay },
-  logoutBtn: { height: 52, borderRadius: 26, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  logoutBtn: { height: 52, borderRadius: 26, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   logoutText: { color: colors.textInverse, fontSize: 15, fontWeight: '700' },
   });
 }

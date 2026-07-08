@@ -529,7 +529,7 @@ export default function BookScreen() {
   seatPill: { height: 40, minWidth: 64, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' },
   seatPillText: { color: colors.textSecondary, fontSize: 14, fontWeight: '700' },
   priceBox: { marginHorizontal: 20, minHeight: 70, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
-  priceInputCeo: { flex: 1, color: colors.textPrimary, fontSize: 30, fontWeight: '400', paddingVertical: 10 },
+  priceInputCeo: { flex: 1, color: colors.textPrimary, fontSize: 30, fontWeight: '400', paddingVertical: 0, textAlignVertical: 'center' },
   suggestedText: { color: colors.textSecondary, fontSize: 11, lineHeight: 15, fontWeight: '600', textAlign: 'right' },
   notesCeo: { marginHorizontal: 20, minHeight: 92, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 14, color: colors.textPrimary, fontSize: 14, lineHeight: 20, textAlignVertical: 'top' },
   routeMiniRow: { flexDirection: 'row', gap: 12 },

@@ -6,10 +6,13 @@ export function useReturnNavigation(fallbackRoute: string) {
   const returnTo = Array.isArray(returnToParam) ? returnToParam[0] : returnToParam;
 
   const goBack = useCallback(() => {
-    const destination = returnTo || fallbackRoute;
-    // Always replace to the explicit destination — never use router.back() which
-    // follows the history stack and ignores where the user came from.
-    router.replace(destination as any);
+    // Prefer router.back() for the correct pop animation.
+    // Only use replace() when there is no back history (e.g. deep-linked directly).
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace((returnTo || fallbackRoute) as any);
+    }
   }, [fallbackRoute, returnTo]);
 
   return { goBack, returnTo };

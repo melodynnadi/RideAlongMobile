@@ -6,6 +6,8 @@ import {
   Image,
   Linking,
   Platform,
+  ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -319,9 +321,6 @@ export function RiderTripInProgressReference() {
   const [trip, setTrip]               = useState<TripData | null>(null);
   const [rideStatus, setRideStatus]   = useState<string>('');
   const [paymentStatus, setPaymentStatus] = useState<string>('');
-  const [driverLocationAt, setDriverLocationAt] = useState<number | null>(null);
-  const [locationStaleSec, setLocationStaleSec] = useState<number>(0);
-  const locationStaleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [driver, setDriver]   = useState<DriverInfo | null>(null);
   const ratingNavRef = useRef(false);
@@ -331,12 +330,7 @@ export function RiderTripInProgressReference() {
   const [distanceMi,  setDistanceMi]  = useState<number | null>(null);
   const [durationMin, setDurationMin] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const [currentRegion, setCurrentRegion] = useState<Region | null>(null);
-  const [followMode, setFollowMode] = useState(true);
-  const [heading, setHeading] = useState(0);
-  const mapRef = useRef<any>(null);
   const etaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const headingSubRef = useRef<Location.LocationSubscription | null>(null);
 
   // Subscribe to confirmedRides for live driverLocation + status
   useEffect(() => {
@@ -350,10 +344,6 @@ export function RiderTripInProgressReference() {
       const status = String(d.status || '').toUpperCase();
       setRideStatus(status);
       setPaymentStatus(String(d.paymentStatus || '').toUpperCase());
-      const locAt = typeof d.driverLocationAt === 'number'
-        ? d.driverLocationAt
-        : d.driverLocationAt?.toMillis?.() ?? null;
-      setDriverLocationAt(locAt);
       setTrip({
         pickup:   d.pickup  ?? d.pickupLocation  ?? null,
         dropoff:  d.dropoff ?? d.dropoffLocation ?? null,
@@ -378,6 +368,7 @@ export function RiderTripInProgressReference() {
     });
     return unsub;
   }, [confirmedRideId]);
+
 
   // Resolve coordinates and fetch initial route
   useEffect(() => {
@@ -423,16 +414,6 @@ export function RiderTripInProgressReference() {
     return () => { if (etaTimerRef.current) clearTimeout(etaTimerRef.current); };
   }, [trip?.driverLocation?.latitude, trip?.driverLocation?.longitude, dropoffCoords]);
 
-  // Track how stale the driver's last location ping is (updates every 10s)
-  useEffect(() => {
-    if (locationStaleTimerRef.current) clearInterval(locationStaleTimerRef.current);
-    locationStaleTimerRef.current = setInterval(() => {
-      setLocationStaleSec(driverLocationAt ? Math.floor((Date.now() - driverLocationAt) / 1000) : 0);
-    }, 10_000);
-    setLocationStaleSec(driverLocationAt ? Math.floor((Date.now() - driverLocationAt) / 1000) : 0);
-    return () => { if (locationStaleTimerRef.current) clearInterval(locationStaleTimerRef.current); };
-  }, [driverLocationAt]);
-
   // Fetch driver profile
   useEffect(() => {
     if (!trip?.driverId) return;
@@ -454,73 +435,6 @@ export function RiderTripInProgressReference() {
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [trip?.driverId]);
-
-  // Fit map to route (or straight line between endpoints if directions failed)
-  useEffect(() => {
-    const coords = routePoints.length > 1 ? routePoints
-      : (pickupCoords && dropoffCoords ? [pickupCoords, dropoffCoords] : []);
-    if (coords.length > 1 && mapRef.current) {
-      setTimeout(() => {
-        mapRef.current?.fitToCoordinates(coords, {
-          edgePadding: { top: 80, right: 40, bottom: 300, left: 40 },
-          animated: true,
-        });
-      }, 500);
-    }
-  }, [routePoints.length, pickupCoords, dropoffCoords]);
-
-  // Device compass heading
-  useEffect(() => {
-    let active = true;
-    Location.watchHeadingAsync((h) => {
-      if (active) setHeading(h.trueHeading ?? h.magHeading ?? 0);
-    }).then((sub) => {
-      if (!active) sub.remove();
-      else headingSubRef.current = sub;
-    }).catch(() => {});
-    return () => {
-      active = false;
-      headingSubRef.current?.remove();
-    };
-  }, []);
-
-  // Follow mode: animate map camera to driver position whenever it moves
-  useEffect(() => {
-    if (!followMode || !driverLoc || !mapRef.current) return;
-    mapRef.current.animateCamera({ center: driverLoc }, { duration: 700 });
-  }, [followMode, trip?.driverLocation?.latitude, trip?.driverLocation?.longitude]);
-
-  const zoomIn = () => {
-    if (!currentRegion || !mapRef.current) return;
-    mapRef.current.animateToRegion(
-      { ...currentRegion, latitudeDelta: currentRegion.latitudeDelta / 2, longitudeDelta: currentRegion.longitudeDelta / 2 },
-      300,
-    );
-  };
-
-  const zoomOut = () => {
-    if (!currentRegion || !mapRef.current) return;
-    mapRef.current.animateToRegion(
-      { ...currentRegion, latitudeDelta: Math.min(currentRegion.latitudeDelta * 2, 180), longitudeDelta: Math.min(currentRegion.longitudeDelta * 2, 360) },
-      300,
-    );
-  };
-
-  const fitRoute = () => {
-    const coords = routePoints.length > 1 ? routePoints
-      : (pickupCoords && dropoffCoords ? [pickupCoords, dropoffCoords] : []);
-    if (coords.length > 1 && mapRef.current) {
-      setFollowMode(false);
-      mapRef.current.fitToCoordinates(coords, {
-        edgePadding: { top: 80, right: 40, bottom: 300, left: 40 },
-        animated: true,
-      });
-    }
-  };
-
-  const resetBearing = () => {
-    mapRef.current?.animateCamera({ heading: 0 }, { duration: 300 });
-  };
 
   const openChat = async () => {
     if (!confirmedRideId) return;
@@ -554,228 +468,140 @@ export function RiderTripInProgressReference() {
     setConfirming(false);
   };
 
-  const shareTrip = () => {
-    Alert.alert('Share trip', 'Trip sharing link copied to clipboard.');
-  };
+  const isDriverDone = rideStatus === 'DRIVER_COMPLETED' || rideStatus === 'RIDER_COMPLETED';
+  const isComplete   = rideStatus === 'COMPLETED';
 
-  const driverLoc = trip?.driverLocation;
-  const [sheetVisible, setSheetVisible] = useState(true);
+  const statusLabel  = isComplete ? 'Ride complete'
+    : isDriverDone ? 'Confirm your arrival'
+    : 'Ride in progress';
+  const statusIcon   = isComplete ? 'checkmark-circle' as const
+    : isDriverDone ? 'flag-outline' as const
+    : 'car-outline' as const;
+  const statusColor  = isComplete || isDriverDone ? colors.green : colors.primary;
 
   return (
-    <View style={s.root}>
-      {/* Map */}
-      <MapView
-        ref={mapRef}
-        style={StyleSheet.absoluteFill}
-        provider={PROVIDER_GOOGLE}
-        customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE}
-        showsUserLocation={false}
-        showsMyLocationButton={false}
-        showsCompass={false}
-        showsTraffic={false}
-        rotateEnabled={false}
-        initialRegion={
-          pickupCoords
-            ? { ...pickupCoords, latitudeDelta: 0.05, longitudeDelta: 0.05 }
-            : { latitude: 30.2672, longitude: -97.7431, latitudeDelta: 0.5, longitudeDelta: 0.5 }
-        }
-        onRegionChangeComplete={(r) => setCurrentRegion(r)}
-        onPanDrag={() => setFollowMode(false)}
-      >
-        {pickupCoords && dropoffCoords && (
-          <Polyline
-            coordinates={routePoints.length > 1 ? routePoints : [pickupCoords, dropoffCoords]}
-            strokeColor={colors.primary}
-            strokeWidth={3.5}
-            lineCap="round"
-            lineJoin="round"
-          />
-        )}
-        {pickupCoords && (
-          <Marker coordinate={pickupCoords} anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={s.dotPickup} />
-          </Marker>
-        )}
-        {dropoffCoords && (
-          <Marker coordinate={dropoffCoords} anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={s.dotDropoff} />
-          </Marker>
-        )}
-        {driverLoc && (
-          <Marker coordinate={driverLoc} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false}>
-            <View style={s.carMarker}>
-              <Ionicons name="car" size={18} color={colors.primary} />
-            </View>
-          </Marker>
-        )}
-      </MapView>
-
-      {/* Header */}
-      <SafeAreaView edges={['top']} style={s.headerSafe}>
-        <View style={s.header}>
-          <TouchableOpacity style={s.headerBtn} onPress={() => router.back()} activeOpacity={0.75}>
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <StatusBar barStyle={colors.statusBar} />
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+        {/* Header */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4, minHeight: 56 }}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' }}
+            activeOpacity={0.75}
+          >
             <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
           </TouchableOpacity>
-          <Text style={s.headerTitle}>Trip in progress</Text>
-          <View style={s.headerBtn} />
-        </View>
-      </SafeAreaView>
-
-      {/* Stale location pill — shown when driver location hasn't updated in >30s */}
-      {locationStaleSec > 30 && rideStatus !== 'COMPLETED' && (
-        <View style={s.stalePill}>
-          <Ionicons name="wifi-outline" size={13} color={colors.textInverse} style={{ marginRight: 4 }} />
-          <Text style={s.stalePillText}>
-            {locationStaleSec < 120
-              ? `Driver location ${locationStaleSec}s ago`
-              : `Driver location ${Math.floor(locationStaleSec / 60)}m ago`}
+          <Text style={{ flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700', color: colors.textPrimary }}>
+            Trip in progress
           </Text>
+          <View style={{ width: 40 }} />
         </View>
-      )}
 
-      {/* Map controls */}
-      <MapControls
-        onZoomIn={zoomIn}
-        onZoomOut={zoomOut}
-        onFitRoute={fitRoute}
-        followMode={followMode}
-        onFollowToggle={() => {
-          if (!followMode) {
-            setFollowMode(true);
-            if (driverLoc) mapRef.current?.animateCamera({ center: driverLoc }, { duration: 600 });
-          } else {
-            setFollowMode(false);
-          }
-        }}
-        heading={heading}
-        onResetBearing={resetBearing}
-        bottomOffset={sheetVisible ? 300 : 160}
-      />
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 + insets.bottom }} showsVerticalScrollIndicator={false}>
 
-      {/* Loading */}
-      {loading && (
-        <View style={s.loadingOverlay}>
-          <ActivityIndicator color={colors.primary} size="large" />
-        </View>
-      )}
-
-      {/* Bottom sheet (collapsible) */}
-      {sheetVisible && (
-        <View style={[s.sheet, { paddingBottom: insets.bottom + 16 }]}>
-          {/* Handle row */}
-          <View style={s.sheetHandleRow}>
-            <View style={s.dragHandle} />
-            <TouchableOpacity style={s.collapseBtn} onPress={() => setSheetVisible(false)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}>
-              <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
-            </TouchableOpacity>
+          {/* Status hero */}
+          <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+            <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: isComplete || isDriverDone ? colors.greenDim : colors.primaryDim, alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+              <Ionicons name={statusIcon} size={34} color={statusColor} />
+            </View>
+            <Text style={{ fontSize: 22, fontWeight: '800', color: colors.textPrimary, marginBottom: 4 }}>{statusLabel}</Text>
+            {!isComplete && !isDriverDone && durationMin !== null && (
+              <Text style={{ fontSize: 15, color: colors.textSecondary }}>
+                {formatDuration(durationMin)} · {distanceMi !== null ? `${distanceMi.toFixed(1)} mi to go` : ''}
+              </Text>
+            )}
           </View>
 
-          {/* Driver row */}
-          <View style={s.driverRow}>
-            <View style={s.driverAvatar}>
-              {driver?.photoURL
-                ? <Image source={{ uri: driver.photoURL }} style={s.driverAvatarImg} />
-                : <Text style={s.driverInitials}>{(driver?.name || 'D').split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase()}</Text>}
-            </View>
-            <View style={s.driverInfo}>
-              <Text style={s.driverName}>{driver?.name ?? 'Loading…'}</Text>
-              <Text style={s.driverVehicle}>{driver?.vehicleText ?? ''}</Text>
-            </View>
-            <TouchableOpacity style={s.iconBtn} onPress={openChat} activeOpacity={0.75}>
-              <Ionicons name="chatbubble-ellipses" size={20} color={colors.textPrimary} />
-            </TouchableOpacity>
-            <TouchableOpacity style={s.iconBtn} onPress={callDriver} activeOpacity={0.75}>
-              <Ionicons name="call" size={20} color={colors.textPrimary} />
-            </TouchableOpacity>
-          </View>
-
-          {/* ETA row — hide once driver has completed */}
-          {rideStatus !== 'DRIVER_COMPLETED' && rideStatus !== 'COMPLETED' && (
-            <View style={s.etaRow}>
-              <View style={s.etaBlock}>
-                <Text style={s.etaLabel}>ETA</Text>
-                <Text style={s.etaValue}>{durationMin !== null ? formatDuration(durationMin) : '—'}</Text>
+          {/* Driver card */}
+          <View style={{ backgroundColor: colors.bgCard, borderRadius: 20, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 16 }}>
+            <Text style={{ fontSize: 11, fontWeight: '800', color: colors.textSecondary, letterSpacing: 1.2, marginBottom: 14, textTransform: 'uppercase' }}>Your driver</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+              <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                {driver?.photoURL
+                  ? <Image source={{ uri: driver.photoURL }} style={{ width: 52, height: 52 }} />
+                  : <Text style={{ fontSize: 18, fontWeight: '700', color: colors.textPrimary }}>{(driver?.name || 'D').split(/\s+/).map((p: string) => p[0]).join('').slice(0, 2).toUpperCase()}</Text>}
               </View>
-              <View style={s.etaDivider} />
-              <View style={s.etaBlock}>
-                <Text style={s.etaLabel}>MILES TO GO</Text>
-                <Text style={s.etaValueSm}>{distanceMi !== null ? `${distanceMi.toFixed(1)} mi` : '—'}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: colors.textPrimary }}>{driver?.name ?? 'Loading…'}</Text>
+                {driver?.vehicleText ? <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>{driver.vehicleText}</Text> : null}
+              </View>
+              <TouchableOpacity
+                style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}
+                onPress={openChat} activeOpacity={0.75}
+              >
+                <Ionicons name="chatbubble-ellipses" size={18} color={colors.primary} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center' }}
+                onPress={callDriver} activeOpacity={0.75}
+              >
+                <Ionicons name="call" size={18} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* ETA card — only while in progress */}
+          {!isDriverDone && !isComplete && (
+            <View style={{ flexDirection: 'row', backgroundColor: colors.bgCard, borderRadius: 20, borderWidth: 1, borderColor: colors.border, marginBottom: 16, overflow: 'hidden' }}>
+              <View style={{ flex: 1, alignItems: 'center', paddingVertical: 18 }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: colors.textSecondary, letterSpacing: 1.2, marginBottom: 6, textTransform: 'uppercase' }}>ETA</Text>
+                <Text style={{ fontSize: 26, fontWeight: '800', color: colors.textPrimary }}>{durationMin !== null ? formatDuration(durationMin) : '—'}</Text>
+              </View>
+              <View style={{ width: 1, backgroundColor: colors.border }} />
+              <View style={{ flex: 1, alignItems: 'center', paddingVertical: 18 }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: colors.textSecondary, letterSpacing: 1.2, marginBottom: 6, textTransform: 'uppercase' }}>Miles left</Text>
+                <Text style={{ fontSize: 26, fontWeight: '800', color: colors.textPrimary }}>{distanceMi !== null ? distanceMi.toFixed(1) : '—'}</Text>
               </View>
             </View>
           )}
 
-          {/* Rider confirmation banner */}
-          {(rideStatus === 'DRIVER_COMPLETED' || rideStatus === 'RIDER_COMPLETED') && rideStatus !== 'COMPLETED' && (
-            <View style={s.confirmBanner}>
-              <Ionicons name="checkmark-circle" size={22} color={colors.green} style={{ marginBottom: 6 }} />
-              <Text style={s.confirmBannerTitle}>Driver marked the ride complete</Text>
-              <Text style={s.confirmBannerBody}>{"Please confirm you've arrived at your destination."}</Text>
+          {/* Confirm arrival */}
+          {isDriverDone && !isComplete && (
+            <View style={{ backgroundColor: colors.greenDim, borderRadius: 20, borderWidth: 1, borderColor: colors.greenBorder, padding: 20, marginBottom: 16, alignItems: 'center' }}>
+              <Ionicons name="checkmark-circle" size={28} color={colors.green} style={{ marginBottom: 10 }} />
+              <Text style={{ fontSize: 17, fontWeight: '800', color: colors.textPrimary, marginBottom: 6 }}>Driver marked the ride complete</Text>
+              <Text style={{ fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: 18 }}>Please confirm you've arrived at your destination.</Text>
               <TouchableOpacity
-                style={[s.confirmBtn, confirming && { opacity: 0.6 }]}
+                style={{ backgroundColor: colors.primary, borderRadius: 27, paddingVertical: 14, paddingHorizontal: 32, opacity: confirming ? 0.6 : 1 }}
                 onPress={confirmRideComplete}
                 disabled={confirming}
                 activeOpacity={0.85}
               >
                 {confirming
-                  ? <ActivityIndicator size="small" color={colors.textInverse} />
-                  : <Text style={s.confirmBtnText}>Confirm Arrival</Text>}
+                  ? <ActivityIndicator size="small" color="#FFF" />
+                  : <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '700' }}>Confirm Arrival</Text>}
               </TouchableOpacity>
             </View>
           )}
 
-          {rideStatus === 'COMPLETED' && paymentStatus !== 'FAILED' && (
-            <View style={[s.confirmBanner, { backgroundColor: colors.greenDim }]}>
+          {/* Completed */}
+          {isComplete && (
+            <View style={{ backgroundColor: colors.greenDim, borderRadius: 20, borderWidth: 1, borderColor: colors.greenBorder, padding: 20, marginBottom: 16, alignItems: 'center' }}>
               {paymentStatus === 'PENDING' || paymentStatus === '' ? (
                 <>
-                  <ActivityIndicator size="small" color={colors.green} style={{ marginBottom: 6 }} />
-                  <Text style={[s.confirmBannerTitle, { color: colors.green }]}>Ride complete!</Text>
-                  <Text style={s.confirmBannerBody}>Processing payment…</Text>
+                  <ActivityIndicator size="small" color={colors.green} style={{ marginBottom: 10 }} />
+                  <Text style={{ fontSize: 17, fontWeight: '800', color: colors.green }}>Ride complete!</Text>
+                  <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 4 }}>Processing payment…</Text>
+                </>
+              ) : paymentStatus === 'FAILED' ? (
+                <>
+                  <Ionicons name="alert-circle" size={28} color={colors.primary} style={{ marginBottom: 10 }} />
+                  <Text style={{ fontSize: 17, fontWeight: '800', color: colors.primary }}>Ride complete — payment issue</Text>
+                  <Text style={{ fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginTop: 4 }}>Please contact support@ridealongapp.com</Text>
                 </>
               ) : (
                 <>
-                  <Ionicons name="checkmark-circle" size={22} color={colors.green} style={{ marginBottom: 6 }} />
-                  <Text style={[s.confirmBannerTitle, { color: colors.green }]}>Ride complete!</Text>
-                  <Text style={s.confirmBannerBody}>Thanks for riding with RideAlong.</Text>
+                  <Ionicons name="checkmark-circle" size={28} color={colors.green} style={{ marginBottom: 10 }} />
+                  <Text style={{ fontSize: 17, fontWeight: '800', color: colors.green }}>Ride complete!</Text>
+                  <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 4 }}>Thanks for riding with RideAlong.</Text>
                 </>
               )}
             </View>
           )}
-          {rideStatus === 'COMPLETED' && paymentStatus === 'FAILED' && (
-            <View style={[s.confirmBanner, { backgroundColor: colors.primaryDim }]}>
-              <Ionicons name="alert-circle" size={22} color={colors.primary} style={{ marginBottom: 6 }} />
-              <Text style={[s.confirmBannerTitle, { color: colors.primary }]}>Ride complete — payment issue</Text>
-              <Text style={s.confirmBannerBody}>Your payment could not be processed. Please contact support@ridealongapp.com.</Text>
-            </View>
-          )}
 
-          {/* Share */}
-          {rideStatus !== 'COMPLETED' && (
-            <TouchableOpacity style={s.shareBtn} onPress={shareTrip} activeOpacity={0.8}>
-              <Ionicons name="share-social-outline" size={16} color={colors.textPrimary} />
-              <Text style={s.shareBtnText}>Share trip with a friend</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
-
-      {/* Compact bar — shown when sheet is hidden */}
-      {!sheetVisible && (
-        <View style={[s.compactBar, { paddingBottom: insets.bottom + 12 }]}>
-          <View style={s.compactEtaBlock}>
-            <Text style={s.compactEtaLabel}>ETA</Text>
-            <Text style={s.compactEtaValue}>{durationMin !== null ? formatDuration(durationMin) : '—'}</Text>
-          </View>
-          <View style={s.compactDivider} />
-          <View style={s.compactEtaBlock}>
-            <Text style={s.compactEtaLabel}>MILES</Text>
-            <Text style={s.compactEtaValue}>{distanceMi !== null ? `${distanceMi.toFixed(1)}` : '—'}</Text>
-          </View>
-          <View style={{ flex: 1 }} />
-          <TouchableOpacity style={s.compactIconBtn} onPress={() => setSheetVisible(true)} activeOpacity={0.75}>
-            <Ionicons name="chevron-up" size={20} color={colors.textPrimary} />
-          </TouchableOpacity>
-        </View>
-      )}
+        </ScrollView>
+      </SafeAreaView>
     </View>
   );
 }
@@ -1133,9 +959,6 @@ export function DriverTripInProgressReference() {
     }
   };
 
-  const shareTrip = () => {
-    Alert.alert('Share trip', 'Trip sharing link copied to clipboard.');
-  };
 
   const navigateToDropoff = () => {
     if (!dropoffCoords) { Alert.alert('Destination not available yet'); return; }
@@ -1346,24 +1169,18 @@ export function DriverTripInProgressReference() {
             </View>
           </View>
 
-          {/* Complete + Share row */}
+          {/* Complete button */}
           {rideStatus !== 'DRIVER_COMPLETED' && rideStatus !== 'COMPLETED' ? (
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <TouchableOpacity
-                style={[s.completeBtn, completing && { opacity: 0.6 }]}
-                onPress={handleComplete}
-                disabled={completing}
-                activeOpacity={0.85}
-              >
-                {completing
-                  ? <ActivityIndicator size="small" color={colors.textInverse} />
-                  : <Text style={s.completeBtnText}>Complete Ride</Text>}
-              </TouchableOpacity>
-              <TouchableOpacity style={s.shareBtn} onPress={shareTrip} activeOpacity={0.8}>
-                <Ionicons name="share-social-outline" size={16} color={colors.textPrimary} />
-                <Text style={s.shareBtnText}>Share</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              style={[s.completeBtn, completing && { opacity: 0.6 }]}
+              onPress={handleComplete}
+              disabled={completing}
+              activeOpacity={0.85}
+            >
+              {completing
+                ? <ActivityIndicator size="small" color={colors.textInverse} />
+                : <Text style={s.completeBtnText}>Complete Ride</Text>}
+            </TouchableOpacity>
           ) : rideStatus === 'DRIVER_COMPLETED' ? (
             <View style={s.waitingBanner}>
               <ActivityIndicator size="small" color={colors.primary} style={{ marginRight: 10 }} />
@@ -1470,13 +1287,6 @@ function makeStyles(colors: AppColors) {
     etaLabel:  { color: colors.textSecondary, fontSize: 10, fontWeight: '700', letterSpacing: 0.5, marginBottom: 4 },
     etaValue:  { color: colors.primary, fontSize: 26, fontWeight: '800' },
     etaValueSm: { color: colors.textPrimary, fontSize: 18, fontWeight: '700' },
-
-    shareBtn: {
-      flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-      borderWidth: 1, borderColor: colors.border, borderRadius: 24,
-      paddingVertical: 13, backgroundColor: colors.bgCard,
-    },
-    shareBtnText: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
 
     navBtn: {
       flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,

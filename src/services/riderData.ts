@@ -158,7 +158,7 @@ const isInactiveRide = (ride: MobileRidePosting) => {
   const statusAtFlag = normalizedStatus(
     ride.raw?.statusAtFlag || ride.raw?.statusBeforeFlag || ride.raw?.flaggedFromStatus || ride.raw?.previousStatus,
   );
-  return inactiveRideStatuses.has(status) || statusAtFlag === 'completed';
+  return inactiveRideStatuses.has(status) || statusAtFlag === 'completed' || Boolean(ride.raw?.completedAt || ride.raw?.endedAt);
 };
 
 export const toDate = (value: any): Date | null => {
@@ -351,6 +351,8 @@ export function subscribeAvailableRides(
         .filter((ride) => {
           // Never show the rider their own driver postings
           if (currentUid && ride.driverId === currentUid) return false;
+          // Completed/cancelled/expired postings should only live in history.
+          if (isInactiveRide(ride)) return false;
           // Never show rides whose scheduled time is more than 2 hours in the past
           if (ride.date && ride.date.getTime() < cutoff) return false;
           const status = ride.status;
@@ -459,7 +461,7 @@ export function subscribeRiderConfirmedRides(uid: string, onData: (rides: Mobile
         .filter((ride) => !isInactiveRide(ride))
         .filter((ride) => {
           const s = String(ride.status || '').toUpperCase();
-          if (s === 'IN_PROGRESS' || s === 'DRIVER_COMPLETED' || s === 'RIDER_COMPLETED' || s === 'FLAGGED') return true;
+          if (s === 'IN_PROGRESS' || s === 'DRIVER_COMPLETED' || s === 'RIDER_COMPLETED') return true;
           return !ride.date || ride.date.getTime() >= now;
         });
       rides.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));

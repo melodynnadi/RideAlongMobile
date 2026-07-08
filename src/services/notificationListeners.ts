@@ -1,7 +1,5 @@
-import { collection, onSnapshot, query, where, getDocs, Unsubscribe, DocumentChange } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, Unsubscribe, DocumentChange } from 'firebase/firestore';
 import { firestore } from '@/constants/services';
-import { showToast, rideToasts } from '@/src/utils/showToast';
-import { shouldShowToastEvent, buildToastKey } from '@/src/utils/toastDeduper';
 import { showLocalNotification } from '@/services/messagingService';
 import { AppState } from 'react-native';
 import { chatBelongsToRole, roleUnreadField } from '@/src/utils/roleIdentity';
@@ -14,6 +12,7 @@ export function setupDriverNotificationListeners(driverId: string, driverEmail?:
   const unsubscribers: Unsubscribe[] = [];
   const processedDocs = new Set<string>(); // Track already-processed docs to avoid duplicate notifications
   const isFirstSnapshot = { requests: true, confirmed: true, offers: true }; // Track first snapshot for each listener
+  const lastKnownStatus = new Map<string, string>(); // Track previous status per confirmedRide doc
 
   // Listen for new ride posting requests (riders requesting driver's posted rides)
   try {
@@ -40,15 +39,7 @@ export function setupDriverNotificationListeners(driverId: string, driverEmail?:
           // New ride request received - Don't show toast here, push notification handles it
           console.log('📍 New ride request detected (push notification already sent)');
         } else if (change.type === 'modified' && processedDocs.has(docId)) {
-          const status = String(data?.status || '').toLowerCase();
-          if (status === 'accepted' || status === 'confirmed') {
-            const key = buildToastKey('ride_accepted', String(data?.rideRequestId || data?.id || docId), []);
-            if (shouldShowToastEvent(key)) {
-              rideToasts.rideAccepted();
-            }
-          } else if (status === 'rejected' || status === 'declined') {
-            showToast('info', 'Ride request declined');
-          }
+          // Status changes handled silently — push notifications cover these
         }
       });
     }, (error) => {
@@ -71,8 +62,10 @@ export function setupDriverNotificationListeners(driverId: string, driverEmail?:
       // Skip the initial snapshot to avoid showing toasts for existing documents
       if (isFirstSnapshot.confirmed) {
         isFirstSnapshot.confirmed = false;
-        // Mark all existing docs as processed
-        snapshot.docs.forEach(doc => processedDocs.add(`confirmed_${doc.id}`));
+        snapshot.docs.forEach(doc => {
+          processedDocs.add(`confirmed_${doc.id}`);
+          lastKnownStatus.set(doc.id, String(doc.data()?.status || '').toUpperCase());
+        });
         return;
       }
       
@@ -82,70 +75,12 @@ export function setupDriverNotificationListeners(driverId: string, driverEmail?:
         
         if (change.type === 'added' && !processedDocs.has(`confirmed_${docId}`)) {
           processedDocs.add(`confirmed_${docId}`);
-          // Only show toast if ride is fully CONFIRMED (all seats filled)
-          // For group rides with PENDING status, wait until all seats are filled
           const status = String(data?.status || '').toUpperCase();
-          if (status === 'CONFIRMED') {
-            const key = buildToastKey('ride_accepted', String(data?.rideRequestId || data?.id || docId), []);
-            if (shouldShowToastEvent(key)) {
-              rideToasts.rideConfirmed({
-                from: data?.pickup?.address || 'Pickup location',
-                to: data?.dropoff?.address || 'Dropoff location'
-              });
-            }
-          }
+          lastKnownStatus.set(docId, status);
         } else if (change.type === 'modified' && processedDocs.has(`confirmed_${docId}`)) {
           const status = String(data?.status || '').toUpperCase();
-          // Check if status changed from PENDING to CONFIRMED (group ride filled)
-          // Only show toast if driverPickupConfirmed is not set yet (prevents toast on pickup button press)
-          if (status === 'CONFIRMED' && !data?.driverPickupConfirmed) {
-            const key = buildToastKey('ride_confirmed_status_change', String(data?.rideRequestId || data?.id || docId), []);
-            if (shouldShowToastEvent(key)) {
-              rideToasts.rideConfirmed({
-                from: data?.pickup?.address || 'Pickup location',
-                to: data?.dropoff?.address || 'Dropoff location'
-              });
-            }
-          } else if (status === 'COMPLETED') {
-            // For group rides, only show "Ride completed" toast when ALL seats are completed
-            const postingId = data?.ridePostingId;
-            if (postingId) {
-              // This is a group ride - check if all seats are completed
-              const allSeatsQuery = query(
-                collection(firestore, 'confirmedRides'),
-                where('ridePostingId', '==', postingId)
-              );
-              getDocs(allSeatsQuery).then(seatsSnapshot => {
-                const allCompleted = seatsSnapshot.docs.every(doc => 
-                  String(doc.data()?.status || '').toUpperCase() === 'COMPLETED'
-                );
-                
-                if (allCompleted) {
-                  const key = buildToastKey('ride_completed', String(postingId), []);
-                  if (shouldShowToastEvent(key)) {
-                    rideToasts.rideCompleted();
-                  }
-                }
-              }).catch(err => {
-                console.warn('Error checking group ride completion:', err);
-              });
-            } else {
-              // Single ride - show toast immediately
-              const key = buildToastKey('ride_completed', String(data?.rideRequestId || data?.id || docId), []);
-              if (shouldShowToastEvent(key)) {
-                rideToasts.rideCompleted();
-              }
-            }
-          } else if (status === 'IN_PROGRESS') {
-            // Don't show "Ride in progress" toast if driver has already completed
-            // (status is IN_PROGRESS while waiting for rider to also confirm completion)
-            if (!data?.driverCompleteConfirmed) {
-              const key = buildToastKey('ride_started', String(data?.rideRequestId || data?.id || docId), []);
-              if (shouldShowToastEvent(key)) {
-                showToast('info', 'Ride in progress', 'Drive safely!');
-              }
-            }
-          }
+          lastKnownStatus.set(docId, status);
+          // All ride status toasts removed — push notifications handle user communication
         }
       });
     }, (error) => {
@@ -181,7 +116,7 @@ export function setupDriverNotificationListeners(driverId: string, driverEmail?:
         // (has ridePostingId). Don't show when driver makes offer on ride request (has rideRequestId only)
         if (change.type === 'added' && !processedDocs.has(`offer_${docId}`) && data?.ridePostingId) {
           processedDocs.add(`offer_${docId}`);
-          showToast('info', 'New Ride Offer', `${data?.riderName || 'A rider'} made an offer`);
+          // Toast removed — push notification handles new offer alerts
         }
       });
     }, (error) => {

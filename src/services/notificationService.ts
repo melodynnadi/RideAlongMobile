@@ -9,7 +9,7 @@ import * as Device from 'expo-device';
 import { Platform, AppState } from 'react-native';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import { showToast, showMessageToast, rideToasts } from '../utils/showToast';
+import { showToast, showMessageToast } from '../utils/showToast';
 import { buildToastKey, shouldShowToastEvent } from '../utils/toastDeduper';
 import { settingsService } from './settingsService';
 import { useAuthStore } from '@/stores/authStore';
@@ -316,51 +316,14 @@ class NotificationService {
       || (typeof notificationData.dropoff === 'string' ? notificationData.dropoff : undefined)
       || 'Dropoff location';
 
-    // Map notification types to appropriate toast types
-    switch (notificationData.type) {
-      case 'new_ride_request':
-        rideToasts.newRideRequest({
-          riderName: notificationData.riderName || 'A rider',
-          from,
-          to,
-        });
-        break;
-      case 'ride_accepted':
-        rideToasts.rideAccepted();
-        break;
-      case 'ride_started':
-        rideToasts.rideStarted(notificationData.riderName || 'Rider');
-        break;
-      case 'ride_completed':
-        rideToasts.rideCompleted();
-        break;
-      case 'ride_cancelled':
-        rideToasts.rideCancelled(notificationData.reason);
-        break;
-      case 'rider_cancelled':
-        rideToasts.riderCancelled(notificationData.riderName || 'Rider');
-        break;
-      case 'payment_received':
-        rideToasts.paymentReceived(notificationData.amount || '0.00');
-        break;
-      // Backend sends 'ride_status_change' with a status sub-field
-      case 'ride_status_change': {
-        const status = String(notificationData.status || '').toUpperCase();
-        if (status === 'IN_PROGRESS') rideToasts.rideStarted(notificationData.riderName || notificationData.userName || notificationData.passengerName || 'Rider');
-        else if (status === 'COMPLETED') rideToasts.rideCompleted();
-        else showToast('info', title || 'Ride update', body || undefined);
-        break;
-      }
-      case 'new_message':
-        showMessageToast({
-          senderName: notificationData.senderName || notificationData.riderName || notificationData.driverName || title || 'New message',
-          preview: body || undefined,
-          initials: notificationData.senderInitials || undefined,
-          online: true,
-        });
-        break;
-      default:
-        showToast('info', title || 'Notification', body || undefined);
+    // Only show in-app toast for messages — everything else is handled by the OS push notification
+    if (notificationData.type === 'new_message') {
+      showMessageToast({
+        senderName: notificationData.senderName || notificationData.riderName || notificationData.driverName || title || 'New message',
+        preview: body || undefined,
+        initials: notificationData.senderInitials || undefined,
+        online: true,
+      });
     }
   }
 

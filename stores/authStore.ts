@@ -489,6 +489,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
+    // Clear push token from Firestore before signing out so the logged-out
+    // device no longer receives push notifications.
+    try {
+      const uid = get().uid;
+      if (uid) {
+        const { doc, updateDoc } = await import('firebase/firestore');
+        const { firestore } = await import('@/constants/services');
+        await Promise.allSettled([
+          updateDoc(doc(firestore, 'drivers', uid), { pushToken: null }),
+          updateDoc(doc(firestore, 'riders', uid), { pushToken: null }),
+        ]);
+      }
+    } catch {}
+
     try {
       await firebaseSignOut(firebaseAuth);
     } catch {}

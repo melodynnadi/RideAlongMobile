@@ -2,7 +2,7 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { doc, updateDoc } from 'firebase/firestore';
-import { firestore, getApiBaseUrl } from '@/constants/services';
+import { firestore, getApiBaseUrl, firebaseAuth } from '@/constants/services';
 
 async function setupAndroidChannels() {
   if (Platform.OS !== 'android') return;
@@ -65,14 +65,19 @@ export async function registerRiderPushToken(userId: string) {
     const pushToken = await getExpoPushToken();
     if (!pushToken) return;
 
-    // Write as 'pushToken' (consistent field name the backend reads)
+    // Write to riders collection. Also write to drivers if this is a dual-role account
+    // so server-side getUserPushToken('rider') can find the token either way.
     try {
       await updateDoc(doc(firestore, 'riders', userId), { pushToken });
     } catch {}
+    try {
+      await updateDoc(doc(firestore, 'drivers', userId), { pushToken });
+    } catch {} // silently skip if no driver doc exists
 
+    const idToken = await firebaseAuth.currentUser?.getIdToken().catch(() => null);
     const response = await fetch(`${getApiBaseUrl()}/api/push/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}) },
       body: JSON.stringify({ userId, pushToken, role: 'rider' }),
     });
     if (!response.ok) console.warn('[registerRiderPushToken] Server rejected token');
@@ -86,14 +91,18 @@ export async function registerDriverPushToken(userId: string) {
     const pushToken = await getExpoPushToken();
     if (!pushToken) return;
 
-    // Also write directly to Firestore so token is available even if API call fails
+    // Write to drivers collection. Also write to riders if this is a dual-role account.
     try {
       await updateDoc(doc(firestore, 'drivers', userId), { pushToken });
     } catch {}
+    try {
+      await updateDoc(doc(firestore, 'riders', userId), { pushToken });
+    } catch {} // silently skip if no rider doc exists
 
+    const idToken = await firebaseAuth.currentUser?.getIdToken().catch(() => null);
     const response = await fetch(`${getApiBaseUrl()}/api/push/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}) },
       body: JSON.stringify({ userId, pushToken, role: 'driver' }),
     });
     if (!response.ok) console.warn('[registerDriverPushToken] Server rejected token');

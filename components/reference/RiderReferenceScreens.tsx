@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Platform, ScrollView, Share, StyleSheet, Text as RNText, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, ScrollView, Share, StyleSheet, Text as RNText, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,13 +27,14 @@ import { badgeLabel, useRiderUnreadCounts } from '@/hooks/useRiderUnreadCounts';
 import { riderCompleteRide } from '@/src/services/rideActions';
 import { hasUserRatedRide } from '@/src/services/ratings';
 import { useRideBrowseStore, type RiderRideFilter } from '@/stores/rideBrowseStore';
-import { FlagRideModal, FlaggedRideBanner } from '@/components/FlagRideModal';
+import { ReportIssueModal } from '@/components/ReportIssueModal';
 import { CityAutocomplete } from '@/components/CityAutocomplete';
 import { DatePickerModal, TimePickerModal, formatDateLabel } from '@/components/DateTimePickerModals';
 import { computeRiderSuggestedPrice, formatContributionRange, getRideType } from '@/src/utils/pricing';
 import { chatBelongsToRole, roleKey } from '@/src/utils/roleIdentity';
 import { getOrCreateRideChat } from '@/src/services/chatAvailability';
 import { createRoleNotification } from '@/src/services/notificationRecords';
+import { useTripShare } from '@/src/services/tripShare';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { lightColors, type AppColors } from '@/constants/theme';
 
@@ -74,7 +75,7 @@ async function getCurrentLocationAddressAsync(): Promise<string | null> {
   }
 }
 
-type TabKey = 'home' | 'find' | 'rides' | 'inbox' | 'you';
+type TabKey = 'home' | 'find' | 'rides' | 'inbox' | 'profile' | 'you';
 type RNTextProps = React.ComponentProps<typeof RNText>;
 type Coords = { lat: number; lng: number };
 
@@ -145,6 +146,11 @@ function PhoneScreen({
 
   return (
     <StylesCtx.Provider value={styles}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+    >
     <View style={styles.root}>
       <StatusBar style={colors.statusBar === 'light-content' ? 'light' : 'dark'} />
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -206,6 +212,7 @@ function PhoneScreen({
         {activeTab ? <BottomNav active={activeTab} /> : null}
       </SafeAreaView>
     </View>
+    </KeyboardAvoidingView>
     </StylesCtx.Provider>
   );
 }
@@ -219,6 +226,7 @@ function BottomNav({ active }: { active: TabKey }) {
     { key: 'find', label: 'Request', icon: 'add-circle-outline', href: '/(rider)/book' },
     { key: 'rides', label: 'Rides', icon: 'ticket-outline', href: '/(rider)/available-rides' },
     { key: 'inbox', label: 'Inbox', icon: 'chatbubble', href: '/(rider)/messages' },
+    { key: 'profile', label: 'Profile', icon: 'person', href: '/(rider)/profile' },
   ];
 
   return (
@@ -477,6 +485,8 @@ export function RiderHomeReference() {
   const [requestsWithOffers, setRequestsWithOffers] = useState<Map<string, { offerId: string; driverId?: string; offerPrice?: number; offerCount: number }>>(new Map());
   const [confirmedRideStatus, setConfirmedRideStatus] = useState<string | null>(null);
   const [confirmedRideId, setConfirmedRideId] = useState<string | null>(null);
+  const [driverEnRoute, setDriverEnRoute] = useState(false);
+  const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const [completedRideSourceKeys, setCompletedRideSourceKeys] = useState<Set<string>>(new Set());
   const ratingNavRef = useRef<Set<string>>(new Set());
   const [from, setFrom] = useState('');
@@ -638,8 +648,10 @@ export function RiderHomeReference() {
   }, [from]);
 
   const nextRide = useMemo(() => {
-    const inProgress = confirmed.find((r) => String(r.status || '').toUpperCase() === 'IN_PROGRESS');
-    if (inProgress) return inProgress;
+    // Prioritise any ride that's actively in progress (needs rider action)
+    const activeStatuses = new Set(['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED']);
+    const active = confirmed.find((r) => activeStatuses.has(String(r.status || '').toUpperCase()));
+    if (active) return active;
     return confirmed.find((ride) => !ride.date || ride.date.getTime() >= Date.now()) || null;
   }, [confirmed]);
   const nextRequest = activeRequests[0] || null;
@@ -685,6 +697,10 @@ export function RiderHomeReference() {
       const status = String(rideData.status || '').toUpperCase();
       setConfirmedRideId(docId);
       setConfirmedRideStatus(status);
+      // Clear en-route once ride is in progress or beyond
+      const stillEnRoute = !!rideData.driverEnRoute && status === 'CONFIRMED';
+      setDriverEnRoute(stillEnRoute);
+      setVerificationCode(rideData.verificationCode || null);
       if (status === 'COMPLETED' && !ratingNavRef.current.has(docId)) {
         ratingNavRef.current.add(docId);
         const alreadyRated = !!rideData.riderRated || await hasUserRatedRide(docId, uid);
@@ -725,10 +741,13 @@ export function RiderHomeReference() {
       return () => { unsub1(); unsub2(); };
     }
 
-    // Classic ride request
-    const q = query(collection(firestore, 'confirmedRides'), where('rideRequestId', '==', _requestId));
+    // Classic ride request — query by riderId (allowed by rules), filter client-side for matching rideRequestId
+    const q = query(collection(firestore, 'confirmedRides'), where('riderId', '==', uid));
     return onSnapshot(q, async (snap) => {
-      const d = snap.docs[0] ?? null;
+      const d = snap.docs.find((doc) => {
+        const data = doc.data();
+        return data.rideRequestId === _requestId || data.rideId === _requestId;
+      }) ?? snap.docs[0] ?? null;
       if (d) {
         applySnap(d.id, d.data());
       } else {
@@ -780,13 +799,58 @@ export function RiderHomeReference() {
         </View>
         {(nextRide || nextRequest) && confirmedRideStatus !== 'COMPLETED' ? (
           <View style={styles.homePrimaryBlock}>
-            {nextRide ? <LiveRideCard ride={nextRide} /> : <RiderActivityCard request={nextRequest} offerInfo={nextRequestOfferInfo} confirmedRideStatus={confirmedRideStatus} confirmedRideId={confirmedRideId} />}
+            {nextRide ? <LiveRideCard ride={nextRide} /> : <RiderActivityCard request={nextRequest} offerInfo={nextRequestOfferInfo} confirmedRideStatus={confirmedRideStatus} confirmedRideId={confirmedRideId} driverEnRoute={driverEnRoute} verificationCode={verificationCode} />}
           </View>
         ) : (
           <View style={styles.homePrimarySearchBlock}>
             <RouteCard cta from={from} to={to} onChangeFrom={setFrom} onChangeTo={setTo} onSearch={search} />
           </View>
         )}
+
+        {/* Also upcoming — additional rides/requests beyond the hero */}
+        {(() => {
+          const now = Date.now();
+          // Additional confirmed rides (excluding the one shown as hero)
+          const additionalRides = confirmed.filter((r) => {
+            if (nextRide && r.id === nextRide.id) return false;
+            const s = String(r.status || '').toUpperCase();
+            if (['COMPLETED', 'CANCELLED', 'CANCELED', 'EXPIRED'].includes(s)) return false;
+            return !r.date || r.date.getTime() >= now - 2 * 60 * 60 * 1000;
+          });
+          // Additional requests (excluding the one shown as hero)
+          const additionalRequests = activeRequests.slice(1);
+          const hasMore = additionalRides.length > 0 || additionalRequests.length > 0;
+          if (!hasMore) return null;
+          return (
+            <View style={{ marginTop: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <Text style={{ color: colors.textPrimary, fontSize: 17, fontWeight: '700' }}>Also upcoming</Text>
+              </View>
+              {additionalRides.map((ride) => (
+                <View key={ride.id} style={{ marginBottom: 10 }}>
+                  <LiveRideCard ride={ride} />
+                </View>
+              ))}
+              {additionalRequests.map((req) => {
+                const offer = requestsWithOffers.get(req.id);
+                const offerInfo = offer ? { offerId: offer.offerId, driverId: offer.driverId, offerPrice: offer.offerPrice, offerCount: offer.offerCount } : null;
+                return (
+                  <View key={req.id} style={{ marginBottom: 10 }}>
+                    <RiderActivityCard
+                      request={req}
+                      offerInfo={offerInfo}
+                      confirmedRideStatus={null}
+                      confirmedRideId={null}
+                      driverEnRoute={false}
+                      verificationCode={null}
+                    />
+                  </View>
+                );
+              })}
+            </View>
+          );
+        })()}
+
         {promotionsLoading && promotions.length === 0 ? (
           <View style={styles.promotionLoading}><ActivityIndicator color={colors.primary} /></View>
         ) : promotions.length > 0 ? (
@@ -859,7 +923,12 @@ function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
   const [vehicleText, setVehicleText] = useState(ride.vehicle);
   const [driverPhotoURL, setDriverPhotoURL] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
-  const [flagVisible, setFlagVisible] = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
+  const { shareTrip, sharing } = useTripShare(
+    isInProgress ? ride.id : null,
+    isInProgress,
+    { pickup: ride.from, dropoff: ride.to },
+  );
 
   useEffect(() => {
     setDriverName(ride.driverName);
@@ -878,14 +947,14 @@ function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
       const vi = d.vehicleInfo || {};
       const vehicle = [vi.year, vi.color, vi.make, vi.model].filter(Boolean).join(' ');
       if (vehicle) setVehicleText(vehicle);
-      const photo = d.photoURL || d.avatarUrl || d.profilePicture || null;
+      const photo = d.avatarUrl || d.avatarUrl1 || d.photoURL || d.profilePicture || null;
       setDriverPhotoURL(photo);
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [ride.id]);
 
   const openDetails = () => router.push({ pathname: '/(rider)/ride/[id]', params: { id: ride.id, returnTo: '/(rider)' } } as any);
-  const openTrip = () => router.push(`/(rider)/trip/${ride.id}` as any);
+  const openTrip = () => {}; // trip-in-progress page removed for riders
 
   return (
     <View style={styles.rideCard}>
@@ -898,9 +967,6 @@ function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           {totalSeats > 1 && <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '700' }}>{seatsTaken}/{totalSeats} seats</Text>}
           {ride.price > 0 && <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '800' }}>${ride.price.toFixed(2)}</Text>}
-          <TouchableOpacity onPress={() => setFlagVisible(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="flag-outline" size={18} color={colors.red} />
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -951,17 +1017,25 @@ function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
                 ? <ActivityIndicator size="small" color={colors.textInverse} />
                 : <Text style={styles.actionBtnPrimaryText}>Confirm Arrival</Text>}
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtnSecondary, { flex: 1 }]} onPress={openTrip} activeOpacity={0.75}>
-              <Text style={styles.actionBtnSecondaryText}>View Map</Text>
-            </TouchableOpacity>
           </>
         ) : isInProgress ? (
           <>
-            <TouchableOpacity style={styles.actionBtnSecondary} onPress={openTrip} activeOpacity={0.75}>
-              <Text style={styles.actionBtnSecondaryText}>Live View</Text>
+            <TouchableOpacity
+              style={[styles.actionBtnSecondary, { flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center' }]}
+              onPress={shareTrip}
+              disabled={sharing}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="share-outline" size={16} color={colors.textPrimary} />
+              <Text style={styles.actionBtnSecondaryText}>Share Trip</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtnSecondary, { flex: 1 }]} onPress={openDetails} activeOpacity={0.75}>
-              <Text style={styles.actionBtnSecondaryText}>View Details</Text>
+            <TouchableOpacity
+              style={[styles.actionBtnSecondary, { flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center' }]}
+              onPress={() => setReportVisible(true)}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="alert-circle-outline" size={16} color={colors.textPrimary} />
+              <Text style={styles.actionBtnSecondaryText}>Report</Text>
             </TouchableOpacity>
           </>
         ) : (
@@ -971,12 +1045,11 @@ function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
         )}
       </View>
 
-      <FlagRideModal
-        visible={flagVisible}
-        onClose={() => setFlagVisible(false)}
-        rideId={ride.id}
-        role="rider"
-        onFlagged={() => setFlagVisible(false)}
+      <ReportIssueModal
+        visible={reportVisible}
+        onClose={() => setReportVisible(false)}
+        confirmedRideId={ride.id}
+        reportedDuringRide={true}
       />
     </View>
   );
@@ -1017,7 +1090,7 @@ async function openRiderRatingIfNeeded(confirmedRideId: string) {
   }
 }
 
-function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedRideId }: { request: any; offerInfo?: { offerId: string; driverId?: string; offerPrice?: number; offerCount?: number } | null; confirmedRideStatus?: string | null; confirmedRideId?: string | null }) {
+function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedRideId, driverEnRoute, verificationCode }: { request: any; offerInfo?: { offerId: string; driverId?: string; offerPrice?: number; offerCount?: number } | null; confirmedRideStatus?: string | null; confirmedRideId?: string | null; driverEnRoute?: boolean; verificationCode?: string | null }) {
   const styles = useRiderStyles();
   const { colors } = useAppTheme();
   const pickup = request.pickupAddress || request.pickup || request.from || 'Pickup pending';
@@ -1026,14 +1099,29 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
   const reqStatus       = normalizeStatus(request.status ?? request.state);
   const isConfirmed     = reqStatus === 'ACCEPTED' || reqStatus === 'CONFIRMED';
   const confirmedNorm   = normalizeStatus(confirmedRideStatus);
-  const isFlagged       = confirmedNorm === 'FLAGGED' || normalizeStatus(request.status) === 'FLAGGED';
   const isInProgress    = ['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED'].includes(confirmedNorm);
   const isDriverCompleted = confirmedNorm === 'DRIVER_COMPLETED';
   const hasOffer = !isConfirmed && !!offerInfo;
   const [acting, setActing] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [flagVisible, setFlagVisible] = useState(false);
   const [offerPaymentVisible, setOfferPaymentVisible] = useState(false);
+  const [localCode, setLocalCode] = useState<string | null>(verificationCode ?? null);
+  const [reportVisible, setReportVisible] = useState(false);
+  const { shareTrip, sharing } = useTripShare(
+    confirmedRideId ?? null,
+    isInProgress,
+    { pickup: request.pickupAddress || request.pickup, dropoff: request.dropoffAddress || request.dropoff },
+  );
+
+  // Fetch code directly if not provided via prop (listener may not have fired yet)
+  useEffect(() => {
+    if (verificationCode) { setLocalCode(verificationCode); return; }
+    if (!confirmedRideId || !isConfirmed) return;
+    getDoc(doc(firestore, 'confirmedRides', confirmedRideId)).then((snap) => {
+      const code = snap.exists() ? snap.data()?.verificationCode : null;
+      if (code) setLocalCode(code);
+    }).catch(() => {});
+  }, [confirmedRideId, verificationCode, isConfirmed]);
   const [driverName, setDriverName] = useState<string>('');
   const [vehicleText, setVehicleText] = useState<string>('');
   const [driverPhotoURL, setDriverPhotoURL] = useState<string | null>(null);
@@ -1053,7 +1141,7 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
       const vi = d.vehicleInfo || {};
       const vehicle = [vi.year, vi.color, vi.make, vi.model].filter(Boolean).join(' ');
       if (vehicle) setVehicleText(vehicle);
-      const photo = d.photoURL || d.avatarUrl || d.avatarUrl1 || d.profilePicture || null;
+      const photo = d.avatarUrl || d.avatarUrl1 || d.photoURL || d.profilePicture || null;
       setDriverPhotoURL(photo);
       if (typeof d.rating === 'number') setDriverRating(d.rating);
     }).catch(() => {});
@@ -1180,9 +1268,10 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
     ]);
   };
 
-  const statusColor = isDriverCompleted ? colors.primary : isInProgress ? colors.primary : isConfirmed ? colors.green : hasOffer ? colors.primary : colors.textSecondary;
-  const statusBg    = isDriverCompleted ? colors.primaryDim : isInProgress ? colors.primaryDim : isConfirmed ? colors.greenDim : hasOffer ? colors.primaryDim : colors.bgSecondary;
-  const statusLabel = isDriverCompleted ? 'CONFIRM ARRIVAL' : isInProgress ? 'IN PROGRESS' : isConfirmed ? 'CONFIRMED' : hasOffer ? 'OFFER RECEIVED' : 'PENDING';
+  const isEnRoute   = !!driverEnRoute && isConfirmed && !isInProgress && !isDriverCompleted;
+  const statusColor = isDriverCompleted ? colors.primary : isInProgress ? colors.primary : isEnRoute ? colors.primary : isConfirmed ? colors.green : hasOffer ? colors.primary : colors.textSecondary;
+  const statusBg    = isDriverCompleted ? colors.primaryDim : isInProgress ? colors.primaryDim : isEnRoute ? colors.primaryDim : isConfirmed ? colors.greenDim : hasOffer ? colors.primaryDim : colors.bgSecondary;
+  const statusLabel = isDriverCompleted ? 'CONFIRM ARRIVAL' : isInProgress ? 'IN PROGRESS' : isEnRoute ? '🚗 DRIVER EN ROUTE' : isConfirmed ? 'CONFIRMED' : hasOffer ? 'OFFER RECEIVED' : 'PENDING';
   const showDriverInfo = (isConfirmed || isInProgress || isDriverCompleted) && !!driverName;
 
   return (
@@ -1195,9 +1284,6 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           {price > 0 && <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '800' }}>${price.toFixed(0)}</Text>}
-          <TouchableOpacity onPress={() => setFlagVisible(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="flag-outline" size={18} color={colors.red} />
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -1219,23 +1305,46 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
         </View>
       </TouchableOpacity>
 
-      {/* Driver info (when confirmed/in-progress) */}
+      {/* Verification code — shown to rider when ride is CONFIRMED, before pickup */}
+      {isConfirmed && !isInProgress && !isDriverCompleted && localCode && (
+        <View style={{ marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border, alignItems: 'center' }}>
+          <Text style={{ fontSize: 11, fontWeight: '800', color: colors.textSecondary, letterSpacing: 1.2, marginBottom: 8, textTransform: 'uppercase' }}>Your verification code</Text>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            {localCode.split('').map((digit, i) => (
+              <View key={i} style={{ width: 52, height: 64, borderRadius: 14, backgroundColor: colors.primaryDim, borderWidth: 2, borderColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ color: colors.primary, fontSize: 32, fontWeight: '800' }}>{digit}</Text>
+              </View>
+            ))}
+          </View>
+          <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 10, textAlign: 'center' }}>
+            Give this code to your driver when they arrive
+          </Text>
+        </View>
+      )}
+
+      {/* Driver info (when confirmed/in-progress) — tappable → driver profile */}
       {showDriverInfo && (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
+        <TouchableOpacity
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border }}
+          onPress={() => driverId && router.push({ pathname: '/(rider)/driver/[driverId]', params: { driverId, returnTo: '/(rider)' } } as any)}
+          activeOpacity={driverId ? 0.7 : 1}
+        >
           <View style={[styles.avatar, { overflow: 'hidden' }]}>
             {driverPhotoURL
               ? <Image source={{ uri: driverPhotoURL }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
               : <Text style={styles.avatarText}>{driverName.split(/\s+/).map((p) => p[0]).join('').slice(0, 2)}</Text>}
           </View>
-          <Text style={styles.driverSmall}>
-            {driverName}{'\n'}{driverRating ? `★ ${driverRating.toFixed(2)} · ` : ''}{vehicleText}
-          </Text>
-        </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.driverSmall}>{driverName}</Text>
+            {(driverRating || vehicleText) ? (
+              <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                {driverRating ? `★ ${driverRating.toFixed(2)}` : ''}{driverRating && vehicleText ? ' · ' : ''}{vehicleText}
+              </Text>
+            ) : null}
+          </View>
+          {driverId && <Ionicons name="chevron-forward" size={14} color={colors.textSecondary} />}
+        </TouchableOpacity>
       )}
-      {isFlagged && confirmedRideId && (
-        <FlaggedRideBanner rideId={confirmedRideId} role="rider" colors={colors} />
-      )}
-
       {/* Actions */}
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
         {isDriverCompleted ? (
@@ -1256,25 +1365,25 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
                 ? <ActivityIndicator size="small" color={colors.textInverse} />
                 : <Text style={styles.actionBtnPrimaryText}>Confirm Arrival</Text>}
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionBtnSecondary, { flex: 1 }]}
-              onPress={() => confirmedRideId && router.push(`/(rider)/trip/${confirmedRideId}` as any)}
-              activeOpacity={0.75}
-            >
-              <Text style={styles.actionBtnSecondaryText}>View Map</Text>
-            </TouchableOpacity>
           </>
         ) : isInProgress ? (
           <>
-            <TouchableOpacity style={styles.actionBtnSecondary} onPress={openChat} activeOpacity={0.75}>
-              <Text style={styles.actionBtnSecondaryText}>Message Driver</Text>
-            </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.actionBtnSecondary, { flex: 1 }]}
-              onPress={() => confirmedRideId && router.push(`/(rider)/trip/${confirmedRideId}` as any)}
+              style={[styles.actionBtnSecondary, { flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center' }]}
+              onPress={shareTrip}
+              disabled={sharing}
               activeOpacity={0.75}
             >
-              <Text style={styles.actionBtnSecondaryText}>Live View</Text>
+              <Ionicons name="share-outline" size={16} color={colors.textPrimary} />
+              <Text style={styles.actionBtnSecondaryText}>Share Trip</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionBtnSecondary, { flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center' }]}
+              onPress={() => setReportVisible(true)}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="alert-circle-outline" size={16} color={colors.textPrimary} />
+              <Text style={styles.actionBtnSecondaryText}>Report</Text>
             </TouchableOpacity>
           </>
         ) : isConfirmed ? (
@@ -1289,6 +1398,47 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
             >
               <Text style={styles.actionBtnSecondaryText}>View Details</Text>
             </TouchableOpacity>
+            {/* Driver no-show — visible 30 min after scheduled departure */}
+            {(() => {
+              const rideDate = request.date || '';
+              const rideTime = request.time || '';
+              if (!rideDate || !rideTime) return null;
+              const [h = 0, m = 0] = rideTime.split(':').map(Number);
+              const scheduled = new Date(`${rideDate}T00:00:00`);
+              scheduled.setHours(h, m, 0, 0);
+              const gracePassed = Date.now() > scheduled.getTime() + 30 * 60 * 1000;
+              if (!gracePassed || !confirmedRideId) return null;
+              return (
+                <TouchableOpacity
+                  style={[styles.actionBtnSecondary, { flex: 1, borderColor: colors.red }]}
+                  onPress={() => Alert.alert(
+                    'Driver no-show?',
+                    'Report that your driver did not show up after 30 minutes. You will receive a full refund.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Report no-show', style: 'destructive', onPress: async () => {
+                        try {
+                          const { getApiBaseUrl } = await import('@/constants/services');
+                          const token = await firebaseAuth.currentUser?.getIdToken();
+                          const res = await fetch(`${getApiBaseUrl()}/api/rides/${confirmedRideId}/driver-no-show`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                          });
+                          const json = await res.json();
+                          if (!res.ok) throw new Error(json?.error || 'Failed');
+                          Alert.alert('Reported', 'No-show reported. A full refund will be issued to your account.');
+                        } catch (e: any) {
+                          Alert.alert('Error', e?.message || 'Could not report no-show. Please try again.');
+                        }
+                      }},
+                    ]
+                  )}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.actionBtnSecondaryText, { color: colors.red }]}>Didn't show?</Text>
+                </TouchableOpacity>
+              );
+            })()}
           </>
         ) : hasOffer ? (
           <>
@@ -1331,13 +1481,14 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
         )}
       </View>
 
-      <FlagRideModal
-        visible={flagVisible}
-        rideId={confirmedRideId || request.id || null}
-        role="rider"
-        onClose={() => setFlagVisible(false)}
-        onFlagged={() => setFlagVisible(false)}
-      />
+      {confirmedRideId && (
+        <ReportIssueModal
+          visible={reportVisible}
+          onClose={() => setReportVisible(false)}
+          confirmedRideId={confirmedRideId}
+          reportedDuringRide={isInProgress}
+        />
+      )}
 
       {/* Payment authorization for offer acceptance — must be authorized before confirming with driver */}
       <PaymentModal
@@ -1840,7 +1991,7 @@ export function RiderRequestReference() {
         updatedAt: serverTimestamp(),
       });
       Alert.alert('Request posted', 'Drivers can now send you offers.');
-      router.replace('/(rider)/requests' as any);
+      router.navigate('/(rider)/requests' as any);
     } catch (error: any) {
       // Payment was authorized but doc creation failed — void the hold.
       try {
@@ -2158,9 +2309,14 @@ export function RiderAvailableReference() {
         ))}
       </ScrollView>
 
-      {loading ? <ActivityIndicator color={colors.primary} size="large" /> : null}
+      {loading ? (
+        <View style={{ minHeight: 300, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+          <ActivityIndicator color={colors.primary} size="large" />
+          <Text style={{ color: colors.textSecondary, fontSize: 14 }}>Loading rides…</Text>
+        </View>
+      ) : null}
 
-      {filteredRides.map((ride) => {
+      {!loading && filteredRides.map((ride) => {
         const isBooked = myRequestedPostingIds.has(ride.id);
         const initials = ride.driverName.split(/\s+/).map((p) => p[0]).join('').slice(0, 2);
         const meta = [
@@ -2321,7 +2477,7 @@ export function RiderDetailReference() {
   const { id, returnTo } = useLocalSearchParams<{ id?: string; returnTo?: string | string[] }>();
   const rideId = Array.isArray(id) ? id[0] : id;
   const returnTarget = Array.isArray(returnTo) ? returnTo[0] : returnTo;
-  const goBackFromDetails = () => router.replace((returnTarget || '/(rider)/available-rides') as any);
+  const goBackFromDetails = () => router.navigate((returnTarget || '/(rider)/available-rides') as any);
   const [ride, setRide] = useState<MobileRidePosting | null>(null);
   const [confirmedRequest, setConfirmedRequest] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -2728,11 +2884,31 @@ export function RiderDetailReference() {
         return;
       }
       const isConfirmed = rideStatus === 'CONFIRMED';
+
+      // Calculate whether the 48-hour free cancellation window applies
+      let cancelMessage = 'Your request will be cancelled and any payment hold fully released.';
+      if (isConfirmed) {
+        const rideDate = ride?.raw?.date || ride?.raw?.scheduledDate || '';
+        const rideTime = ride?.raw?.time || ride?.raw?.departureTime || '';
+        let hoursUntilRide: number | null = null;
+        if (rideDate) {
+          const [h = 0, m = 0] = (rideTime || '').split(':').map(Number);
+          const rideTs = new Date(`${rideDate}T00:00:00`);
+          rideTs.setHours(h, m, 0, 0);
+          hoursUntilRide = (rideTs.getTime() - Date.now()) / (60 * 60 * 1000);
+        }
+        if (hoursUntilRide !== null && hoursUntilRide >= 48) {
+          cancelMessage = `Free cancellation — your ride is ${Math.floor(hoursUntilRide)} hours away. You will receive a full refund.`;
+        } else if (hoursUntilRide !== null && hoursUntilRide < 2) {
+          cancelMessage = `Late cancellation — your ride is in less than 2 hours. The full ride amount will be charged since the driver can no longer find a replacement.`;
+        } else {
+          cancelMessage = 'Cancelling within 48 hours of your ride incurs a 50% cancellation fee. The remaining balance will be released to your card within 3–5 business days.';
+        }
+      }
+
       Alert.alert(
         'Cancel ride?',
-        isConfirmed
-          ? 'Cancelling a confirmed ride incurs a 50% cancellation fee. The remaining balance will be released to your card within 3–5 business days.'
-          : 'Your request will be cancelled and any payment hold fully released.',
+        cancelMessage,
         [
           { text: 'Keep ride', style: 'cancel' },
           {
@@ -2803,6 +2979,23 @@ export function RiderDetailReference() {
               <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: currentStatus.color }} />
               <Text style={{ color: currentStatus.color, fontSize: 12, fontWeight: '800', letterSpacing: 0.5 }}>{currentStatus.label}</Text>
             </View>
+
+            {/* Verification code — shown when ride is CONFIRMED, before pickup */}
+            {rideStatus === 'CONFIRMED' && confirmedRequest.confirmed?.verificationCode && (
+              <View style={{ backgroundColor: colors.primaryDim, borderRadius: 18, borderWidth: 1.5, borderColor: colors.primary, padding: 20, marginBottom: 16, alignItems: 'center' }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: colors.primary, letterSpacing: 1.2, marginBottom: 12, textTransform: 'uppercase' }}>Your verification code</Text>
+                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+                  {String(confirmedRequest.confirmed.verificationCode).split('').map((digit: string, i: number) => (
+                    <View key={i} style={{ width: 56, height: 68, borderRadius: 14, backgroundColor: colors.bg, borderWidth: 2, borderColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ color: colors.primary, fontSize: 34, fontWeight: '800' }}>{digit}</Text>
+                    </View>
+                  ))}
+                </View>
+                <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center' }}>
+                  Give this code to your driver when they arrive to pick you up
+                </Text>
+              </View>
+            )}
 
             {/* Driver / request card */}
             <View style={{ backgroundColor: colors.bgCard, borderRadius: 18, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 16 }}>

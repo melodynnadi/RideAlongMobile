@@ -20,6 +20,7 @@ import { firebaseAuth, firestore } from '@/constants/services';
 import { settingsService } from '@/src/services/settingsService';
 import { notificationService } from '@/src/services/notificationService';
 import { useVerificationStore } from '@/stores/verificationStore';
+import { useAuthStore } from '@/stores/authStore';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { AppColors } from '@/constants/theme';
 
@@ -45,10 +46,8 @@ export default function SettingsScreen() {
         const data = snap.data() as any;
 
         const savedPush = data?.settings?.pushNotificationsEnabled ?? data?.pushNotificationsEnabled;
-        const savedDarkMode = data?.settings?.darkModeEnabled ?? data?.darkModeEnabled;
 
         if (typeof savedPush === 'boolean') setPushEnabled(savedPush);
-        if (typeof savedDarkMode === 'boolean') setDark(savedDarkMode);
       } catch {}
     };
 
@@ -94,9 +93,12 @@ export default function SettingsScreen() {
     }
   };
 
+  const { driverProfile } = useAuthStore();
+  const university = driverProfile?.university || driverProfile?.personalInfo?.university || null;
   const isVerifiedFinal = isVerified || verificationStatus === 'approved' || verificationStatus === 'auto-approved';
   const isPending = verificationStatus === 'pending' || verificationStatus === 'manual-review';
-  const verLabel = isVerifiedFinal ? 'UT Austin - approved' : isPending ? 'Pending review' : 'Not verified';
+  const verStatusLabel = isVerifiedFinal ? 'Approved' : isPending ? 'Pending review' : 'Not verified';
+  const verLabel = university ? `${university} · ${verStatusLabel}` : verStatusLabel;
 
   const openLink = async (url: string) => {
     try {
@@ -200,7 +202,7 @@ export default function SettingsScreen() {
               icon="help-buoy-outline"
               label="Help Center"
               sub="FAQs & how-to guides"
-              onPress={() => openLink('https://ridealongapp.com/pages/help')}
+              onPress={() => WebBrowser.openBrowserAsync('https://ridealongapp.com/pages/help')}
             />
             <NavRow
               colors={colors}

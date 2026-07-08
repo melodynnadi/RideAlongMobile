@@ -20,8 +20,6 @@ import {
 } from 'firebase/firestore';
 import { firebaseAuth, firestore } from '@/constants/services';
 import { computeFilteredAverageRating } from '@/src/services/ratings';
-import FlagRideModal from '@/components/FlagRideModal';
-import { submitDriverFlag } from '@/src/services/flagService';
 
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 import { useAppTheme } from '@/hooks/ThemeContext';
@@ -51,9 +49,6 @@ export default function RideHistoryScreen() {
   const [totalRides, setTotalRides] = useState(0);
   const [loading, setLoading]   = useState(true);
   const [avgRating, setAvgRating] = useState<number | null>(null);
-  const [flagModalVisible, setFlagModalVisible] = useState(false);
-  const [selectedRideId, setSelectedRideId]     = useState<string | null>(null);
-
   const s = useMemo(() => StyleSheet.create({
     root:    { flex: 1, backgroundColor: colors.bg },
     safe:    { flex: 1 },
@@ -108,7 +103,6 @@ export default function RideHistoryScreen() {
     riderMeta: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
     rating: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     ratingText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
-    flagBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.redDim },
 
     loadingWrap: { alignItems: 'center', paddingTop: 60 },
     emptyCard:   { borderRadius: 20, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border, backgroundColor: colors.bgCard, padding: 32, alignItems: 'center', marginTop: 4 },
@@ -116,23 +110,6 @@ export default function RideHistoryScreen() {
     emptyTitle:  { color: colors.textPrimary, fontSize: 18, fontWeight: '700', marginBottom: 6 },
     emptyText:   { color: colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19 },
   }), [colors]);
-
-  const handleFlagPress  = (rideId: string) => { setSelectedRideId(rideId); setFlagModalVisible(true); };
-  const handleFlagSubmit = async (data: { reason: string; details?: string }) => {
-    if (!selectedRideId) return false;
-    try {
-      const user = firebaseAuth.currentUser;
-      if (!user) { Alert.alert('Authentication required', 'Please sign in to flag a ride.'); return false; }
-      await submitDriverFlag(selectedRideId, {
-        reason: data.reason, details: data.details || '', flaggedByRole: 'driver', flaggedById: user.uid,
-      });
-      Alert.alert('Success', 'Ride flagged successfully. An admin will review your report.');
-      return true;
-    } catch {
-      Alert.alert('Error', 'Failed to flag ride. Please try again.');
-      return false;
-    }
-  };
 
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(firebaseAuth, (user) => {
@@ -354,7 +331,6 @@ export default function RideHistoryScreen() {
             <Text style={s.riderMeta}>{item.seatCount && item.seatCount > 1 ? `${item.seatCount} riders` : '1 rider'}</Text>
           </View>
           {stars > 0 ? <View style={s.rating}><Ionicons name="star" size={14} color={colors.amber} /><Text style={s.ratingText}>{item.rating?.toFixed(1)}</Text></View> : null}
-          {!isFlagged ? <TouchableOpacity style={s.flagBtn} onPress={() => handleFlagPress(item.id)} accessibilityLabel="Report ride"><Ionicons name="flag-outline" size={17} color={colors.red} /></TouchableOpacity> : null}
         </View>
       </View>
     );
@@ -409,11 +385,6 @@ export default function RideHistoryScreen() {
           }
         />
 
-        <FlagRideModal
-          visible={flagModalVisible}
-          onClose={() => { setFlagModalVisible(false); setSelectedRideId(null); }}
-          onSubmit={handleFlagSubmit}
-        />
       </SafeAreaView>
     </View>
   );

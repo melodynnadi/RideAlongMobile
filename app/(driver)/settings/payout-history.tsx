@@ -139,19 +139,21 @@ export default function PayoutHistoryScreen() {
     return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
   };
 
+  // Resolve whichever date field the API version provides
+  const payoutDate = (p: Payout) => (p as any).date ?? (p as any).arrivalDate ?? (p as any).created ?? null;
+
   const lifetimeEarned = payouts.reduce((sum, p) => sum + (p.amount || 0), 0);
   const totalRides     = payouts.length;
   const avgPerRide     = totalRides > 0 ? lifetimeEarned / totalRides : 0;
 
-  const firstPayoutDate = payouts.length > 0 ? parseDate(payouts[payouts.length - 1]?.date) : null;
+  const firstPayoutDate = payouts.length > 0 ? parseDate(payoutDate(payouts[payouts.length - 1])) : null;
   const sinceLabel      = firstPayoutDate
     ? firstPayoutDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
     : null;
 
-  // Group payouts by month
   const grouped: { month: string; items: Payout[] }[] = [];
   payouts.forEach((p) => {
-    const monthKey = getMonthKey(p.date);
+    const monthKey = getMonthKey(payoutDate(p));
     const existing = grouped.find((g) => g.month === monthKey);
     if (existing) existing.items.push(p);
     else grouped.push({ month: monthKey, items: [p] });
@@ -207,10 +209,12 @@ export default function PayoutHistoryScreen() {
                 <Text style={s.monthLabel}>{month}</Text>
                 <View style={s.monthCard}>
                   {items.map((payout, idx) => {
-                    const pending  = isPending(payout.status);
-                    const dateStr  = formatDateShort(payout.date);
+                    const pending   = isPending(payout.status);
+                    const dateStr   = formatDateShort(payoutDate(payout));
                     const amountStr = `$${payout.amount.toFixed(2)}`;
-                    const isLast   = idx === items.length - 1;
+                    const isLast    = idx === items.length - 1;
+                    const methodLabel = payout.method === 'instant' ? 'Instant payout' : payout.method === 'standard' ? 'Standard payout' : 'Payout';
+                    const bankSub = payout.bankLast4 ? `Bank ···· ${payout.bankLast4}` : null;
                     return (
                       <View key={payout.id} style={[s.payRow, !isLast && s.payRowBorder]}>
                         <View style={[s.payIcon, pending ? s.payIconPending : s.payIconDone]}>
@@ -221,10 +225,8 @@ export default function PayoutHistoryScreen() {
                           />
                         </View>
                         <View style={s.payInfo}>
-                          <Text style={s.payDate}>{dateStr}</Text>
-                          {payout.bankLast4 ? (
-                            <Text style={s.payBank}>Chase ●● {payout.bankLast4}</Text>
-                          ) : null}
+                          <Text style={s.payDate}>{methodLabel}</Text>
+                          <Text style={s.payBank}>{dateStr}{bankSub ? ` · ${bankSub}` : ''}</Text>
                         </View>
                         <Text style={[s.payAmount, pending && s.payAmountPending]}>
                           {amountStr}

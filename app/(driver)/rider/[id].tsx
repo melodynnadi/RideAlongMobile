@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { firestore, firebaseAuth, storage } from '@/constants/services';
-import { doc, getDoc, query, collection, where, onSnapshot, getDocs } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 
 import { useAppTheme } from '@/hooks/ThemeContext';
@@ -81,6 +81,35 @@ function profileAvatarFrom(data: any): string | undefined {
 
 type Review = { id: string; reviewerName?: string; rating?: number; comment?: string; createdAt?: any };
 type CommentItem = Review & { raterId?: string; commenterName?: string; commenterAvatarUrl?: string };
+
+async function getCompletedRiderRideIds(riderId: string) {
+  const ids = new Set<string>();
+  let count = 0;
+  const addRide = (id: string, data: any) => {
+    count += 1;
+    ids.add(id);
+    if (data?.rideRequestId) ids.add(String(data.rideRequestId));
+    if (data?.ridePostingId) ids.add(String(data.ridePostingId));
+    if (data?.ridePostingRequestId) ids.add(String(data.ridePostingRequestId));
+  };
+
+  try {
+    const snap = await getDocs(query(
+      collection(firestore, 'confirmedRides'),
+      where('riderId', '==', riderId),
+      where('status', 'in', ['COMPLETED', 'completed']),
+    ));
+    snap.docs.forEach((d) => addRide(d.id, d.data() as any));
+  } catch {
+    const snap = await getDocs(query(collection(firestore, 'confirmedRides'), where('riderId', '==', riderId)));
+    snap.docs.forEach((d) => {
+      const data = d.data() as any;
+      if (String(data?.status || '').toUpperCase() === 'COMPLETED') addRide(d.id, data);
+    });
+  }
+
+  return { ids, count };
+}
 
 const PREF_ICONS: Record<string, string> = {
   musicPreference:       'musical-notes-outline',
@@ -245,40 +274,30 @@ export default function RiderProfilePage() {
   useEffect(() => {
     if (!riderId) return;
     let mounted = true;
-    let unsubReviews: (() => void) | null = null;
+    // Track both fetches — only hide spinner when both complete
+    let profileDone = false;
+    let ratingsDone = false;
+    const tryFinish = () => { if (profileDone && ratingsDone && mounted) setLoading(false); };
 
-    // Fetch rider's completed rides first so we can filter ratings to only ones
-    // where they acted as a rider — dual-role accounts share a UID, so without
-    // this filter, ratings earned as a driver bleed into the rider profile.
+    // Use backend endpoint — admin SDK bypasses Firestore rules that block
+    // a viewing driver from querying another rider's confirmedRides.
     const riderRideIds = new Set<string>();
     (async () => {
       try {
-        const ridesSnap = await getDocs(
-          query(collection(firestore, 'confirmedRides'), where('riderId', '==', riderId), where('status', '==', 'COMPLETED'))
-        );
-        if (!mounted) return;
-        setTotalRides(ridesSnap.size || 0);
-        ridesSnap.docs.forEach((d) => {
-          riderRideIds.add(d.id);
-          const rd = d.data() as any;
-          if (rd.rideRequestId) riderRideIds.add(String(rd.rideRequestId));
-          if (rd.ridePostingId) riderRideIds.add(String(rd.ridePostingId));
-          if (rd.ridePostingRequestId) riderRideIds.add(String(rd.ridePostingRequestId));
+        const { getApiBaseUrl } = await import('@/constants/services');
+        const token = await firebaseAuth.currentUser?.getIdToken().catch(() => null);
+        const resp = await fetch(`${getApiBaseUrl()}/api/riders/${encodeURIComponent(riderId)}/public-profile`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
-      } catch {}
-
-      if (!mounted) return;
-      const revQ = query(collection(firestore, 'rideRatings'), where('rateeId', '==', riderId));
-      unsubReviews = onSnapshot(revQ, (snap) => {
-        if (!mounted) return;
-        const allRevs: Review[] = snap.docs.map((d) => {
-          const data = d.data() as any;
-          return { id: d.id, ...data, rating: typeof data.stars === 'number' ? data.stars : data.rating } as Review;
-        });
-        const revs = riderRideIds.size > 0
-          ? allRevs.filter(r => riderRideIds.has(String((r as any).rideId || '')))
-          : allRevs;
-        setReviews(revs);
+        if (resp.ok) {
+          const { totalRides: count, ratings } = await resp.json() as { totalRides: number; ratings: any[] };
+          if (!mounted) return;
+          setTotalRides(count || 0);
+          ratings.forEach((r: any) => riderRideIds.add(String(r.rideId || '')));
+          const revs: Review[] = ratings.map((r: any) => ({
+            id: r.id, ...r, rating: typeof r.stars === 'number' ? r.stars : r.rating,
+          }));
+          setReviews(revs);
 
       (async () => {
         try {
@@ -351,8 +370,10 @@ export default function RiderProfilePage() {
           setComments(built);
         } catch { setComments([]); }
       })();
-    }, () => {});
-    })(); // close outer async IIFE (rides fetch + ratings subscription)
+        }
+      } catch { setTotalRides(0); setReviews([]); }
+      finally { ratingsDone = true; tryFinish(); }
+    })(); // close outer async IIFE
 
     (async () => {
       try {
@@ -373,10 +394,10 @@ export default function RiderProfilePage() {
         if (!mounted) return;
         setRider(finalRider);
       } catch {}
-      finally { if (mounted) setLoading(false); }
+      finally { profileDone = true; tryFinish(); }
     })();
 
-    return () => { mounted = false; unsubReviews?.(); };
+    return () => { mounted = false; };
   }, [riderId]);
 
   if (loading) {
@@ -571,4 +592,3 @@ export default function RiderProfilePage() {
     </View>
   );
 }
-

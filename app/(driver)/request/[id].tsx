@@ -42,6 +42,46 @@ const PREF_LABELS: Record<string, string> = {
   passengerType:         'Passenger type',
 };
 
+async function getRiderRatingForCompletedRides(riderId: string): Promise<number | undefined> {
+  const rideIds = new Set<string>();
+  const addRide = (id: string, data: any) => {
+    rideIds.add(id);
+    if (data?.rideRequestId) rideIds.add(String(data.rideRequestId));
+    if (data?.ridePostingId) rideIds.add(String(data.ridePostingId));
+    if (data?.ridePostingRequestId) rideIds.add(String(data.ridePostingRequestId));
+  };
+
+  try {
+    const ridesSnap = await getDocs(query(
+      collection(firestore, 'confirmedRides'),
+      where('riderId', '==', riderId),
+      where('status', 'in', ['COMPLETED', 'completed']),
+    ));
+    ridesSnap.docs.forEach((d) => addRide(d.id, d.data() as any));
+  } catch {
+    const ridesSnap = await getDocs(query(collection(firestore, 'confirmedRides'), where('riderId', '==', riderId)));
+    ridesSnap.docs.forEach((d) => {
+      const data = d.data() as any;
+      if (String(data?.status || '').toUpperCase() === 'COMPLETED') addRide(d.id, data);
+    });
+  }
+
+  if (rideIds.size === 0) return undefined;
+
+  const ratingsSnap = await getDocs(query(collection(firestore, 'rideRatings'), where('rateeId', '==', riderId)));
+  const nums = ratingsSnap.docs
+    .map((d) => d.data() as any)
+    .filter((r) => {
+      const rateeRole = String(r?.rateeRole || r?.ratedRole || '').toLowerCase();
+      if (rateeRole && rateeRole !== 'rider') return false;
+      return rideIds.has(String(r?.rideId || ''));
+    })
+    .map((r) => (typeof r.stars === 'number' ? r.stars : (typeof r.rating === 'number' ? r.rating : undefined)))
+    .filter((n): n is number => typeof n === 'number');
+
+  return nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : undefined;
+}
+
 function fmtDate(val: any): string {
   if (!val) return '';
   try {
@@ -192,16 +232,8 @@ export default function RequestDeepLinkScreen() {
                 preferences: Object.keys(prefs).length > 0 ? prefs : null,
               });
 
-              const ratingsSnap = await getDocs(query(collection(firestore, 'rideRatings'), where('rateeId', '==', rId)));
-              if (!ratingsSnap.empty) {
-                const nums = ratingsSnap.docs
-                  .map(d => { const r = d.data() as any; return typeof r.stars === 'number' ? r.stars : (typeof r.rating === 'number' ? r.rating : undefined); })
-                  .filter((n): n is number => typeof n === 'number');
-                if (nums.length > 0) {
-                  const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
-                  setRiderProfile(prev => prev ? { ...prev, rating: avg } : prev);
-                }
-              }
+              const riderRating = await getRiderRatingForCompletedRides(rId);
+              if (typeof riderRating === 'number') setRiderProfile(prev => prev ? { ...prev, rating: riderRating } : prev);
             } catch {}
           }
         } else {

@@ -7,7 +7,7 @@ import { hitSlop } from '@/theme/designSystem';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import type { AppColors } from '@/constants/theme';
 
-export type DriverTab = 'home' | 'offer' | 'requests' | 'inbox';
+export type DriverTab = 'home' | 'offer' | 'requests' | 'inbox' | 'profile';
 
 function badgeLabel(n: number) {
   return n > 9 ? '9+' : String(n);
@@ -23,6 +23,7 @@ export function DriverBottomNav({ activeTab }: { activeTab: DriverTab }) {
     { key: 'offer', label: 'Offer', icon: 'add-circle-outline', href: '/(driver)/book' },
     { key: 'requests', label: 'Requests', icon: 'ticket-outline', href: '/(driver)/requests' },
     { key: 'inbox', label: 'Inbox', icon: 'chatbubble', href: '/(driver)/messages' },
+    { key: 'profile', label: 'Profile', icon: 'person', href: '/(driver)/profile' },
   ];
 
   return (

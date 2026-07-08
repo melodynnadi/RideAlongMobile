@@ -14,6 +14,7 @@ import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
 import DriverPreferredRoutesManager from '@/components/DriverPreferredRoutesManager';
 
 import { useAuthStore } from '@/stores/authStore';
+import { useVerificationStore } from '@/stores/verificationStore';
 import { usePaymentStore } from '@/stores/paymentStore';
 import { usePreferencesStore } from '@/stores/preferencesStore';
 import { useEmergencyContactsStore } from '@/stores/emergencyContactsStore';
@@ -47,8 +48,6 @@ import { submitRating } from '@/src/services/functions';
 import { notificationService } from '@/src/services/notificationService';
 import { settingsService } from '@/src/services/settingsService';
 import { hasUserRatedRide } from '@/src/services/ratings';
-import { FlagRideModal } from '@/components/FlagRideModal';
-
 const FONT_SANS = Platform.OS === 'web' ? '"Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, sans-serif' : undefined;
 const FONT_MONO = Platform.OS === 'web' ? '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace' : undefined;
 
@@ -67,7 +66,7 @@ function ColorsProvider({ children }: { children: React.ReactNode }) {
 }
 
 type TextProps = React.ComponentProps<typeof RNText>;
-type TabKey = 'home' | 'find' | 'rides' | 'inbox' | 'you';
+type TabKey = 'home' | 'find' | 'rides' | 'inbox' | 'profile' | 'you';
 
 function Text({ style, ...props }: TextProps) {
   const { s } = useScreenCtx();
@@ -147,9 +146,9 @@ function Phone({
                   style={s.circle}
                   onPress={() => {
                     if (onBack) { onBack(); return; }
+                    if (router.canGoBack()) { router.back(); return; }
                     const dest = returnTo || backTarget || backHref;
-                    if (dest) { router.replace(dest as any); return; }
-                    if (router.canGoBack()) router.back();
+                    if (dest) router.navigate(dest as any);
                   }}
                   accessibilityRole="button"
                   accessibilityLabel="Go back"
@@ -257,6 +256,7 @@ function BottomNav({ active }: { active: TabKey }) {
     { key: 'find', label: 'Request', icon: 'add-circle-outline', href: '/(rider)/book' },
     { key: 'rides', label: 'Rides', icon: 'ticket-outline', href: '/(rider)/available-rides' },
     { key: 'inbox', label: 'Inbox', icon: 'chatbubble', href: '/(rider)/messages' },
+    { key: 'profile', label: 'Profile', icon: 'person', href: '/(rider)/profile' },
   ];
   return (
     <View style={s.tabs}>
@@ -537,6 +537,9 @@ function RiderRequestsReferenceInner() {
   const [decliningOfferId, setDecliningOfferId] = useState<string | null>(null);
   const [waitlistEntries, setWaitlistEntries] = useState<import('@/src/services/waitlistService').WaitlistEntry[]>([]);
   const [leavingWaitlistId, setLeavingWaitlistId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const loadedRef = React.useRef(false);
+  const markLoaded = React.useCallback(() => { if (!loadedRef.current) { loadedRef.current = true; setLoading(false); } }, []);
 
   useEffect(() => {
     if (!uid) return;
@@ -596,7 +599,7 @@ function RiderRequestsReferenceInner() {
     await acceptOffer(offer, request, paymentIntentId);
   };
 
-  useEffect(() => uid ? subscribeRiderRequests(uid, setRequests) : undefined, [uid]);
+  useEffect(() => uid ? subscribeRiderRequests(uid, (data) => { setRequests(data); markLoaded(); }) : undefined, [uid, markLoaded]);
 
   useEffect(() => {
     if (!uid) return;
@@ -624,9 +627,21 @@ function RiderRequestsReferenceInner() {
           raw: r,
         };
       });
-      setPostingRequests(items);
+      const now = Date.now();
+      const activeStatuses = new Set(['pending','open','posted','offer','offer_received','accepted','confirmed','matched','in_progress','in-progress']);
+      setPostingRequests(items.filter((item) => {
+        if (!activeStatuses.has(item.status)) return false;
+        // Drop past-dated items regardless of cache state
+        if (item.date) {
+          const endOfDay = new Date(item.date); endOfDay.setHours(23, 59, 59, 999);
+          if (endOfDay.getTime() < now) return false;
+        }
+        return true;
+      }));
+      markLoaded();
     }, (error) => {
       setPostingRequests([]);
+      markLoaded();
       console.warn('[RiderRequestsReference] ridePostingRequests listener error:', error);
     });
   }, [uid]);
@@ -682,8 +697,9 @@ function RiderRequestsReferenceInner() {
   };
 
   const isDateExpired = (request: MobileRideRequest): boolean => {
-    if (!OPEN.has(request.status) || hasRequestActivity(request)) return false;
-    // Prefer dateLabel (user-entered trip date) over request.date which may be createdAt
+    // Both pending (OPEN) and confirmed (MATCHED) requests expire if their ride date has passed
+    if (!OPEN.has(request.status) && !MATCHED.has(request.status)) return false;
+    // Prefer dateLabel (user-entered trip date)
     let rideDate: Date | null = null;
     if (request.dateLabel && request.dateLabel !== 'Date pending') {
       const iso = request.dateLabel.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -694,9 +710,10 @@ function RiderRequestsReferenceInner() {
         if (!isNaN(d.getTime())) rideDate = d;
       }
     }
-    // Only fall back to request.date if it was explicitly set from pickupTime/requestedTime
-    // (not createdAt fallback) — we can't distinguish here, so skip the fallback to avoid
-    // treating createdAt as the trip date
+    // For confirmed/accepted requests also check request.date
+    if (!rideDate && request.date instanceof Date && !isNaN(request.date.getTime())) {
+      rideDate = request.date;
+    }
     if (!rideDate) return false;
     const endOfDay = new Date(rideDate);
     endOfDay.setHours(23, 59, 59, 999);
@@ -711,12 +728,28 @@ function RiderRequestsReferenceInner() {
   });
 
   return (
-    <Phone title="My requests" back activeTab="rides">
+    <Phone title="My requests" back activeTab="rides" headerGap={4}>
       <View style={s.pillRow}>
         <TouchableOpacity onPress={() => setFilter('open')}><Pill label={`Open · ${allRequests.filter((r) => (OPEN.has(r.status) || MATCHED.has(r.status)) && !isDateExpired(r)).length}`} active={filter === 'open'} /></TouchableOpacity>
         <TouchableOpacity onPress={() => setFilter('past')}><Pill label={`Past · ${allRequests.filter((r) => PAST.has(r.status) || isDateExpired(r)).length}`} active={filter === 'past'} /></TouchableOpacity>
       </View>
-      {filtered.map((request) => {
+      {loading ? (
+        <View style={{ minHeight: 300, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+          <ActivityIndicator color={colors.primary} size="large" />
+          <Text style={{ color: colors.textSecondary, fontSize: 14 }}>Loading requests…</Text>
+        </View>
+      ) : filtered.length === 0 ? (
+        <View style={s.emptyState ?? { alignItems: 'center', justifyContent: 'center', paddingVertical: 48, paddingHorizontal: 24 }}>
+          <Ionicons name="car-outline" size={32} color={colors.primary} />
+          <Text style={{ color: colors.textPrimary, fontSize: 18, fontWeight: '700', marginTop: 14, textAlign: 'center' }}>
+            {filter === 'open' ? 'No open requests' : 'No past requests'}
+          </Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 6, textAlign: 'center', maxWidth: 260 }}>
+            {filter === 'open' ? 'Request a ride and nearby drivers will send you offers.' : 'Completed and cancelled rides will appear here.'}
+          </Text>
+        </View>
+      ) : null}
+      {!loading && filtered.map((request) => {
         const expired = isDateExpired(request);
         const offers = offersMap[request.id] || [];
         const hasOffers = offers.length > 0;
@@ -939,7 +972,6 @@ function RiderHistoryReferenceInner() {
   const uid = useAuthStore((state) => state.uid);
   const [rides, setRides] = useState<HistoryRide[]>([]);
   const [loading, setLoading] = useState(true);
-  const [flagRideId, setFlagRideId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!uid) { setRides([]); setLoading(false); return; }
@@ -1151,20 +1183,6 @@ function RiderHistoryReferenceInner() {
                     <Text style={s.riderHistoryDriverName} numberOfLines={1}>{ride.driverName}</Text>
                     <Text style={s.riderHistoryDriverMeta}>{ride.seats} {ride.seats === 1 ? 'seat' : 'seats'}</Text>
                   </View>
-                  {ride.confirmedRideId && !isFlagged ? (
-                    <TouchableOpacity
-                      style={s.riderHistoryFlagButton}
-                      onPress={() => setFlagRideId(ride.confirmedRideId || null)}
-                      accessibilityRole="button"
-                      accessibilityLabel="Report ride"
-                    >
-                      <Ionicons name="flag-outline" size={16} color={colors.red} />
-                    </TouchableOpacity>
-                  ) : isFlagged ? (
-                    <View style={[s.riderHistoryFlagButton, { backgroundColor: colors.redDim }]}>
-                      <Ionicons name="flag" size={16} color={colors.red} />
-                    </View>
-                  ) : null}
                 </View>
               </View>
             </View>
@@ -1186,13 +1204,6 @@ function RiderHistoryReferenceInner() {
         ) : null}
       </Phone>
 
-      <FlagRideModal
-        visible={!!flagRideId}
-        rideId={flagRideId}
-        role="rider"
-        onClose={() => setFlagRideId(null)}
-        onFlagged={() => setFlagRideId(null)}
-      />
     </>
   );
 }
@@ -1965,7 +1976,7 @@ function RiderChatReferenceInner() {
       if (recipientId) {
         try {
           const driverSnap = await getDoc(doc(firestore, 'drivers', recipientId));
-          const pushToken = driverSnap.exists() ? (driverSnap.data() as any)?.expoPushToken : null;
+          const pushToken = driverSnap.exists() ? ((driverSnap.data() as any)?.pushToken || (driverSnap.data() as any)?.expoPushToken) : null;
           if (pushToken && String(pushToken).startsWith('ExponentPushToken')) {
             const senderName = firebaseAuth.currentUser?.displayName || 'A rider';
             const pushRes = await fetch('https://exp.host/--/api/v2/push/send', {
@@ -2059,8 +2070,14 @@ function RiderChatReferenceInner() {
             keyboardShouldPersistTaps="handled"
           >
             {!messages.length ? (
-              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                <RNText style={{ color: colors.textSecondary, textAlign: 'center', fontSize: 14 }}>No messages yet. Say hello.</RNText>
+              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
+                <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={22} color={colors.primary} />
+                </View>
+                <RNText style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '700', marginBottom: 8, textAlign: 'center' }}>Coordinate your ride</RNText>
+                <RNText style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 20 }}>
+                  Use this chat to discuss pickup location, timing, any last-minute changes, or if you're running late.
+                </RNText>
               </View>
             ) : null}
             {messages.map((msg) => {
@@ -2091,7 +2108,7 @@ function RiderChatReferenceInner() {
               <>
                 <TextInput
                   style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, maxHeight: 100, backgroundColor: colors.bgSecondary, color: colors.textPrimary }}
-                  placeholder="Message..."
+                  placeholder="Pickup spot, timing, updates…"
                   placeholderTextColor={colors.textSecondary}
                   value={draft}
                   onChangeText={setDraft}
@@ -2193,9 +2210,17 @@ function NoticeRow({ icon, text, time, orange, first }: { icon: keyof typeof Ion
   const isBell = icon === 'notifications-outline' || icon === 'notifications';
   return (
     <View style={[s.noticeRow, first && s.noticeRowFirst]}>
-      <View style={[s.noticeIcon, orange && { backgroundColor: colors.primaryDim }, isBell && { backgroundColor: colors.primary }]}><Ionicons name={icon} size={16} color={isBell ? colors.textInverse : orange ? colors.primary : colors.textPrimary} /></View>
-      <Text style={s.noticeBody}>{text}</Text>
-      <Text style={s.mono}>{time}</Text>
+      {/* Unread indicator dot */}
+      {orange ? (
+        <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.primary, alignSelf: 'center', flexShrink: 0, marginRight: -6 }} />
+      ) : (
+        <View style={{ width: 7, flexShrink: 0, marginRight: -6 }} />
+      )}
+      <View style={[s.noticeIcon, orange && { backgroundColor: colors.primaryDim }, isBell && { backgroundColor: colors.primary }]}>
+        <Ionicons name={icon} size={16} color={isBell ? colors.textInverse : orange ? colors.primary : colors.textPrimary} />
+      </View>
+      <Text style={[s.noticeBody, orange && { fontWeight: '600', color: colors.textPrimary }]}>{text}</Text>
+      <Text style={[s.mono, orange && { color: colors.primary, fontWeight: '600' }]}>{time}</Text>
     </View>
   );
 }
@@ -2258,8 +2283,11 @@ function RiderProfileReferenceInner() {
   };
 
   return (
-    <Phone title="Profile" back backTarget="/(rider)" compactContent bottom={<PrimaryButton onPress={signOut}>Log out</PrimaryButton>} bottomOffset={4}>
-      <TouchableOpacity style={s.profileSettingsBtn} onPress={() => router.push({ pathname: '/(rider)/settings', params: { returnTo: '/(rider)/profile' } } as any)}><Ionicons name="settings" size={20} color={colors.textPrimary} /></TouchableOpacity>
+    <Phone activeTab="profile">
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+        <Text style={{ fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1 }}>Profile</Text>
+        <TouchableOpacity style={s.profileSettingsBtn} onPress={() => router.push({ pathname: '/(rider)/settings', params: { returnTo: '/(rider)/profile' } } as any)}><Ionicons name="settings" size={20} color={colors.textPrimary} /></TouchableOpacity>
+      </View>
       <View style={s.profileTopRow}>
         <View style={s.bigAvatar}>{profile?.avatarUrl ? <Image source={{ uri: profile.avatarUrl }} style={s.bigAvatarImage} contentFit="cover" /> : <Text style={s.bigAvatarText}>{initials}</Text>}</View>
         <View style={{ flex: 1 }}>
@@ -2304,6 +2332,9 @@ function RiderProfileReferenceInner() {
         </TouchableOpacity>
       ) : null}
       <View style={s.menuCard}><MenuRow icon="wallet" title="Payment methods" href="/(rider)/settings/payment-methods" returnTo="/(rider)/profile" /><MenuRow icon="time" title="Ride history" href="/(rider)/settings/ride-history" returnTo="/(rider)/profile" /><MenuRow icon="notifications" title="Notifications" href="/(rider)/notifications" returnTo="/(rider)/profile" /></View>
+      <TouchableOpacity style={s.logoutBtn} onPress={signOut} activeOpacity={0.85}>
+        <Text style={s.logoutBtnText}>Log out</Text>
+      </TouchableOpacity>
     </Phone>
   );
 }
@@ -2360,7 +2391,15 @@ export function RiderSettingsReference() {
 function RiderSettingsReferenceInner() {
   const { s } = useScreenCtx();
   const { isDark, setDark } = useAppTheme();
+  const { riderProfile } = useAuthStore();
+  const { isVerified, verificationStatus } = useVerificationStore();
   const [pushEnabled, setPushEnabled] = useState(true);
+
+  const riderUniversity = riderProfile?.university || null;
+  const isVerifiedFinal = isVerified || verificationStatus === 'approved' || verificationStatus === 'auto-approved';
+  const isPending = verificationStatus === 'pending' || verificationStatus === 'manual-review';
+  const verStatusLabel = isVerifiedFinal ? 'Approved' : isPending ? 'Pending review' : 'Not verified';
+  const riderVerLabel = riderUniversity ? `${riderUniversity} · ${verStatusLabel}` : verStatusLabel;
 
   useEffect(() => {
     settingsService.getSettings().then((settings) => setPushEnabled(settings.pushNotificationsEnabled)).catch(() => {});
@@ -2371,13 +2410,11 @@ function RiderSettingsReferenceInner() {
         const snapshot = await getDoc(doc(firestore, 'riders', currentUser.uid));
         const data = snapshot.data() as any;
         const savedPush = data?.settings?.pushNotificationsEnabled ?? data?.pushNotificationsEnabled;
-        const savedDarkMode = data?.settings?.darkModeEnabled ?? data?.darkModeEnabled;
         if (typeof savedPush === 'boolean') setPushEnabled(savedPush);
-        if (typeof savedDarkMode === 'boolean') setDark(savedDarkMode);
       } catch {}
     };
     void loadRiderSettings();
-  }, [setDark]);
+  }, []);
 
   const togglePush = async (value: boolean) => {
     const previous = pushEnabled;
@@ -2409,7 +2446,7 @@ function RiderSettingsReferenceInner() {
       <Text style={s.settingsSectionLabel}>ACCOUNT</Text>
       <View style={[s.menuCard, s.settingsMenuCard]}>
         <MenuRow icon="person" title="Account" sub="Email, phone, password" href="/(rider)/settings/account-settings" returnTo="/(rider)/settings" />
-        <MenuRow icon="school" title="Student verification" sub="Upload proof and view status" href="/(rider)/settings/student-verification" returnTo="/(rider)/settings" />
+        <MenuRow icon="school" title="Student verification" sub={riderVerLabel} href="/(rider)/settings/student-verification" returnTo="/(rider)/settings" />
 
       </View>
       <Text style={s.settingsSectionLabel}>RIDE</Text>
@@ -3164,7 +3201,7 @@ function makeStyles(colors: any) {
   profileIdentityHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   editProfileButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
   profileBadgeRow: { marginTop: 6 },
-  profileSettingsBtn: { position: 'absolute', top: 10, right: 20, zIndex: 5, width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' },
+  profileSettingsBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' },
   profileActivity: { minHeight: 72, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', marginBottom: 18, paddingHorizontal: 8 },
   profileActivityItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
   profileActivityValue: { color: colors.textPrimary, fontSize: 20, lineHeight: 25, fontWeight: '700' },
@@ -3182,6 +3219,8 @@ function makeStyles(colors: any) {
   statValue: { fontSize: 30, fontWeight: '300' },
   statLabel: { color: colors.textSecondary, fontSize: 12, marginTop: 4 },
   menuCard: { borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, overflow: 'hidden', marginBottom: 18 },
+  logoutBtn: { height: 52, borderRadius: 26, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  logoutBtnText: { color: colors.textInverse, fontSize: 15, fontWeight: '700' },
   menuRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 18, borderBottomWidth: 1, borderBottomColor: colors.border },
   menuRowLast: { borderBottomWidth: 0 },
   menuIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },

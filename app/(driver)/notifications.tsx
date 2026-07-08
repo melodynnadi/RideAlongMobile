@@ -135,11 +135,16 @@ export default function NotificationsScreen() {
       borderBottomColor: colors.border,
       backgroundColor: colors.bg,
     },
+    rowUnread: {},
     firstRow: { paddingTop: 6 },
     iconWrap:  { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
     iconWrapUnread: { backgroundColor: colors.primaryDim },
+    unreadDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.primary, flexShrink: 0, marginRight: -6 },
+    readSpacer: { width: 7, flexShrink: 0, marginRight: -6 },
     rowBody:   { flex: 1, minWidth: 0, color: colors.textPrimary, fontSize: 14, lineHeight: 21 },
+    rowBodyUnread: { fontWeight: '600' },
     rowTime:   { color: colors.textSecondary, fontSize: 11, fontWeight: '600', flexShrink: 0 },
+    rowTimeUnread: { color: colors.primary },
     swipeDelete: {
       backgroundColor: colors.red,
       justifyContent: 'center',
@@ -314,15 +319,16 @@ export default function NotificationsScreen() {
         onPress={() => markAsRead(n.id)}
         activeOpacity={0.86}
         disabled={n.read}
-        style={[s.row, index === 0 && s.firstRow]}
+        style={[s.row, index === 0 && s.firstRow, !n.read && s.rowUnread]}
         accessibilityRole="button"
         accessibilityLabel={n.read ? 'Read notification' : 'Mark notification as read'}
       >
+        {!n.read ? <View style={s.unreadDot} /> : <View style={s.readSpacer} />}
         <View style={[s.iconWrap, !n.read && s.iconWrapUnread]}>
           <Ionicons name={n.iconName as any} size={16} color={!n.read ? colors.primary : colors.textPrimary} />
         </View>
-        <Text style={s.rowBody} numberOfLines={2}>{n.message || n.title}</Text>
-        <Text style={s.rowTime}>{n.time}</Text>
+        <Text style={[s.rowBody, !n.read && s.rowBodyUnread]} numberOfLines={2}>{n.message || n.title}</Text>
+        <Text style={[s.rowTime, !n.read && s.rowTimeUnread]}>{n.time}</Text>
       </TouchableOpacity>
     </Swipeable>
   );

@@ -147,7 +147,7 @@ function makeStyles(colors: AppColors) {
   container: {
     padding: 16,
     backgroundColor: colors.bgCard,
-    borderRadius: 12,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: colors.border,
   },

@@ -338,6 +338,7 @@ export default function MessagesScreen() {
                 userIdsArr.map(async (userId) => {
                   try {
                     let userDoc = await getDoc(doc(firestore, 'riders', userId));
+                    if (!userDoc.exists()) userDoc = await getDoc(doc(firestore, 'drivers', userId));
                     if (!userDoc.exists()) userDoc = await getDoc(doc(firestore, 'users', userId));
                     userCache.set(userId, userDoc.exists() ? userDoc.data() : null);
                   } catch (error) {
@@ -366,15 +367,30 @@ export default function MessagesScreen() {
                 const names = otherParticipants
                   .map((pid: string) => {
                     const userData = userCache.get(pid);
-                    return userData?.fullName || userData?.name || userData?.email?.split('@')[0] || 'User';
+                    return userData?.fullName
+                      || userData?.name
+                      || userData?.displayName
+                      || ((userData?.firstName || userData?.lastName)
+                          ? [userData?.firstName, userData?.lastName].filter(Boolean).join(' ').trim()
+                          : null)
+                      || userData?.email?.split('@')[0]
+                      || 'User';
                   })
                   .filter(Boolean);
                 recipientName = names.length > 0 ? names.join(', ') : 'Group Chat';
               } else {
                 const riderData = userCache.get(otherParticipants[0]);
                 if (riderData) {
-                  recipientName = riderData.fullName || riderData.name || riderData.email || 'Unknown User';
-                  recipientPhotoURL = riderData.photoURL || riderData.avatarUrl || null;
+                  recipientName = riderData.fullName
+                    || riderData.name
+                    || riderData.displayName
+                    || ((riderData.firstName || riderData.lastName)
+                        ? [riderData.firstName, riderData.lastName].filter(Boolean).join(' ').trim()
+                        : null)
+                    || riderData.personalInfo?.fullName
+                    || riderData.email?.split('@')[0]
+                    || 'Unknown User';
+                  recipientPhotoURL = riderData.photoURL || riderData.avatarUrl || riderData.photoUrl || null;
                 }
               }
 

@@ -1,6 +1,5 @@
-import React from 'react';
-import { RiderTripInProgressReference } from '@/components/reference/TripInProgressReference';
+import { Redirect } from 'expo-router';
 
 export default function RiderTripInProgressScreen() {
-  return <RiderTripInProgressReference />;
+  return <Redirect href="/(rider)" />;
 }

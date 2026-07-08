@@ -265,7 +265,7 @@ export default function ChatDetailScreen() {
       if (notifyRiderId) {
         try {
           const riderSnap = await getDoc(doc(firestore, 'riders', String(notifyRiderId)));
-          const pushToken = riderSnap.exists() ? (riderSnap.data() as any)?.expoPushToken : null;
+          const pushToken = riderSnap.exists() ? ((riderSnap.data() as any)?.pushToken || (riderSnap.data() as any)?.expoPushToken) : null;
           if (pushToken && String(pushToken).startsWith('ExponentPushToken')) {
             const senderName = currentUser.displayName || 'Your driver';
             const pushRes = await fetch('https://exp.host/--/api/v2/push/send', {
@@ -405,8 +405,14 @@ export default function ChatDetailScreen() {
             showsVerticalScrollIndicator={false}
             ListEmptyComponent={
               !loading ? (
-                <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 14, textAlign: 'center' }}>No messages yet. Say hello.</Text>
+                <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
+                  <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={22} color={colors.primary} />
+                  </View>
+                  <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '700', marginBottom: 8, textAlign: 'center' }}>Coordinate your ride</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 20 }}>
+                    Use this chat to discuss pickup location, timing, any last-minute changes, or if you're running late.
+                  </Text>
                 </View>
               ) : null
             }
@@ -423,7 +429,7 @@ export default function ChatDetailScreen() {
               <>
                 <TextInput
                   style={s.input}
-                  placeholder="Message..."
+                  placeholder="Pickup spot, timing, updates…"
                   placeholderTextColor={colors.textSecondary}
                   value={messageText}
                   onChangeText={setMessageText}

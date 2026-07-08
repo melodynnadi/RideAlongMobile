@@ -13,7 +13,6 @@ import {
 } from 'firebase/firestore';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
-import { FlagRideModal } from '@/components/FlagRideModal';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { getOrCreateRideChat } from '@/src/services/chatAvailability';
 import { createRoleNotification } from '@/src/services/notificationRecords';
@@ -596,30 +595,58 @@ export default function MyPostingsScreen() {
   }, []);
 
   const cancelPosting = useCallback((p: Posting) => {
-    Alert.alert(
-      'Cancel Ride',
-      `Cancel the ride from ${p.from} to ${p.to}? Riders who requested this ride will be notified.`,
-      [
-        { text: 'Keep it', style: 'cancel' },
-        {
-          text: 'Cancel Ride',
-          style: 'destructive',
-          onPress: async () => {
-            setCancelling(p.id);
-            try {
-              await updateDoc(doc(firestore, 'ridePostings', p.id), {
-                status: 'cancelled',
-                cancelledAt: serverTimestamp(),
+    // Determine if the 48-hour free cancellation window applies
+    const rideDate = p.raw?.date || '';
+    const rideTime = p.raw?.time || p.raw?.departureTime || '';
+    let hoursUntilRide: number | null = null;
+    if (rideDate) {
+      const [h = 0, m = 0] = (rideTime || '').split(':').map(Number);
+      const rideTs = new Date(`${rideDate}T00:00:00`);
+      rideTs.setHours(h, m, 0, 0);
+      hoursUntilRide = (rideTs.getTime() - Date.now()) / (60 * 60 * 1000);
+    }
+    const hasBookedRiders = !!confirmedIdByPostingId[p.id];
+    const freeCancellation = !hasBookedRiders || (hoursUntilRide !== null && hoursUntilRide >= 48);
+    const message = hasBookedRiders
+      ? freeCancellation
+        ? `Free cancellation — ride is ${hoursUntilRide !== null ? Math.floor(hoursUntilRide) + 'h' : 'over 48h'} away. All booked riders will be fully refunded.`
+        : `Late cancellation (within 48 hours). All booked riders will be fully refunded but a late-cancellation strike will be recorded on your account.`
+      : `Cancel the ride from ${p.from} to ${p.to}?`;
+
+    Alert.alert('Cancel Ride', message, [
+      { text: 'Keep it', style: 'cancel' },
+      {
+        text: 'Cancel Ride',
+        style: 'destructive',
+        onPress: async () => {
+          setCancelling(p.id);
+          try {
+            if (hasBookedRiders) {
+              // Route through backend — handles payment void, notifications, seat release
+              const { getApiBaseUrl } = await import('@/constants/services');
+              const { firebaseAuth } = await import('@/constants/services');
+              const confirmedId = confirmedIdByPostingId[p.id];
+              const token = await firebaseAuth.currentUser?.getIdToken().catch(() => null);
+              const res = await fetch(`${getApiBaseUrl()}/api/rides/${encodeURIComponent(confirmedId)}/cancel`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                body: JSON.stringify({ collection: 'confirmedRides', cancelledBy: 'driver' }),
               });
-            } catch {
-              Alert.alert('Error', 'Could not cancel the ride. Please try again.');
+              if (!res.ok) throw new Error(`Server error ${res.status}`);
+            } else {
+              // No riders booked — simple Firestore update
+              await updateDoc(doc(firestore, 'ridePostings', p.id), {
+                status: 'cancelled', cancelledAt: serverTimestamp(),
+              });
             }
-            setCancelling(null);
-          },
+          } catch {
+            Alert.alert('Error', 'Could not cancel the ride. Please try again.');
+          }
+          setCancelling(null);
         },
-      ],
-    );
-  }, []);
+      },
+    ]);
+  }, [confirmedIdByPostingId]);
 
   const editPosting = useCallback((p: Posting) => {
     router.push({
@@ -857,7 +884,6 @@ function PostingCard({
     },
     cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
     statusPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
-    cardFlagBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.redDim, alignItems: 'center', justifyContent: 'center' },
     statusText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.4 },
     dateText: { fontSize: 12, color: colors.textSecondary, fontWeight: '500' },
     route: { flexDirection: 'row', gap: 12, marginBottom: 14 },
@@ -924,7 +950,6 @@ function PostingCard({
   }), [colors]);
 
   const hasRequests = incomingRequests.length > 0;
-  const [flagVisible, setFlagVisible] = useState(false);
   const isExpired = isPostingOutdated(p, Date.now(), hasRequests || Boolean(confirmedId));
 
   const statusLabel = p.status === 'cancelled' ? 'Cancelled'
@@ -951,11 +976,6 @@ function PostingCard({
         <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
           {(p.date || p.time) ? (
             <Text style={ps.dateText}>{[p.date, p.time].filter(Boolean).join(' - ')}</Text>
-          ) : null}
-          {confirmedId ? (
-            <TouchableOpacity style={ps.cardFlagBtn} onPress={() => setFlagVisible(true)} activeOpacity={0.75}>
-              <Ionicons name="flag-outline" size={14} color={colors.red} />
-            </TouchableOpacity>
           ) : null}
         </View>
       </View>
@@ -1093,13 +1113,6 @@ function PostingCard({
         </View>
       )}
 
-      <FlagRideModal
-        visible={flagVisible}
-        rideId={confirmedId || null}
-        role="driver"
-        onClose={() => setFlagVisible(false)}
-        onFlagged={() => setFlagVisible(false)}
-      />
     </View>
   );
 }

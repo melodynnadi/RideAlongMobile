@@ -3,7 +3,7 @@ import { useAppTheme } from '@/hooks/ThemeContext';
 import {
   View, ScrollView, StyleSheet, Text, TouchableOpacity, Modal,
   TextInput, Keyboard,
-  ActivityIndicator, Alert, Image, Share, Linking, Dimensions,
+  ActivityIndicator, Alert, Image, Linking, Dimensions,
   RefreshControl, useColorScheme, StatusBar, Animated,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,10 +18,10 @@ import {
   confirmPickup as actionConfirmPickup,
   completeRide as actionCompleteRide,
   cancelRide as actionCancelRide,
-  flagRide, groupPickup, groupComplete, groupFlag,
+  groupPickup, groupComplete,
 } from '@/src/services/rideActions';
 import { getDownloadURL, ref as storageRef } from 'firebase/storage';
-import FlagRideModal, { FlaggedRideBanner } from '@/components/FlagRideModal';
+import { ReportIssueModal } from '@/components/ReportIssueModal';
 import { Button } from '@/components/ui/Button';
 import { computeFilteredAverageRating, hasUserRatedRide } from '@/src/services/ratings';
 import { PromotionDetailsModal } from '@/components/PromotionDetailsModal';
@@ -349,18 +349,20 @@ function DriverHomePostRideCard() {
   );
 }
 
-function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRequestId, onAcceptRequest, onRejectRequest }: { ride: UpcomingRideCard; hasOfferReceived?: boolean; seatsFilled?: number; pendingRequestId?: string; onAcceptRequest?: () => void; onRejectRequest?: () => void }) {
+function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRequestId, onAcceptRequest, onRejectRequest, onPartialStart, onCancelOffer }: { ride: UpcomingRideCard; hasOfferReceived?: boolean; seatsFilled?: number; pendingRequestId?: string; onAcceptRequest?: () => void; onRejectRequest?: () => void; onPartialStart?: () => void; onCancelOffer?: () => void }) {
   const { colors } = useAppTheme();
   const s = useDriverHomeStyles();
-  const [pickingUp,   setPickingUp]   = React.useState(false);
-  const [completing,  setCompleting]  = React.useState(false);
-  const [flagVisible, setFlagVisible] = React.useState(false);
+  const [pickingUp,      setPickingUp]      = React.useState(false);
+  const [completing,     setCompleting]     = React.useState(false);
+  const [reportVisible,  setReportVisible]  = React.useState(false);
+  const [sendingEnRoute, setSendingEnRoute] = React.useState(false);
+  const [enRouteSent,    setEnRouteSent]    = React.useState(!!(ride.raw as any)?.driverEnRoute);
   const dateText = ride.dateTime ? formatDate(ride.dateTime) : (ride.dateStr || 'Date pending');
   const rawStatus = String(ride.confirmedStatus || ride.status || '').toLowerCase();
-  const isConfirmedOnly = rawStatus === 'confirmed';
-  const isInProgress    = rawStatus === 'in_progress';
-  const isConfirmed     = isConfirmedOnly || isInProgress;
-  const isFlagged       = rawStatus === 'flagged';
+  const isConfirmedOnly   = rawStatus === 'confirmed';
+  const isDriverCompleted = rawStatus === 'driver_completed';
+  const isInProgress      = rawStatus === 'in_progress' || isDriverCompleted;
+  const isConfirmed       = isConfirmedOnly || isInProgress;
   const isOfferSent     = rawStatus.includes('offer') || rawStatus === 'sent';
   const isPosting       = ride.type === 'ridePosting';
   const seatCount       = ride.seatCount ?? 1;
@@ -375,7 +377,8 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
     ? groupPassengers.filter((p: any) => String(p?.status || '').toUpperCase() !== 'COMPLETED' && p?.driverCompleteConfirmed === true).length
     : 0;
 
-  const statusLabel = isInProgress ? 'IN PROGRESS'
+  const statusLabel = isDriverCompleted ? 'AWAITING CONFIRMATION'
+    : isInProgress ? 'IN PROGRESS'
     : isConfirmedOnly ? 'CONFIRMED'
     : isWaitingForSeats ? 'WAITING FOR PASSENGERS'
     : (isPosting && hasOfferReceived) ? 'REQUEST RECEIVED'
@@ -399,7 +402,8 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
   const groupRideTripId = ride.type === 'groupRide'
     ? (Array.isArray((ride as any).passengers) ? (ride as any).passengers[0]?.confirmedId : undefined)
     : undefined;
-
+  const activeConfirmedRideId = ride.confirmedId || groupRideTripId || null;
+  const firstGroupPassenger = groupPassengers?.[0];
   const openRequest = () => {
     if (pendingRequestId) {
       router.push({ pathname: '/(driver)/request/[id]', params: { id: pendingRequestId, returnTo: '/(driver)' } } as any);
@@ -410,11 +414,9 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
     }
   };
 
-  const handlePickup = async () => {
+  const doPickup = async (verificationCode?: string) => {
     setPickingUp(true);
     try {
-      // A fully-confirmed multi-seat posting aggregates into a 'groupRide' card with
-      // no single confirmedId — pick up all child confirmedRides via the posting instead.
       if (ride.type === 'groupRide') {
         const result = await groupPickup(ride.ridePostingId || ride.id);
         if (result.ok && result.confirmedRideIds[0]) {
@@ -427,12 +429,39 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
         rideRequestId: ride.type === 'rideRequest' ? ride.id : undefined,
         ridePostingId: ride.type === 'ridePosting' ? ride.id : undefined,
         riderId: ride.riderId,
+        verificationCode,
       });
       if (pickedUp && ride.confirmedId) {
         router.push(('/(driver)/trip/' + ride.confirmedId) as any);
       }
     } finally {
       setPickingUp(false);
+    }
+  };
+
+  const handlePickup = () => {
+    // If the confirmedRide has a verification code, prompt driver to enter it
+    const rawCode = (ride.raw as any)?.verificationCode;
+    if (rawCode && ride.type !== 'groupRide') {
+      Alert.prompt(
+        'Enter rider\'s code',
+        'Ask your rider for their 4-digit verification code',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Confirm', onPress: async (code) => {
+            if (!code || code.trim().length === 0) {
+              Alert.alert('Code required', 'Please enter the rider\'s verification code.');
+              return;
+            }
+            await doPickup(code.trim());
+          }},
+        ],
+        'plain-text',
+        '',
+        'number-pad',
+      );
+    } else {
+      doPickup();
     }
   };
 
@@ -505,15 +534,17 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
           {seatCount > 1 ? <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '700' }}>{seatsFilled ?? 0}/{seatCount} seats</Text> : null}
           {ride.priceText ? <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '800' }}>{ride.priceText}</Text> : null}
           {isConfirmed && ride.confirmedId ? (
-            <TouchableOpacity onPress={() => setFlagVisible(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="flag-outline" size={18} color="#DC2626" />
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity onPress={() => setReportVisible(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="alert-circle-outline" size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </>
           ) : null}
         </View>
       </View>
 
       {/* Route */}
-      <TouchableOpacity activeOpacity={0.7} onPress={isInProgress && (ride.confirmedId || groupRideTripId) ? () => router.push(`/(driver)/trip/${ride.confirmedId || groupRideTripId}` as any) : openRequest}>
+      <TouchableOpacity activeOpacity={0.7} onPress={isInProgress && activeConfirmedRideId ? () => router.push(`/(driver)/trip/${activeConfirmedRideId}` as any) : openRequest}>
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <View style={{ alignItems: 'center', paddingTop: 4, gap: 4 }}>
             <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: colors.textPrimary }} />
@@ -528,51 +559,165 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
         </View>
       </TouchableOpacity>
 
-      {isFlagged && ride.confirmedId && (
-        <FlaggedRideBanner rideId={ride.confirmedId} role="driver" colors={colors} />
+      {/* Rider info — shown when ride is confirmed or in progress; tappable → rider profile */}
+      {(isConfirmed || isInProgress) && ride.riderName && (
+        <TouchableOpacity
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border }}
+          onPress={() => ride.riderId && router.push({ pathname: '/(driver)/rider/[id]', params: { id: ride.riderId, returnTo: '/(driver)' } } as any)}
+          activeOpacity={ride.riderId ? 0.7 : 1}
+        >
+          <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+            {ride.riderAvatarUrl
+              ? <Image source={{ uri: ride.riderAvatarUrl }} style={{ width: 38, height: 38 }} resizeMode="cover" />
+              : <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: '700' }}>
+                  {ride.riderName.split(/\s+/).map((p: string) => p[0]).join('').slice(0, 2).toUpperCase()}
+                </Text>}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: '600' }} numberOfLines={1}>
+              {ride.riderName}
+            </Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+              {ride.riderRating != null ? `★ ${ride.riderRating.toFixed(2)}` : 'No ratings yet'}
+            </Text>
+          </View>
+          {ride.riderId && <Ionicons name="chevron-forward" size={14} color={colors.textSecondary} />}
+        </TouchableOpacity>
       )}
 
       {/* Actions */}
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
-        {!isFlagged && isConfirmedOnly && (
-          <TouchableOpacity
-            style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: pickingUp ? 0.6 : 1 }}
-            onPress={handlePickup}
-            disabled={pickingUp}
-            activeOpacity={0.8}
-          >
-            {pickingUp
-              ? <ActivityIndicator size="small" color="#FFF" />
-              : <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>Pick Up</Text>}
-          </TouchableOpacity>
+        {isConfirmedOnly && (
+          <>
+            {/* I'm on my way — notify riders before pickup */}
+            {!enRouteSent ? (
+              <TouchableOpacity
+                style={{ flex: 1, borderRadius: 20, paddingVertical: 10, alignItems: 'center', borderWidth: 1.5, borderColor: colors.primary, opacity: sendingEnRoute ? 0.6 : 1 }}
+                onPress={async () => {
+                  if (sendingEnRoute) return;
+                  setSendingEnRoute(true);
+                  try {
+                    const token = await firebaseAuth.currentUser?.getIdToken();
+                    const res = await fetch(`${getApiBaseUrl()}/api/rides/${ride.confirmedId}/driver-en-route`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                    });
+                    if (res.ok) { setEnRouteSent(true); Alert.alert('Riders notified', 'Your riders have been notified you are on the way.'); }
+                  } catch {}
+                  setSendingEnRoute(false);
+                }}
+                disabled={sendingEnRoute}
+                activeOpacity={0.8}
+              >
+                {sendingEnRoute
+                  ? <ActivityIndicator size="small" color={colors.primary} />
+                  : <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>{"I'm on my way"}</Text>}
+              </TouchableOpacity>
+            ) : (
+              <View style={{ flex: 1, borderRadius: 20, paddingVertical: 10, alignItems: 'center', backgroundColor: colors.primaryDim }}>
+                <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>Riders notified ✓</Text>
+              </View>
+            )}
+            <TouchableOpacity
+              style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: pickingUp ? 0.6 : 1 }}
+              onPress={handlePickup}
+              disabled={pickingUp}
+              activeOpacity={0.8}
+            >
+              {pickingUp
+                ? <ActivityIndicator size="small" color="#FFF" />
+                : <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>Pick Up</Text>}
+            </TouchableOpacity>
+            {/* Rider no-show — only visible 30 min after scheduled departure */}
+            {(() => {
+              const dt = ride.dateTime;
+              if (!dt || !ride.confirmedId) return null;
+              const gracePassed = Date.now() > dt.getTime() + 30 * 60 * 1000;
+              if (!gracePassed) return null;
+              return (
+                <TouchableOpacity
+                  style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center' }}
+                  onPress={() => Alert.alert(
+                    'Rider no-show?',
+                    'Report that the rider did not show up after 30 minutes. The full ride amount will be charged to the rider.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Report no-show', style: 'destructive', onPress: async () => {
+                        try {
+                          const token = await firebaseAuth.currentUser?.getIdToken();
+                          const res = await fetch(`${getApiBaseUrl()}/api/rides/${ride.confirmedId}/rider-no-show`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                          });
+                          const json = await res.json();
+                          if (!res.ok) throw new Error(json?.error || 'Failed');
+                          Alert.alert('Reported', 'No-show recorded. The full ride amount has been charged.');
+                        } catch (e: any) {
+                          Alert.alert('Error', (e as any)?.message || 'Could not report no-show.');
+                        }
+                      }},
+                    ]
+                  )}
+                  activeOpacity={0.75}
+                >
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700' }}>No-show</Text>
+                </TouchableOpacity>
+              );
+            })()}
+          </>
         )}
-        {isInProgress && needsGroupComplete && (
-          <TouchableOpacity
-            style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: completing ? 0.6 : 1 }}
-            onPress={handleComplete}
-            disabled={completing}
-            activeOpacity={0.8}
-          >
-            {completing
-              ? <ActivityIndicator size="small" color="#FFF" />
-              : <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>Complete Ride</Text>}
-          </TouchableOpacity>
+        {isInProgress && !isDriverCompleted && needsGroupComplete && (
+          <>
+            <TouchableOpacity
+              style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: completing ? 0.6 : 1 }}
+              onPress={handleComplete}
+              disabled={completing}
+              activeOpacity={0.8}
+            >
+              {completing
+                ? <ActivityIndicator size="small" color="#FFF" />
+                : <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>Complete Ride</Text>}
+            </TouchableOpacity>
+          </>
         )}
-        {isInProgress && !needsGroupComplete && (
+        {(isDriverCompleted || (isInProgress && !needsGroupComplete)) && (
           <View style={{ flex: 1, alignItems: 'center', paddingVertical: 10 }}>
-            <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '600' }}>Waiting for {groupWaitingCount} rider{groupWaitingCount === 1 ? '' : 's'} to confirm…</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '600' }}>
+              {isDriverCompleted ? 'Waiting for rider to confirm arrival…' : `Waiting for ${groupWaitingCount} rider${groupWaitingCount === 1 ? '' : 's'} to confirm…`}
+            </Text>
           </View>
         )}
-        {!isConfirmedOnly && !isInProgress && !isFlagged && !hasOfferReceived && (
+        {isOfferSent && onCancelOffer && (
           <TouchableOpacity
-            style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center' }}
-            onPress={openRequest}
+            style={{ flex: 1, borderRadius: 20, paddingVertical: 10, alignItems: 'center', borderWidth: 1.5, borderColor: colors.border }}
+            onPress={onCancelOffer}
             activeOpacity={0.8}
           >
-            <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>View Details</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '700' }}>Withdraw Offer</Text>
           </TouchableOpacity>
         )}
-        {!isConfirmedOnly && !isInProgress && !isFlagged && hasOfferReceived && (
+        {!isConfirmedOnly && !isInProgress && !hasOfferReceived && !isOfferSent && (
+          <>
+            <TouchableOpacity
+              style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center' }}
+              onPress={openRequest}
+              activeOpacity={0.8}
+            >
+              <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>View Details</Text>
+            </TouchableOpacity>
+            {/* Partial start — show when group ride has some but not all seats filled */}
+            {onPartialStart && isPosting && (seatsFilled ?? 0) > 0 && seatCount > 1 && (seatsFilled ?? 0) < seatCount && (
+              <TouchableOpacity
+                style={{ flex: 1, borderRadius: 20, paddingVertical: 10, alignItems: 'center', borderWidth: 1.5, borderColor: colors.primary }}
+                onPress={onPartialStart}
+                activeOpacity={0.8}
+              >
+                <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>Start with {seatsFilled}</Text>
+              </TouchableOpacity>
+            )}
+          </>
+        )}
+        {!isConfirmedOnly && !isInProgress && hasOfferReceived && (
           <>
             <TouchableOpacity
               style={{ flex: 1, borderRadius: 20, paddingVertical: 10, alignItems: 'center', borderWidth: 1.5, borderColor: colors.border }}
@@ -592,15 +737,14 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
         )}
       </View>
 
-      {ride.confirmedId ? (
-        <FlagRideModal
-          visible={flagVisible}
-          onClose={() => setFlagVisible(false)}
-          rideId={ride.confirmedId}
-          role="driver"
-          onFlagged={() => setFlagVisible(false)}
+      {ride.confirmedId && (
+        <ReportIssueModal
+          visible={reportVisible}
+          onClose={() => setReportVisible(false)}
+          confirmedRideId={ride.confirmedId}
+          reportedDuringRide={isInProgress || isConfirmedOnly}
         />
-      ) : null}
+      )}
     </View>
   );
 }
@@ -732,10 +876,6 @@ export default function HomeScreen() {
 
   // Stores all future recurring instances per schedule so we can reactively pick the right one
   const recurringPoolRef = useRef<Record<string, { id: string; r: any; dt: Date }[]>>({});
-
-  const [flagModalVisible, setFlagModalVisible] = useState(false);
-  const [flaggingRideRef, setFlaggingRideRef] = useState<any | null>(null);
-  const [flaggingLoading, setFlaggingLoading] = useState(false);
 
   const [rideActionLoading, setRideActionLoading] = useState<Record<string, boolean>>({});
   const [waitingAfterComplete, setWaitingAfterComplete] = useState<Record<string, boolean>>({});
@@ -1782,7 +1922,39 @@ export default function HomeScreen() {
             // Prefer explicit metrics; else fallback to originals
             const durationText = getDurationText(r) || getDurationText(r?.originalRidePosting) || getDurationText(r?.originalRidePostingRequest);
             const distanceText = extractDistance(r) || extractDistance(r?.originalRidePosting) || extractDistance(r?.originalRidePostingRequest);
-      if (r.rideRequestId) {
+      const riderIdVal = r.riderId || r.userId || r.requesterId || r.ownerId || r.user?.id;
+          const riderNameVal = r.riderName || r.userName || r.requesterName || null;
+          const riderAvatarVal = r.riderAvatarUrl || r.userAvatarUrl || r.profilePicture || r.photoURL || null;
+          const riderRatingVal = typeof r.riderRating === 'number' ? r.riderRating : null;
+
+          // Async: always fetch from riders/{uid} for avatar — confirmedRide docs don't store it
+          if (riderIdVal) {
+            getDoc(doc(firestore, 'riders', riderIdVal)).then(async (rSnap) => {
+              if (!rSnap.exists()) return;
+              const rd = rSnap.data() as any;
+              const name = rd.fullName || rd.name || rd.displayName || [rd.firstName, rd.lastName].filter(Boolean).join(' ').trim() || null;
+              const avatar = rd.avatarUrl || rd.photoURL || rd.photoUrl || null;
+              // riders/{uid}.rating is maintained as rider-role rating only by the backend
+              // (backfilled and kept separate from drivers/{uid}.rating which is driver-role)
+              const rating: number | null = (typeof rd.rating === 'number' && rd.rating > 0) ? rd.rating : null;
+              setUpcConfirmed((prev) => {
+                const key = r.rideRequestId ? `rideRequest-${r.rideRequestId}` : `ridePosting-${r.ridePostingId}`;
+                if (!prev[key]) return prev;
+                const existing = prev[key];
+                return {
+                  ...prev,
+                  [key]: {
+                    ...existing,
+                    riderName: existing.riderName || name || null,
+                    riderAvatarUrl: avatar || existing.riderAvatarUrl || null,
+                    riderRating: existing.riderRating ?? rating ?? null,
+                  },
+                };
+              });
+            }).catch(() => {});
+          }
+
+          if (r.rideRequestId) {
             cards[`rideRequest-${String(r.rideRequestId)}`] = {
               id: String(r.rideRequestId),
               type: 'rideRequest',
@@ -1796,8 +1968,11 @@ export default function HomeScreen() {
               distanceText,
               confirmedId: d.id,
               confirmedStatus: String(r?.status || 'CONFIRMED'),
-              riderId: r.riderId || r.userId || r.requesterId || r.ownerId || r.user?.id,
-        confirmedDriverComplete: r.driverCompleteConfirmed === true,
+              riderId: riderIdVal,
+              riderName: riderNameVal,
+              riderAvatarUrl: riderAvatarVal,
+              riderRating: riderRatingVal,
+              confirmedDriverComplete: r.driverCompleteConfirmed === true,
               confirmedDriverPickup: r.driverPickupConfirmed === true,
               raw: r,
             };
@@ -1821,8 +1996,11 @@ export default function HomeScreen() {
               distanceText,
               confirmedId: d.id,
               confirmedStatus: String(r?.status || 'CONFIRMED'),
-              riderId: r.riderId || r.userId || r.requesterId || r.ownerId || r.user?.id,
-        confirmedDriverComplete: r.driverCompleteConfirmed === true,
+              riderId: riderIdVal,
+              riderName: riderNameVal,
+              riderAvatarUrl: riderAvatarVal,
+              riderRating: riderRatingVal,
+              confirmedDriverComplete: r.driverCompleteConfirmed === true,
               confirmedDriverPickup: r.driverPickupConfirmed === true,
               seatCount,
               raw: r,
@@ -3349,9 +3527,8 @@ export default function HomeScreen() {
 
   const badgeProps = (
     isOfferReceived: boolean, isOfferSent: boolean, isPosted: boolean,
-    isConfirmed: boolean, isInProgress: boolean, isFlagged: boolean,
+    isConfirmed: boolean, isInProgress: boolean,
   ) => {
-    if (isFlagged)       return { bg: 'rgba(239,68,68,0.15)',   txt: colors.red,   label: 'Flagged' };
     if (isOfferReceived) return { bg: 'rgba(245,158,11,0.15)',  txt: colors.amber, label: 'Offer Received' };
     if (isOfferSent)     return { bg: 'rgba(59,130,246,0.15)',  txt: COLORS.blue,  label: 'Offer Sent' };
     if (isInProgress)    return { bg: 'rgba(16,185,129,0.15)',  txt: colors.green, label: 'In Progress' };
@@ -3456,7 +3633,8 @@ export default function HomeScreen() {
     if (!next) return 'where to?';
 
     const status = String(next.confirmedStatus || next.status || '').toLowerCase();
-    if (status.includes('progress') || status.includes('driver_completed') || status.includes('rider_completed')) return 'your ride is in progress.';
+    if (status.includes('driver_completed') || status.includes('rider_completed')) return 'awaiting rider confirmation.';
+    if (status.includes('progress')) return 'your ride is in progress.';
     if (status === 'pending' && next.type === 'ridePosting' && (next.seatCount ?? 1) > 1) {
       const filled = confirmedCountByPostingId[next.id] || 0;
       const remaining = (next.seatCount ?? 1) - filled;
@@ -3536,6 +3714,40 @@ export default function HomeScreen() {
                   const reqId = postingReqByPostingId[displayUpcoming[0].id]?.id;
                   if (reqId) rejectPostingRequest(reqId);
                 }}
+                onPartialStart={(() => {
+                  const card = displayUpcoming[0];
+                  const filled = confirmedCountByPostingId[card.id] ?? 0;
+                  const total  = (card as any).seatCount ?? 1;
+                  if (card.type !== 'ridePosting' || total <= 1 || filled === 0 || filled >= total) return undefined;
+                  return () => Alert.alert(
+                    `Start with ${filled} rider${filled === 1 ? '' : 's'}?`,
+                    `The ride will start with ${filled} of ${total} seats filled. The empty seat will be closed and any pending requests declined.`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Start ride', onPress: async () => {
+                        try {
+                          const token = await firebaseAuth.currentUser?.getIdToken();
+                          const res = await fetch(`${getApiBaseUrl()}/api/ride-postings/${encodeURIComponent(card.id)}/partial-start`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                          });
+                          const json = await res.json();
+                          if (!res.ok) throw new Error(json?.error || 'Failed');
+                        } catch (e: any) {
+                          Alert.alert('Error', e?.message || 'Could not start ride.');
+                        }
+                      }},
+                    ]
+                  );
+                })()}
+                onCancelOffer={(() => {
+                  const card = displayUpcoming[0];
+                  const offerId = card?.id;
+                  if (!offerId) return undefined;
+                  const rawStatus = String((card as any).status || '').toLowerCase();
+                  if (!['offer sent','offer_sent','sent'].includes(rawStatus)) return undefined;
+                  return () => cancelOffer(offerId);
+                })()}
               />
             ) : (
               <DriverHomePostRideCard />
@@ -3777,7 +3989,6 @@ export default function HomeScreen() {
               const normalizedStatus = (confirmedStatusRaw === 'DRIVER_COMPLETED' || confirmedStatusRaw === 'RIDER_COMPLETED') ? 'IN_PROGRESS' : confirmedStatusRaw;
               const confirmedStatusKey = normalizedStatus.replace(/[-\s]/g, '_');
               const rawStatusKey = String(r?.status || '').toLowerCase();
-              const isFlagged = (confirmedStatusKey === 'FLAGGED') || rawStatusKey === 'flagged';
               const isConfirmed = hasConfirmedRide && (confirmedStatusKey === 'CONFIRMED' || confirmedStatusKey === 'IN_PROGRESS');
               const isInProgress = hasConfirmedRide && confirmedStatusKey === 'IN_PROGRESS';
               const cardKey = `${r.type}-${r.id}`;
@@ -3835,16 +4046,6 @@ export default function HomeScreen() {
                         </View>
                       </View>
                       <View style={s.actionRow}>
-                        {!isGrpFlagged && (
-                          <TouchableOpacity onPress={() => {
-                            if (passengers.length > 0 && passengers[0]?.confirmedId) {
-                              setFlaggingRideRef({ confirmedId: passengers[0].confirmedId, type: 'groupRide', id: postingId, ridePostingId: postingId });
-                              setFlagModalVisible(true);
-                            }
-                          }} style={s.iconBtn}>
-                            <Ionicons name="flag" size={16} color={colors.red} />
-                          </TouchableOpacity>
-                        )}
                         {aggStatus === 'CONFIRMED' && (
                           <Button size="sm" variant="primary" onPress={async () => {
                             try {
@@ -3891,6 +4092,7 @@ export default function HomeScreen() {
                     pendingRequestId={reqId}
                     onAcceptRequest={reqId ? () => acceptPostingRequest(reqId) : undefined}
                     onRejectRequest={reqId ? () => rejectPostingRequest(reqId) : undefined}
+                    onCancelOffer={(isOwnPendingOffer || isOfferSent) ? () => cancelOffer(r.id) : undefined}
                   />
                 </View>
               );
@@ -4198,29 +4400,6 @@ export default function HomeScreen() {
           </View>
         </Modal>
       )}
-
-      {/* Flag Modal */}
-      <FlagRideModal
-        visible={flagModalVisible}
-        onClose={() => { setFlagModalVisible(false); setFlaggingRideRef(null); }}
-        rideId={flaggingRideRef?.confirmedId ?? null}
-        onFlagged={() => {
-          if (flaggingRideRef) {
-            setUpcConfirmed((prev) => {
-              const next = { ...prev } as any;
-              const key = `${flaggingRideRef.type}-${flaggingRideRef.id}`;
-              if (next[key]) next[key] = { ...next[key], status: 'flagged', confirmedStatus: 'flagged' };
-              return next;
-            });
-            setUpcoming((prev) => prev.map((it) =>
-              it.type === flaggingRideRef.type && it.id === flaggingRideRef.id
-                ? { ...it, status: 'flagged' } : it
-            ));
-          }
-          setFlagModalVisible(false);
-          setFlaggingRideRef(null);
-        }}
-      />
 
       {/* Promotion Details Modal */}
       <PromotionDetailsModal

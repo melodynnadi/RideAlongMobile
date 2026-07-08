@@ -249,14 +249,13 @@ export type Payout = {
   type: string;
   method?: string;
   amount: number;
-  date: string;
+  date: number | string;        // Unix timestamp (seconds) or ISO string
+  arrivalDate?: number | null;
+  created?: number;
   status: string;
-  arrivalDate?: string | null;
-  currency?: string;
-  description?: string;
-  failure_code?: string;
-  failure_message?: string;
-  destination?: string;
+  bankLast4?: string | null;
+  description?: string | null;
+  destination?: string | null;
 };
 
 export async function fetchPayouts(limit: number = 10): Promise<{ payouts: Payout[] }> {

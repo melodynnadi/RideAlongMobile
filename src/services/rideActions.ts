@@ -3,7 +3,6 @@ import { firestore, getApiBaseUrl, firebaseAuth } from '@/constants/services';
 import { collection, doc, getDoc, getDocs, query, updateDoc, where, serverTimestamp } from 'firebase/firestore';
 import { updateRideStatus } from '@/src/services/functions';
 import { resolveConfirmedDocId } from '@/src/services/ridesData';
-import { submitDriverFlag, FlagPayload } from '@/src/services/flagService';
 import { logActivity } from '@/src/services/activity';
 import EmailTriggerService from '../../services/EmailTriggerService';
 import { captureRidePayment } from '@/services/payments';
@@ -32,7 +31,7 @@ export type RideCardRef = {
   riderId?: string;
 };
 
-export async function confirmPickup(card: RideCardRef): Promise<boolean> {
+export async function confirmPickup(card: RideCardRef & { verificationCode?: string }): Promise<boolean> {
   try {
     const rideId = await resolveConfirmedDocId(card);
     if (!rideId) {
@@ -65,8 +64,14 @@ export async function confirmPickup(card: RideCardRef): Promise<boolean> {
         driverPickupConfirmed: true,
         updatedAt: serverTimestamp(),
       }).catch(() => {});
-      const ok = await callUpdateRideStatus(rideId, 'driver_pickup');
-      if (!ok) throw new Error('pickup_failed');
+      const result = await callUpdateRideStatus(rideId, 'driver_pickup', card.verificationCode ? { verificationCode: card.verificationCode } : undefined);
+      if (!result.ok) {
+        if (result.code === 'code_invalid' || result.code === 'code_required') {
+          Alert.alert('Incorrect code', result.error || 'The code you entered does not match. Ask your rider for the code shown in their app.');
+          return false;
+        }
+        throw new Error('pickup_failed');
+      }
       await logActivity({
         type: 'ride_picked_up',
         entityType: 'ride',
@@ -84,8 +89,8 @@ export async function confirmPickup(card: RideCardRef): Promise<boolean> {
       if (code === 'failed-precondition') {
         try {
           await updateDoc(doc(firestore, 'confirmedRides', rideId), { status: 'CONFIRMED' });
-          const ok2 = await callUpdateRideStatus(rideId, 'driver_pickup');
-          if (!ok2) throw new Error('pickup_failed_retry');
+          const r2 = await callUpdateRideStatus(rideId, 'driver_pickup');
+          if (!r2.ok) throw new Error('pickup_failed_retry');
           return true;
         } catch (e2) {
           throw e2;
@@ -114,7 +119,7 @@ export async function completeRide(card: RideCardRef): Promise<boolean> {
       driverCompleteConfirmed: true,
       updatedAt: serverTimestamp(),
     }).catch(() => {});
-    const ok = await callUpdateRideStatus(rideId, 'driver_complete');
+    const { ok } = await callUpdateRideStatus(rideId, 'driver_complete');
     if (!ok) throw new Error('complete_failed');
     await logActivity({
       type: 'ride_completed',
@@ -139,7 +144,7 @@ export async function riderCompleteRide(confirmedRideId: string): Promise<boolea
       riderCompleteConfirmed: true,
       updatedAt: serverTimestamp(),
     }).catch(() => {});
-    const ok = await callUpdateRideStatus(confirmedRideId, 'rider_complete');
+    const { ok } = await callUpdateRideStatus(confirmedRideId, 'rider_complete');
     if (!ok) throw new Error('rider_complete_failed');
     await logActivity({
       type: 'ride_completed',
@@ -236,58 +241,6 @@ export async function cancelRide(card: RideCardRef): Promise<boolean> {
   }
 }
 
-async function callFlagEndpoint(rideId: string, payload: FlagPayload): Promise<{ flaggedRides: number; isGroupRide: boolean }> {
-  const token = await firebaseAuth.currentUser?.getIdToken();
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/api/rides/${encodeURIComponent(rideId)}/flag`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: JSON.stringify({ reason: payload.reason, details: payload.details, flaggedByRole: payload.flaggedByRole, severity: 'normal' }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || `Server error ${res.status}`);
-  return { flaggedRides: body.flaggedRides || 1, isGroupRide: body.isGroupRide || false };
-}
-
-export async function flagRide(card: RideCardRef, payload: FlagPayload): Promise<boolean> {
-  try {
-    const rideId = await resolveConfirmedDocId(card);
-    if (!rideId) { Alert.alert('Error', 'Ride not found'); return false; }
-    const result = await callFlagEndpoint(rideId, payload);
-    await logActivity({ type: 'ride_flagged', entityType: 'ride', entityId: rideId, metadata: { reason: payload.reason, flaggedRides: result.flaggedRides, isGroupRide: result.isGroupRide } });
-    Alert.alert(
-      result.isGroupRide ? 'Group Ride Flagged' : 'Ride Flagged',
-      result.isGroupRide
-        ? `All ${result.flaggedRides} passengers have been flagged. Admin will review. No further actions until resolved.`
-        : 'This ride has been flagged for admin review. No further actions until resolved.',
-      [{ text: 'OK' }]
-    );
-    return true;
-  } catch (e: any) {
-    console.warn('flagRide error', e);
-    Alert.alert('Error', e?.message || 'Could not submit flag. Please try again.');
-    return false;
-  }
-}
-
-export async function groupFlag(ridePostingId: string, payload: FlagPayload): Promise<boolean> {
-  try {
-    if (!ridePostingId) throw new Error('missing_posting_id');
-    const qy = query(collection(firestore, 'confirmedRides'), where('ridePostingId', '==', ridePostingId));
-    const snap = await getDocs(qy);
-    if (snap.empty) { Alert.alert('Error', 'No confirmed rides found for this posting'); return false; }
-    const firstRideId = snap.docs[0].id;
-    const result = await callFlagEndpoint(firstRideId, payload);
-    await logActivity({ type: 'group_ride_flagged', entityType: 'posting', entityId: ridePostingId, metadata: { reason: payload.reason, flaggedRides: result.flaggedRides } });
-    Alert.alert('Group Ride Flagged', `All ${result.flaggedRides} passengers have been flagged. Admin will review.`, [{ text: 'OK' }]);
-    return true;
-  } catch (e: any) {
-    console.warn('groupFlag error', e);
-    Alert.alert('Error', e?.message || 'Could not submit flag. Please try again.');
-    return false;
-  }
-}
-
 // --- Group ride actions (posting-level) ---
 // Pick up all child confirmed rides for a posting (Dual Passenger Group Ride)
 export async function groupPickup(ridePostingId: string): Promise<{ ok: boolean; updated: number; total: number; failedCount: number; riderIds: string[]; confirmedRideIds: string[] }> {
@@ -318,8 +271,8 @@ export async function groupPickup(ridePostingId: string): Promise<{ ok: boolean;
           driverPickupConfirmed: true,
           updatedAt: serverTimestamp(),
         }).catch(() => {});
-        const ok = await callUpdateRideStatus(id, 'driver_pickup');
-        if (!ok) throw new Error('pickup_failed');
+        const { ok: pickupOk } = await callUpdateRideStatus(id, 'driver_pickup');
+        if (!pickupOk) throw new Error('pickup_failed');
         updated++;
         confirmedRideIds.push(id);
       } catch (e) {
@@ -369,8 +322,8 @@ export async function groupComplete(ridePostingId: string): Promise<{ ok: boolea
           driverCompleteConfirmed: true,
           updatedAt: serverTimestamp(),
         }).catch(() => {});
-        const ok = await callUpdateRideStatus(id, 'driver_complete');
-        if (!ok) throw new Error('complete_failed');
+        const { ok: completeOk } = await callUpdateRideStatus(id, 'driver_complete');
+        if (!completeOk) throw new Error('complete_failed');
         updated++;
       } catch (e) {
         // Don't silently drop this rider — surface it so the driver knows to retry.
@@ -392,28 +345,32 @@ export async function groupComplete(ridePostingId: string): Promise<{ ok: boolea
 }
 
 // --- Backend update helper: Firebase Callable first, REST fallback to Express ---
-async function callUpdateRideStatus(rideId: string, action: 'driver_pickup' | 'driver_complete' | 'rider_pickup' | 'rider_complete'): Promise<boolean> {
-  try {
-    const res: any = await updateRideStatus({ rideId, action });
-    if (res && (res as any).data && (res as any).data.ok === false) {
-      // fall through to REST
-      throw new Error('callable_failed');
-    }
-    return true;
-  } catch (e) {
+async function callUpdateRideStatus(rideId: string, action: 'driver_pickup' | 'driver_complete' | 'rider_pickup' | 'rider_complete', extra?: Record<string, any>): Promise<{ ok: boolean; error?: string; code?: string }> {
+  // If extra params are present (e.g. verificationCode), skip the Cloud Function —
+  // it doesn't support these params and would bypass validation. Go straight to REST.
+  if (!extra || Object.keys(extra).length === 0) {
     try {
-      const base = getApiBaseUrl();
-      const token = await firebaseAuth.currentUser?.getIdToken();
-      const resp = await fetch(`${base}/rides/${encodeURIComponent(rideId)}/update-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ action, userId: firebaseAuth.currentUser?.uid }),
-      });
-      if (!resp.ok) return false;
-      const j = await resp.json().catch(() => ({ ok: true }));
-      return !!(j && j.ok !== false);
+      const res: any = await updateRideStatus({ rideId, action });
+      if (res && (res as any).data && (res as any).data.ok === false) {
+        throw new Error('callable_failed');
+      }
+      return { ok: true };
     } catch {
-      return false;
+      // fall through to REST
     }
+  }
+  try {
+    const base = getApiBaseUrl();
+    const token = await firebaseAuth.currentUser?.getIdToken();
+    const resp = await fetch(`${base}/rides/${encodeURIComponent(rideId)}/update-status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ action, userId: firebaseAuth.currentUser?.uid, ...(extra || {}) }),
+    });
+    const j = await resp.json().catch(() => ({ ok: resp.ok }));
+    if (!resp.ok) return { ok: false, error: j?.message || j?.error, code: j?.error };
+    return { ok: !!(j && j.ok !== false) };
+  } catch {
+    return { ok: false };
   }
 }
