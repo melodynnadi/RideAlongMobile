@@ -340,6 +340,18 @@ class NotificationService {
           router.replace(isDriver ? '/(driver)' : '/(rider)');
           break;
 
+        case 'driver_on_the_way': {
+          if (!isDriver) {
+            const trackingKey = (data as any).postingId || (data as any).rideId;
+            if (trackingKey) {
+              router.push({ pathname: '/(rider)/driver-map', params: { trackingKey } } as any);
+              break;
+            }
+          }
+          router.replace('/(rider)');
+          break;
+        }
+
         case 'ride_accepted':
         case 'ride_started':
         case 'ride_status_change':

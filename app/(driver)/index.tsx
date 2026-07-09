@@ -41,6 +41,7 @@ import { DriverHomeUtilityBar } from '@/components/reference/DriverReferenceScre
 import { DatePickerModal, TimePickerModal, formatDateLabel } from '@/components/DateTimePickerModals';
 import { createRoleNotification } from '@/src/services/notificationRecords';
 import { getOrCreateRideChat } from '@/src/services/chatAvailability';
+import { useDriverTracking } from '@/src/hooks/useDriverTracking';
 
 // ─── Design Tokens (rider palette) ───────────────────────────────────────────
 const confirmationRepairs = new Set<string>();
@@ -357,6 +358,36 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
   const [reportVisible,  setReportVisible]  = React.useState(false);
   const [sendingEnRoute, setSendingEnRoute] = React.useState(false);
   const [enRouteSent,    setEnRouteSent]    = React.useState(!!(ride.raw as any)?.driverEnRoute);
+  React.useEffect(() => {
+    if ((ride.raw as any)?.driverEnRoute) setEnRouteSent(true);
+  }, [(ride.raw as any)?.driverEnRoute]);
+  const [requesterInfo, setRequesterInfo]  = React.useState<{ riderId: string; name: string; photo: string | null; rating: number | null } | null>(null);
+  // Fetch the requesting rider's profile when a booking request is pending
+  React.useEffect(() => {
+    if (!pendingRequestId || !hasOfferReceived) { setRequesterInfo(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const reqSnap = await getDoc(doc(firestore, 'ridePostingRequests', pendingRequestId));
+        if (!reqSnap.exists() || cancelled) return;
+        const reqData = reqSnap.data();
+        const riderId = reqData.riderId || reqData.userId;
+        if (!riderId) return;
+        const riderSnap = await getDoc(doc(firestore, 'riders', riderId));
+        const riderData = riderSnap.exists() ? riderSnap.data() : {};
+        const userSnap = await getDoc(doc(firestore, 'users', riderId));
+        const userData = userSnap.exists() ? userSnap.data() : {};
+        const name = riderData.fullName || riderData.firstName
+          ? [riderData.firstName, riderData.lastName].filter(Boolean).join(' ') || riderData.fullName
+          : userData.fullName || userData.displayName || reqData.riderName || 'Rider';
+        const photo = riderData.avatarUrl || riderData.photoURL || userData.avatarUrl || userData.photoURL || null;
+        const rating = typeof riderData.rating === 'number' ? riderData.rating : null;
+        if (!cancelled) setRequesterInfo({ riderId, name: name || 'Rider', photo, rating });
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [pendingRequestId, hasOfferReceived]);
+
   const dateText = ride.dateTime ? formatDate(ride.dateTime) : (ride.dateStr || 'Date pending');
   const rawStatus = String(ride.confirmedStatus || ride.status || '').toLowerCase();
   const isConfirmedOnly   = rawStatus === 'confirmed';
@@ -403,6 +434,12 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
     ? (Array.isArray((ride as any).passengers) ? (ride as any).passengers[0]?.confirmedId : undefined)
     : undefined;
   const activeConfirmedRideId = ride.confirmedId || groupRideTripId || null;
+  // For ridePosting/groupRide cards ride.id IS the posting ID; use it so the
+  // key matches what riders look up via ride.raw.ridePostingId on their side.
+  const trackingKey = (ride.type === 'ridePosting' || ride.type === 'groupRide')
+    ? ride.id
+    : activeConfirmedRideId;
+  useDriverTracking(trackingKey, enRouteSent && isConfirmedOnly);
   const firstGroupPassenger = groupPassengers?.[0];
   const openRequest = () => {
     if (ride.type === 'ridePosting' || ride.type === 'groupRide') {
@@ -558,6 +595,30 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
           </View>
         </View>
       </TouchableOpacity>
+
+      {/* Requesting rider info — shown on REQUEST RECEIVED before accept/decline */}
+      {hasOfferReceived && !isConfirmed && !isInProgress && requesterInfo && (
+        <TouchableOpacity
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border }}
+          onPress={() => router.push({ pathname: '/(driver)/rider/[id]', params: { id: requesterInfo.riderId, returnTo: '/(driver)' } } as any)}
+          activeOpacity={0.7}
+        >
+          <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+            {requesterInfo.photo
+              ? <Image source={{ uri: requesterInfo.photo }} style={{ width: 38, height: 38 }} resizeMode="cover" />
+              : <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: '700' }}>
+                  {requesterInfo.name.split(/\s+/).map((p: string) => p[0]).join('').slice(0, 2).toUpperCase()}
+                </Text>}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: '600' }} numberOfLines={1}>{requesterInfo.name}</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+              {requesterInfo.rating != null ? `★ ${requesterInfo.rating.toFixed(2)}` : 'No ratings yet'}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={14} color={colors.textSecondary} />
+        </TouchableOpacity>
+      )}
 
       {/* Rider info — shown when ride is confirmed or in progress; tappable → rider profile */}
       {(isConfirmed || isInProgress) && ride.riderName && (
@@ -2136,6 +2197,7 @@ export default function HomeScreen() {
               seatsFilled: items.length,
               seatCount,
               passengers,
+              raw: { ...base, driverEnRoute: items.some((it) => it.data?.driverEnRoute === true) },
             } as any;
           }
         });

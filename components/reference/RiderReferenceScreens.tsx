@@ -1039,9 +1039,24 @@ function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
             </TouchableOpacity>
           </>
         ) : (
-          <TouchableOpacity style={[styles.actionBtnSecondary, { flex: 1 }]} onPress={openDetails} activeOpacity={0.75}>
-            <Text style={styles.actionBtnSecondaryText}>View Details</Text>
-          </TouchableOpacity>
+          <>
+            {ride.raw?.driverEnRoute ? (
+              <TouchableOpacity
+                style={[styles.actionBtnSecondary, { flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', borderColor: colors.primary }]}
+                onPress={() => {
+                  const trackingKey = ride.raw?.ridePostingId || ride.id;
+                  router.push({ pathname: '/(rider)/driver-map', params: { trackingKey } } as any);
+                }}
+                activeOpacity={0.75}
+              >
+                <Ionicons name="navigate-outline" size={16} color={colors.primary} />
+                <Text style={[styles.actionBtnSecondaryText, { color: colors.primary }]}>Track Driver</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity style={[styles.actionBtnSecondary, { flex: 1 }]} onPress={openDetails} activeOpacity={0.75}>
+              <Text style={styles.actionBtnSecondaryText}>View Details</Text>
+            </TouchableOpacity>
+          </>
         )}
       </View>
 
@@ -1388,9 +1403,23 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
           </>
         ) : isConfirmed ? (
           <>
-            <TouchableOpacity style={styles.actionBtnSecondary} onPress={openChat} activeOpacity={0.75}>
-              <Text style={styles.actionBtnSecondaryText}>Message Driver</Text>
-            </TouchableOpacity>
+            {isEnRoute ? (
+              <TouchableOpacity
+                style={[styles.actionBtnSecondary, { flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', borderColor: colors.primary }]}
+                onPress={() => {
+                  const trackingKey = request.ridePostingId || confirmedRideId;
+                  if (trackingKey) router.push({ pathname: '/(rider)/driver-map', params: { trackingKey } } as any);
+                }}
+                activeOpacity={0.75}
+              >
+                <Ionicons name="navigate-outline" size={16} color={colors.primary} />
+                <Text style={[styles.actionBtnSecondaryText, { color: colors.primary }]}>Track Driver</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.actionBtnSecondary} onPress={openChat} activeOpacity={0.75}>
+                <Text style={styles.actionBtnSecondaryText}>Message Driver</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={[styles.actionBtnSecondary, { flex: 1 }]}
               onPress={() => router.push({ pathname: '/(rider)/ride/[id]', params: { id: request.id, returnTo: '/(rider)' } } as any)}
