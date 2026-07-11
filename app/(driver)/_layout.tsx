@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router';
 import { RouteErrorFallback } from '@/components/ErrorBoundary';
 import { usePendingRatingGate } from '@/src/hooks/usePendingRatingGate';
+import { useGlobalDriverEnRouteTracking } from '@/src/hooks/useGlobalDriverEnRouteTracking';
 import { useAuthStore } from '@/stores/authStore';
 
 export { RouteErrorFallback as ErrorBoundary };
@@ -8,6 +9,7 @@ export { RouteErrorFallback as ErrorBoundary };
 export default function DriverTabLayout() {
   const { isAuthenticated, isEmailVerified } = useAuthStore();
   usePendingRatingGate('driver', isAuthenticated && isEmailVerified);
+  useGlobalDriverEnRouteTracking(isAuthenticated && isEmailVerified);
 
   return (
     <Tabs

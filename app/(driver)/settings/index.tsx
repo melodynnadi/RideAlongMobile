@@ -297,7 +297,7 @@ function makeStyles(colors: AppColors) {
   return StyleSheet.create({
     root: { flex: 1, backgroundColor: colors.bg },
     safe: { flex: 1 },
-    scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 60 },
+    scrollContent: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 60 },
     pageHeader: { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
     backBtn: {
       width: 40,

@@ -158,7 +158,14 @@ const isInactiveRide = (ride: MobileRidePosting) => {
   const statusAtFlag = normalizedStatus(
     ride.raw?.statusAtFlag || ride.raw?.statusBeforeFlag || ride.raw?.flaggedFromStatus || ride.raw?.previousStatus,
   );
-  return inactiveRideStatuses.has(status) || statusAtFlag === 'completed' || Boolean(ride.raw?.completedAt || ride.raw?.endedAt);
+  // DRIVER_COMPLETED/RIDER_COMPLETED still require the other party's action.
+  // Older backend versions wrote completedAt too early, so the explicit active
+  // status must take precedence over that legacy timestamp.
+  const activeCompletionStatuses = new Set(['in_progress', 'driver_completed', 'rider_completed']);
+  const hasLegacyCompletionTimestamp = Boolean(ride.raw?.completedAt || ride.raw?.endedAt);
+  return inactiveRideStatuses.has(status)
+    || statusAtFlag === 'completed'
+    || (hasLegacyCompletionTimestamp && !activeCompletionStatuses.has(status));
 };
 
 export const toDate = (value: any): Date | null => {

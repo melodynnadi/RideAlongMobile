@@ -7,13 +7,14 @@ export function useReturnNavigation(fallbackRoute: string) {
 
   const goBack = useCallback(() => {
     const dest = returnTo || fallbackRoute;
-    // When an explicit returnTo is provided, always use it.
-    // router.back() goes to the wrong screen when the navigation was a tab
-    // switch rather than a stack push (e.g. Tabs.Screen destinations).
-    if (dest) {
-      router.navigate(dest as any);
-    } else if (router.canGoBack()) {
+    // Pop the current screen whenever it was pushed onto the stack. Navigating
+    // to `dest` here makes a back action animate like a new screen is opening
+    // and leaves the detail screen in the history.
+    if (router.canGoBack()) {
       router.back();
+    } else if (dest) {
+      // Deep links and restored sessions may not have a previous stack entry.
+      router.replace(dest as any);
     }
   }, [fallbackRoute, returnTo]);
 

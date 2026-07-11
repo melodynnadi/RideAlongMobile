@@ -128,6 +128,7 @@ function PhoneScreen({
   rightAction,
   bottomAction,
   onBack,
+  compactContent = false,
 }: {
   title?: string;
   activeTab?: TabKey;
@@ -137,6 +138,7 @@ function PhoneScreen({
   rightAction?: React.ReactNode;
   bottomAction?: React.ReactNode;
   onBack?: () => void;
+  compactContent?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const { goBack } = useReturnNavigation('/(rider)');
@@ -172,6 +174,7 @@ function PhoneScreen({
           keyboardDismissMode="interactive"
           contentContainerStyle={[
             styles.content,
+            compactContent ? styles.contentCompact : null,
             title ? styles.contentWithScrollableHeader : null,
             { paddingBottom: 16 + insets.bottom },
             activeTab ? { paddingBottom: bottomNavHeight } : null,
@@ -725,7 +728,16 @@ export function RiderHomeReference() {
       // Strategy 2: collection query by postingId — handles accepted-with-different-requestId
       const q = query(collection(firestore, 'confirmedRides'), where('ridePostingId', '==', _postingId));
       const unsub2 = onSnapshot(q, (snap) => {
-        const d = snap.docs.find((d) => d.data().riderId === uid) ?? snap.docs[0] ?? null;
+        // A posting can have multiple passengers. Never let another rider's
+        // CONFIRMED snapshot overwrite this rider's completion state.
+        const d = snap.docs.find((candidate) => {
+          const data = candidate.data();
+          return data.riderId === uid && (
+            data.ridePostingRequestId === _requestId
+            || data.requestId === _requestId
+            || candidate.id === `${_postingId}_${_requestId}`
+          );
+        }) ?? snap.docs.find((candidate) => candidate.data().riderId === uid) ?? null;
         if (d) {
           applySnap(d.id, d.data());
         } else if (!snap.docs.length) {
@@ -747,7 +759,7 @@ export function RiderHomeReference() {
       const d = snap.docs.find((doc) => {
         const data = doc.data();
         return data.rideRequestId === _requestId || data.rideId === _requestId;
-      }) ?? snap.docs[0] ?? null;
+      }) ?? null;
       if (d) {
         applySnap(d.id, d.data());
       } else {
@@ -1045,7 +1057,7 @@ function LiveRideCard({ ride }: { ride: MobileRidePosting }) {
                 style={[styles.actionBtnSecondary, { flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', borderColor: colors.primary }]}
                 onPress={() => {
                   const trackingKey = ride.raw?.ridePostingId || ride.id;
-                  router.push({ pathname: '/(rider)/driver-map', params: { trackingKey } } as any);
+                  router.push({ pathname: '/(rider)/driver-map', params: { trackingKey, confirmedRideId: ride.id } } as any);
                 }}
                 activeOpacity={0.75}
               >
@@ -1407,8 +1419,10 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
               <TouchableOpacity
                 style={[styles.actionBtnSecondary, { flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', borderColor: colors.primary }]}
                 onPress={() => {
-                  const trackingKey = request.ridePostingId || confirmedRideId;
-                  if (trackingKey) router.push({ pathname: '/(rider)/driver-map', params: { trackingKey } } as any);
+                  // Posting/group requests store the posting id as `rideId`, which is
+                  // also what the driver side uses as its tracking key for those rides.
+                  const trackingKey = request._isPostingRequest ? (request.rideId || confirmedRideId) : confirmedRideId;
+                  if (trackingKey) router.push({ pathname: '/(rider)/driver-map', params: { trackingKey, confirmedRideId } } as any);
                 }}
                 activeOpacity={0.75}
               >
@@ -1727,7 +1741,7 @@ function RiderRequestReferencePlaceholder() {
   const { colors } = useAppTheme();
   const riderPageTitleColor = colors.statusBar === 'light-content' ? '#FFFFFF' : colors.textPrimary;
   return (
-    <PhoneScreen activeTab="find">
+    <PhoneScreen activeTab="find" compactContent>
       <View style={styles.pageIntro}>
         <Text style={[styles.pageTitle, { color: riderPageTitleColor }]}>Request a ride</Text>
       </View>
@@ -2032,7 +2046,7 @@ export function RiderRequestReference() {
   };
 
   return (
-    <PhoneScreen activeTab="find">
+    <PhoneScreen activeTab="find" compactContent>
       <View style={styles.pageIntro}>
         <Text style={[styles.pageTitle, { color: riderPageTitleColor }]}>Request a ride</Text>
       </View>
@@ -2299,7 +2313,7 @@ export function RiderAvailableReference() {
   ];
 
   return (
-    <PhoneScreen activeTab="rides">
+    <PhoneScreen activeTab="rides" compactContent>
       <View style={styles.pageIntro}>
         <Text style={[styles.pageTitle, { color: riderPageTitleColor }]}>Available rides</Text>
       </View>
@@ -3652,6 +3666,7 @@ function makeStyles(colors: AppColors) {
   headerTitleAfterBack: { flexShrink: 1, marginLeft: 12 },
   circleBtn: { ...appHeader.iconButton, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border },
   content: { width: '100%', maxWidth: layout.contentMaxWidth, alignSelf: 'center', paddingHorizontal: layout.screenPadding, paddingTop: 24 },
+  contentCompact: { paddingTop: 8 },
   contentWithScrollableHeader: { paddingTop: 0 },
   homeUtilityBar: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: -6, marginBottom: 24 },
   homeBrandMark: { width: 36, height: 36, borderRadius: 12, overflow: 'hidden' },

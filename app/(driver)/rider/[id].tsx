@@ -169,7 +169,7 @@ export default function RiderProfilePage() {
   const s = useMemo(() => StyleSheet.create({
     root:        { flex: 1, backgroundColor: colors.bg },
     safe:        { flex: 1 },
-    scroll:      { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 40 },
+    scroll:      { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 40 },
     loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
     pageHeader: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },

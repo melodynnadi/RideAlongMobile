@@ -71,16 +71,18 @@ type DriverLocation = {
 
 export default function DriverMapScreen() {
   const { colors, isDark } = useAppTheme();
-  const { trackingKey } = useLocalSearchParams<{ trackingKey: string }>();
+  const { trackingKey, confirmedRideId } = useLocalSearchParams<{ trackingKey: string; confirmedRideId?: string }>();
   const mapRef = useRef<MapView>(null);
 
   const [driverLoc, setDriverLoc] = useState<DriverLocation | null>(null);
+  const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const [riderCoords, setRiderCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [routeCoords, setRouteCoords] = useState<{ latitude: number; longitude: number }[]>([]);
   const [durationMin, setDurationMin] = useState<number | null>(null);
   const [distanceMi, setDistanceMi] = useState<number | null>(null);
   const [arrived, setArrived] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   // Subscribe to driver's live location
   useEffect(() => {
@@ -101,7 +103,17 @@ export default function DriverMapScreen() {
     });
 
     return () => { clearTimeout(notFoundTimer); unsub(); };
-  }, [trackingKey]);
+  }, [trackingKey, retryCount]);
+
+  // Subscribe to the ride's verification code — give it to the driver on arrival
+  useEffect(() => {
+    if (!confirmedRideId) return;
+    const unsub = onSnapshot(doc(firestore, 'confirmedRides', confirmedRideId), (snap) => {
+      const code = snap.exists() ? (snap.data() as any)?.verificationCode : null;
+      setVerificationCode(code || null);
+    }, () => setVerificationCode(null));
+    return unsub;
+  }, [confirmedRideId]);
 
   // Get rider's own location once
   useEffect(() => {
@@ -222,10 +234,17 @@ export default function DriverMapScreen() {
       {notFound && (
         <View style={[s.overlay, { backgroundColor: colors.bgPrimary || '#FBFAF7' }]}>
           <Ionicons name="location-outline" size={40} color={colors.textSecondary} />
-          <Text style={[s.overlayText, { color: colors.textSecondary }]}>Driver location not available yet.</Text>
+          <Text style={[s.overlayText, { color: colors.textSecondary }]}>Still connecting to your driver's location.</Text>
           <Text style={[s.overlayText, { fontSize: 13, marginTop: 4, color: colors.textSecondary }]}>
-            Try again after the driver taps "I'm on my way".
+            This can take a minute once they're on the way — we'll keep trying in the background.
           </Text>
+          <TouchableOpacity
+            style={[s.retryBtn, { borderColor: colors.primary }]}
+            onPress={() => { setNotFound(false); setRetryCount((c) => c + 1); }}
+            activeOpacity={0.75}
+          >
+            <Text style={[s.retryBtnText, { color: colors.primary }]}>Check again</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -257,10 +276,18 @@ export default function DriverMapScreen() {
                   {distanceMi === null ? '—' : distanceMi < 0.1 ? 'Arriving' : `${distanceMi.toFixed(1)} mi`}
                 </Text>
               </View>
-              <View style={[s.etaDivider, { backgroundColor: colors.border }]} />
-              <View style={s.etaBlock}>
-                <Text style={[s.etaLabel, { color: colors.textSecondary }]}>UPDATES</Text>
-                <Text style={[s.etaValue, { color: colors.textPrimary }]}>Every 10s</Text>
+            </View>
+          )}
+
+          {verificationCode && (
+            <View style={[s.codeRow, { borderTopColor: colors.border }]}>
+              <Text style={[s.codeLabel, { color: colors.textSecondary }]}>Give this code to your driver</Text>
+              <View style={s.codeDigits}>
+                {String(verificationCode).split('').map((digit, i) => (
+                  <View key={i} style={[s.codeDigitBox, { borderColor: colors.primary, backgroundColor: colors.bg || colors.bgPrimary }]}>
+                    <Text style={[s.codeDigitText, { color: colors.primary }]}>{digit}</Text>
+                  </View>
+                ))}
               </View>
             </View>
           )}
@@ -334,6 +361,17 @@ const s = StyleSheet.create({
     fontSize: 15,
     textAlign: 'center',
   },
+  retryBtn: {
+    marginTop: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1.5,
+  },
+  retryBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
 
   infoCard: {
     position: 'absolute',
@@ -398,5 +436,35 @@ const s = StyleSheet.create({
   arrivedSub: {
     fontSize: 13,
     fontWeight: '500',
+  },
+
+  codeRow: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    alignItems: 'center',
+  },
+  codeLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  codeDigits: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  codeDigitBox: {
+    width: 40,
+    height: 48,
+    borderRadius: 10,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  codeDigitText: {
+    fontSize: 22,
+    fontWeight: '800',
   },
 });

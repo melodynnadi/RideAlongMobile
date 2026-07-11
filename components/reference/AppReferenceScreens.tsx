@@ -147,8 +147,8 @@ function Phone({
                   onPress={() => {
                     if (onBack) { onBack(); return; }
                     const dest = returnTo || backTarget || backHref;
-                    if (dest) { router.navigate(dest as any); return; }
-                    if (router.canGoBack()) router.back();
+                    if (router.canGoBack()) { router.back(); return; }
+                    if (dest) router.replace(dest as any);
                   }}
                   accessibilityRole="button"
                   accessibilityLabel="Go back"
@@ -1330,7 +1330,7 @@ function DriverPublicProfileReferenceInner() {
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 48 + insets.bottom }}>
 
           {/* Header */}
-          <View style={{ minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 8, marginBottom: 6 }}>
+          <View style={{ minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 2, marginBottom: 6 }}>
             <TouchableOpacity
               onPress={goBack}
               style={{ width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: BDR, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' }}
@@ -1849,7 +1849,7 @@ function RiderMessagesReferenceInner() {
           data={chats}
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 24, paddingBottom: 102, flexGrow: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 102, flexGrow: 1 }}
           showsVerticalScrollIndicator={false}
           ListHeaderComponent={
             <View style={{ marginBottom: 4 }}>
@@ -2283,7 +2283,7 @@ function RiderProfileReferenceInner() {
   };
 
   return (
-    <Phone activeTab="profile">
+    <Phone activeTab="profile" compactContent>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
         <Text style={{ fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1 }}>Profile</Text>
         <TouchableOpacity style={s.profileSettingsBtn} onPress={() => router.push({ pathname: '/(rider)/settings', params: { returnTo: '/(rider)/profile' } } as any)}><Ionicons name="settings" size={20} color={colors.textPrimary} /></TouchableOpacity>

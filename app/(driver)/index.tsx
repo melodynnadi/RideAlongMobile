@@ -41,7 +41,6 @@ import { DriverHomeUtilityBar } from '@/components/reference/DriverReferenceScre
 import { DatePickerModal, TimePickerModal, formatDateLabel } from '@/components/DateTimePickerModals';
 import { createRoleNotification } from '@/src/services/notificationRecords';
 import { getOrCreateRideChat } from '@/src/services/chatAvailability';
-import { useDriverTracking } from '@/src/hooks/useDriverTracking';
 
 // ─── Design Tokens (rider palette) ───────────────────────────────────────────
 const confirmationRepairs = new Set<string>();
@@ -434,12 +433,6 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
     ? (Array.isArray((ride as any).passengers) ? (ride as any).passengers[0]?.confirmedId : undefined)
     : undefined;
   const activeConfirmedRideId = ride.confirmedId || groupRideTripId || null;
-  // For ridePosting/groupRide cards ride.id IS the posting ID; use it so the
-  // key matches what riders look up via ride.raw.ridePostingId on their side.
-  const trackingKey = (ride.type === 'ridePosting' || ride.type === 'groupRide')
-    ? ride.id
-    : activeConfirmedRideId;
-  useDriverTracking(trackingKey, enRouteSent && isConfirmedOnly);
   const firstGroupPassenger = groupPassengers?.[0];
   const openRequest = () => {
     if (ride.type === 'ridePosting' || ride.type === 'groupRide') {
