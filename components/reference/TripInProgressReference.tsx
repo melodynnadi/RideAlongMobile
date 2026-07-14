@@ -29,7 +29,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { firebaseAuth, firestore, GOOGLE_MAPS_API_KEY } from '@/constants/services';
-import { completeRide, riderCompleteRide, groupComplete } from '@/src/services/rideActions';
+import { completeRide, riderCompleteRide, groupComplete, confirmPickup } from '@/src/services/rideActions';
 import { getOrCreateRideChat } from '@/src/services/chatAvailability';
 import { hasUserRatedRide } from '@/src/services/ratings';
 import { useAppTheme } from '@/hooks/ThemeContext';
@@ -608,6 +608,10 @@ export function RiderTripInProgressReference() {
 
 // ─── Driver Trip View ─────────────────────────────────────────────────────────
 
+// A rider counts as "picked up" (no longer a pickup target) once their ride is
+// in progress or beyond.
+const PICKED_UP_STATUSES = new Set(['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED', 'COMPLETED']);
+
 export function DriverTripInProgressReference() {
   const { colors, isDark } = useAppTheme();
   const s = useMemo(() => makeStyles(colors), [colors]);
@@ -634,9 +638,18 @@ export function DriverTripInProgressReference() {
     name: string;
     photoURL: string | null;
     status: string;
+    verificationCode: string | null;
   }>>([]);
   const [loading, setLoading] = useState(true);
   const ratingNavRef = useRef(false);
+
+  // Pre-pickup ("en route to rider") state. liveCoordsByRide holds each pending
+  // rider's live GPS, keyed by their confirmedRide id (one entry for solo rides).
+  const [liveCoordsByRide, setLiveCoordsByRide] = useState<Record<string, { latitude: number; longitude: number }>>({});
+  const [verificationCode, setVerificationCode] = useState<string | null>(null);
+  const [pickingUp, setPickingUp] = useState(false);
+  const driverLocRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const startAnnouncedPhaseRef = useRef<string | null>(null);
 
   // Navigation state
   const [navSteps, setNavSteps]             = useState<NavStep[]>([]);
@@ -658,6 +671,50 @@ export function DriverTripInProgressReference() {
   const etaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const headingSubRef = useRef<Location.LocationSubscription | null>(null);
 
+  // Unified list of riders to pick up: the whole group for a multi-seat posting,
+  // otherwise just this ride. Each entry carries its own confirmedRide id, code
+  // and status so pickups can be confirmed one rider at a time.
+  const pickupMembers = useMemo(() => {
+    if (trip?.ridePostingId && (trip.totalSeats ?? 1) > 1 && groupRiders.length) {
+      return groupRiders.map((r) => ({
+        confirmedRideId: r.confirmedRideId,
+        riderId: r.riderId,
+        name: r.name,
+        status: String(r.status || '').toUpperCase(),
+        verificationCode: r.verificationCode ?? null,
+      }));
+    }
+    if (confirmedRideId) {
+      return [{ confirmedRideId, riderId: trip?.riderId ?? null, name: riderName, status: rideStatus, verificationCode }];
+    }
+    return [];
+  }, [groupRiders, confirmedRideId, trip?.ridePostingId, trip?.totalSeats, trip?.riderId, riderName, rideStatus, verificationCode]);
+
+  const pendingMembers = useMemo(
+    () => pickupMembers.filter((m) => !PICKED_UP_STATUSES.has(String(m.status || '').toUpperCase())),
+    [pickupMembers],
+  );
+
+  // Two-phase navigation: while any rider still needs pickup, navigate to the
+  // nearest pending rider's live location; once everyone is aboard, to the dropoff.
+  const currentTarget = useMemo(() => {
+    if (!pendingMembers.length) return null;
+    if (!driverLoc) return pendingMembers[0];
+    let best = pendingMembers[0];
+    let bestD = Infinity;
+    for (const m of pendingMembers) {
+      const c = liveCoordsByRide[m.confirmedRideId] ?? pickupCoords;
+      if (!c) continue;
+      const d = haversineMiles(driverLoc, c);
+      if (d < bestD) { bestD = d; best = m; }
+    }
+    return best;
+  }, [pendingMembers, driverLoc, liveCoordsByRide, pickupCoords]);
+
+  const phase: 'toPickup' | 'toDropoff' = pendingMembers.length > 0 ? 'toPickup' : 'toDropoff';
+  const targetLiveCoords = currentTarget ? (liveCoordsByRide[currentTarget.confirmedRideId] ?? null) : null;
+  const destination = phase === 'toPickup' ? (targetLiveCoords ?? pickupCoords) : dropoffCoords;
+
   // Subscribe to confirmedRides for status + rider info
   useEffect(() => {
     if (!confirmedRideId) return;
@@ -666,6 +723,7 @@ export function DriverTripInProgressReference() {
       const d = snap.data();
       const status = String(d.status || '').toUpperCase();
       setRideStatus(status);
+      setVerificationCode(d.verificationCode || null);
       setTrip({
         pickup:   d.pickup  ?? d.pickupLocation  ?? null,
         dropoff:  d.dropoff ?? d.dropoffLocation ?? null,
@@ -690,6 +748,25 @@ export function DriverTripInProgressReference() {
     return unsub;
   }, [confirmedRideId]);
 
+  // Subscribe to each still-pending rider's live location (one doc for a solo
+  // ride, several for a group). Permission-denied before a rider starts sharing
+  // just means "no location yet" — handled quietly as a waiting state.
+  const pendingIdsKey = pendingMembers.map((m) => m.confirmedRideId).sort().join(',');
+  useEffect(() => {
+    if (!pendingIdsKey) { setLiveCoordsByRide({}); return; }
+    const ids = pendingIdsKey.split(',');
+    const unsubs = ids.map((id) =>
+      onSnapshot(doc(firestore, 'riderTracking', id), (snap) => {
+        if (!snap.exists()) return;
+        const d = snap.data() as any;
+        if (typeof d.lat === 'number' && typeof d.lng === 'number') {
+          setLiveCoordsByRide((prev) => ({ ...prev, [id]: { latitude: d.lat, longitude: d.lng } }));
+        }
+      }, () => { /* waiting for this rider to start sharing */ }),
+    );
+    return () => unsubs.forEach((u) => u());
+  }, [pendingIdsKey]);
+
   // For multi-seat postings, track every sibling rider — pending-confirmation count
   // and full passenger info so the live map can show everyone, not just this one.
   useEffect(() => {
@@ -707,6 +784,7 @@ export function DriverTripInProgressReference() {
           name: data.riderName || 'Rider',
           photoURL: data.riderAvatarUrl || data.userAvatarUrl || data.profilePicture || data.photoURL || null,
           status: String(data.status || '').toUpperCase(),
+          verificationCode: data.verificationCode ?? null,
         };
       });
       // Enrich riders missing a photo by fetching from riders collection
@@ -756,7 +834,7 @@ export function DriverTripInProgressReference() {
     });
   }, []);
 
-  // Resolve coords + route + nav steps
+  // Resolve pickup/dropoff coords from their address strings (both phases).
   useEffect(() => {
     if (!trip) return;
     let cancelled = false;
@@ -768,24 +846,61 @@ export function DriverTripInProgressReference() {
       if (cancelled) return;
       if (pc) setPickupCoords(pc);
       if (dc) setDropoffCoords(dc);
-      if (pc && dc) {
-        const dir = await fetchDirections(pc, dc);
-        if (!cancelled && dir) {
-          setRoutePoints(dir.polyline);
-          setDistanceMi(dir.distanceMi);
-          setDurationMin(dir.durationMin);
-          setNavSteps(dir.steps);
-          setCurrentStepIdx(0);
-          announcedRef.current.clear();
-          if (dir.steps[0]) {
-            speak(`Starting navigation. ${dir.steps[0].instruction}`);
-          }
-        }
-      }
       setLoading(false);
     })();
     return () => { cancelled = true; };
   }, [trip?.pickup, trip?.dropoff]);
+
+  // toDropoff phase — full turn-by-turn route from pickup to dropoff (unchanged
+  // behavior; runs once the rider is aboard and both endpoints are known).
+  useEffect(() => {
+    if (phase !== 'toDropoff' || !pickupCoords || !dropoffCoords) return;
+    let cancelled = false;
+    (async () => {
+      const dir = await fetchDirections(pickupCoords, dropoffCoords);
+      if (cancelled || !dir) return;
+      setRoutePoints(dir.polyline);
+      setDistanceMi(dir.distanceMi);
+      setDurationMin(dir.durationMin);
+      setNavSteps(dir.steps);
+      setCurrentStepIdx(0);
+      announcedRef.current.clear();
+      if (dir.steps[0] && startAnnouncedPhaseRef.current !== 'toDropoff') {
+        startAnnouncedPhaseRef.current = 'toDropoff';
+        speak(`Starting navigation. ${dir.steps[0].instruction}`);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [phase, pickupCoords, dropoffCoords]);
+
+  // toPickup phase — live route from the driver to the rider's current location.
+  // Coarsen driver (~110m) and destination (~55m) into a key so route refreshes
+  // as they move without hammering the Directions API on every GPS tick.
+  const targetId = currentTarget?.confirmedRideId ?? '';
+  const pickupRouteKey = phase === 'toPickup' && driverLoc && destination
+    ? `${targetId}:${Math.round(driverLoc.latitude * 1000)}:${Math.round(driverLoc.longitude * 1000)}:${Math.round(destination.latitude * 2000)}:${Math.round(destination.longitude * 2000)}`
+    : 'na';
+  useEffect(() => {
+    if (phase !== 'toPickup') return;
+    const origin = driverLocRef.current;
+    if (!origin || !destination) return;
+    let cancelled = false;
+    (async () => {
+      const dir = await fetchDirections(origin, destination);
+      if (cancelled || !dir) return;
+      setRoutePoints(dir.polyline);
+      setDistanceMi(dir.distanceMi);
+      setDurationMin(dir.durationMin);
+      // Re-announce whenever the target rider changes (advancing through a group).
+      const announceKey = `pickup:${targetId}`;
+      if (startAnnouncedPhaseRef.current !== announceKey) {
+        startAnnouncedPhaseRef.current = announceKey;
+        speak(pendingMembers.length > 1 ? `Navigating to ${currentTarget?.name || 'your rider'}.` : 'Navigating to your rider.');
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickupRouteKey]);
 
   // Watch driver location, publish to Firestore, update navigation
   useEffect(() => {
@@ -800,6 +915,7 @@ export function DriverTripInProgressReference() {
           if (!active) return;
           const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
           const bearing = loc.coords.heading ?? 0;
+          driverLocRef.current = coords;
           setDriverLoc(coords);
           setHeading(bearing);
 
@@ -876,11 +992,11 @@ export function DriverTripInProgressReference() {
   }, []);
 
   useEffect(() => {
-    if (driverLoc && dropoffCoords) {
-      updateEta(driverLoc, dropoffCoords);
+    if (driverLoc && destination) {
+      updateEta(driverLoc, destination);
     }
     return () => { if (etaTimerRef.current) clearTimeout(etaTimerRef.current); };
-  }, [driverLoc?.latitude, driverLoc?.longitude, dropoffCoords]);
+  }, [driverLoc?.latitude, driverLoc?.longitude, destination?.latitude, destination?.longitude]);
 
   // Fit map (fall back to endpoint pair if directions unavailable)
   useEffect(() => {
@@ -989,6 +1105,41 @@ export function DriverTripInProgressReference() {
     });
   };
 
+  const handleConfirmPickup = () => {
+    const target = currentTarget;
+    if (!target || pickingUp) return;
+    const doConfirm = async (code?: string) => {
+      setPickingUp(true);
+      // Confirms pickup for THIS rider only (server marks one confirmedRide at a
+      // time). Their status flips to IN_PROGRESS → they drop out of pendingMembers
+      // and the target advances to the next rider (or to the dropoff when none remain).
+      await confirmPickup({
+        confirmedId: target.confirmedRideId,
+        riderId: target.riderId || undefined,
+        verificationCode: code,
+      });
+      setPickingUp(false);
+    };
+    // Prompt for this rider's verification code when they have one (iOS supports
+    // Alert.prompt; mirrors the existing home-screen pickup flow).
+    if (target.verificationCode && Platform.OS === 'ios') {
+      Alert.prompt(
+        pendingMembers.length > 1 ? `Enter ${target.name}'s code` : "Enter rider's code",
+        "Ask your rider for their 4-digit verification code",
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Confirm', onPress: (input?: string) => {
+            if (!input || !input.trim()) { Alert.alert('Code required', "Please enter the rider's verification code."); return; }
+            doConfirm(input.trim());
+          } },
+        ],
+        'plain-text', '', 'number-pad',
+      );
+    } else {
+      doConfirm();
+    }
+  };
+
   const handleComplete = async () => {
     if (!confirmedRideId || completing) return;
     const doComplete = async () => {
@@ -1040,25 +1191,38 @@ export function DriverTripInProgressReference() {
         onRegionChangeComplete={(r) => setCurrentRegion(r)}
         onPanDrag={() => setFollowMode(false)}
       >
-        {pickupCoords && dropoffCoords && (
+        {routePoints.length > 1 && (
           <Polyline
-            coordinates={routePoints.length > 1 ? routePoints : [pickupCoords, dropoffCoords]}
+            coordinates={routePoints}
             strokeColor={colors.primary}
             strokeWidth={3.5}
             lineCap="round"
             lineJoin="round"
           />
         )}
-        {pickupCoords && (
+        {/* toDropoff shows pickup + dropoff dots; toPickup shows the live rider marker */}
+        {phase === 'toDropoff' && pickupCoords && (
           <Marker coordinate={pickupCoords} anchor={{ x: 0.5, y: 0.5 }}>
             <View style={s.dotPickup} />
           </Marker>
         )}
-        {dropoffCoords && (
+        {phase === 'toDropoff' && dropoffCoords && (
           <Marker coordinate={dropoffCoords} anchor={{ x: 0.5, y: 0.5 }}>
             <View style={s.dotDropoff} />
           </Marker>
         )}
+        {phase === 'toPickup' && pendingMembers.map((m) => {
+          const c = liveCoordsByRide[m.confirmedRideId] ?? pickupCoords;
+          if (!c) return null;
+          const isCurrent = m.confirmedRideId === currentTarget?.confirmedRideId;
+          return (
+            <Marker key={m.confirmedRideId} coordinate={c} anchor={{ x: 0.5, y: 1 }} opacity={isCurrent ? 1 : 0.55}>
+              <View style={[s.riderPinMarker, !isCurrent && { backgroundColor: colors.textSecondary }]}>
+                <Ionicons name="person" size={16} color={colors.textInverse} />
+              </View>
+            </Marker>
+          );
+        })}
         {/* Driver's own position — pulsing car marker */}
         {driverLoc && (
           <Marker coordinate={driverLoc} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false}>
@@ -1095,7 +1259,11 @@ export function DriverTripInProgressReference() {
             <TouchableOpacity style={s.headerBtn} onPress={() => router.back()} activeOpacity={0.75}>
               <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
             </TouchableOpacity>
-            <Text style={s.headerTitle}>Trip in progress</Text>
+            <Text style={s.headerTitle}>
+              {phase !== 'toPickup' ? 'Trip in progress'
+                : pendingMembers.length > 1 ? `Picking up ${currentTarget?.name || 'rider'}`
+                : 'Heading to pickup'}
+            </Text>
             <View style={s.headerBtn} />
           </View>
         )}
@@ -1179,13 +1347,28 @@ export function DriverTripInProgressReference() {
             </View>
             <View style={s.etaDivider} />
             <View style={s.etaBlock}>
-              <Text style={s.etaLabel}>MILES TO GO</Text>
+              <Text style={s.etaLabel}>{phase === 'toPickup' ? 'MILES TO RIDER' : 'MILES TO GO'}</Text>
               <Text style={s.etaValueSm}>{distanceMi !== null ? `${distanceMi.toFixed(1)} mi` : '—'}</Text>
             </View>
           </View>
 
-          {/* Complete button */}
-          {rideStatus !== 'DRIVER_COMPLETED' && rideStatus !== 'COMPLETED' ? (
+          {/* Primary action: confirm pickup before pickup, complete ride after */}
+          {phase === 'toPickup' ? (
+            <TouchableOpacity
+              style={[s.completeBtn, pickingUp && { opacity: 0.6 }]}
+              onPress={handleConfirmPickup}
+              disabled={pickingUp}
+              activeOpacity={0.85}
+            >
+              {pickingUp
+                ? <ActivityIndicator size="small" color={colors.textInverse} />
+                : <Text style={s.completeBtnText}>
+                    {pickupMembers.length > 1
+                      ? `Confirm Pickup — ${currentTarget?.name || 'rider'} (${pickupMembers.length - pendingMembers.length + 1}/${pickupMembers.length})`
+                      : 'Confirm Pickup'}
+                  </Text>}
+            </TouchableOpacity>
+          ) : rideStatus !== 'DRIVER_COMPLETED' && rideStatus !== 'COMPLETED' ? (
             <TouchableOpacity
               style={[s.completeBtn, completing && { opacity: 0.6 }]}
               onPress={handleComplete}
@@ -1260,6 +1443,7 @@ function makeStyles(colors: AppColors) {
 
     dotPickup:  { width: 14, height: 14, borderRadius: 7, backgroundColor: colors.textPrimary, borderWidth: 2, borderColor: colors.bgCard },
     dotDropoff: { width: 14, height: 14, borderRadius: 7, backgroundColor: colors.primary, borderWidth: 2, borderColor: colors.bgCard },
+    riderPinMarker: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2.5, borderColor: colors.bgCard },
 
     sheet:     {
       position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10,

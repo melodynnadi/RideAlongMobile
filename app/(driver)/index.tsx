@@ -656,7 +656,11 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
                     });
-                    if (res.ok) { setEnRouteSent(true); Alert.alert('Riders notified', 'Your riders have been notified you are on the way.'); }
+                    if (res.ok) {
+                      setEnRouteSent(true);
+                      // Take the driver straight into live navigation to the rider.
+                      router.push(`/(driver)/trip/${activeConfirmedRideId}` as any);
+                    }
                   } catch {}
                   setSendingEnRoute(false);
                 }}
@@ -668,9 +672,14 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
                   : <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>{"I'm on my way"}</Text>}
               </TouchableOpacity>
             ) : (
-              <View style={{ flex: 1, borderRadius: 20, paddingVertical: 10, alignItems: 'center', backgroundColor: colors.primaryDim }}>
-                <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>Riders notified ✓</Text>
-              </View>
+              <TouchableOpacity
+                style={{ flex: 1, borderRadius: 20, paddingVertical: 10, alignItems: 'center', backgroundColor: colors.primaryDim, flexDirection: 'row', justifyContent: 'center', gap: 5 }}
+                onPress={() => activeConfirmedRideId && router.push(`/(driver)/trip/${activeConfirmedRideId}` as any)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="navigate" size={13} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>Navigate to pickup</Text>
+              </TouchableOpacity>
             )}
             <TouchableOpacity
               style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: pickingUp ? 0.6 : 1 }}

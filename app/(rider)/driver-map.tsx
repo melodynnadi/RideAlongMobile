@@ -284,7 +284,7 @@ export default function DriverMapScreen() {
               <Text style={[s.codeLabel, { color: colors.textSecondary }]}>Give this code to your driver</Text>
               <View style={s.codeDigits}>
                 {String(verificationCode).split('').map((digit, i) => (
-                  <View key={i} style={[s.codeDigitBox, { borderColor: colors.primary, backgroundColor: colors.bg || colors.bgPrimary }]}>
+                  <View key={i} style={[s.codeDigitBox, { borderColor: colors.primary, backgroundColor: colors.bg }]}>
                     <Text style={[s.codeDigitText, { color: colors.primary }]}>{digit}</Text>
                   </View>
                 ))}

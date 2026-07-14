@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as DocumentPicker from 'expo-document-picker';
 
 import { UniversitySearch } from '@/components/ui/UniversitySearch';
@@ -322,10 +323,22 @@ function makeStyles(colors: AppColors) {
     submittedBtnText: { color: colors.textInverse, fontSize: 16, fontWeight: '700' },
 
     flagsList: { width: '100%', gap: 8, marginTop: 20 },
+    flagsSoftHeader: { fontSize: 13, fontWeight: '600', color: colors.textSecondary, marginBottom: 2 },
     flagRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
     flagText: { flex: 1, fontSize: 13, color: colors.red, lineHeight: 19 },
+
+    checklistCard: {
+      marginTop: 20, backgroundColor: colors.bgSecondary,
+      borderRadius: 14, padding: 16, width: '100%', gap: 8,
+    },
+    checklistTitle: { fontSize: 13, fontWeight: '700', color: colors.textPrimary, marginBottom: 2 },
+    checklistRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+    checklistText: { flex: 1, fontSize: 13, color: colors.textSecondary, lineHeight: 19 },
+
+    detailsToggle: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 16 },
+    detailsToggleText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
     reasoningCard: {
-      marginTop: 16, backgroundColor: colors.bgSecondary,
+      marginTop: 10, backgroundColor: colors.bgSecondary,
       borderRadius: 12, padding: 14, width: '100%',
     },
     reasoningText: { fontSize: 13, color: colors.textSecondary, lineHeight: 20 },
@@ -351,6 +364,7 @@ export function DriverSignUpScreen() {
     reasoning: string;
     score: number;
   } | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
 
   // Step 1 – Personal info
   const [firstName, setFirstName] = useState('');
@@ -407,7 +421,21 @@ export function DriverSignUpScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.85 });
-    if (!result.canceled && result.assets[0]) setter(result.assets[0]);
+    if (result.canceled || !result.assets[0]) return;
+    const asset = result.assets[0];
+    // iOS photos are HEIC, which neither Google Vision nor OpenAI OCR can read —
+    // convert to JPEG on-device so the license documents are actually verifiable.
+    try {
+      const jpegFormat = (ImageManipulator as any)?.SaveFormat?.JPEG || 'jpeg';
+      const converted = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        [{ resize: { width: 1600 } }],
+        { compress: 0.85, format: jpegFormat as any },
+      );
+      setter({ ...asset, uri: converted.uri, mimeType: 'image/jpeg', fileName: 'license.jpg' } as ImagePicker.ImagePickerAsset);
+    } catch {
+      setter(asset);
+    }
   };
 
   const pickDocument = async (setter: (a: DocAsset) => void) => {
@@ -599,68 +627,107 @@ export function DriverSignUpScreen() {
 
     const isApproved = decision === 'approved';
     const isRejected = decision === 'rejected';
+    const isReview = !isApproved && !isRejected;
 
+    // Orange for approved/review, red only for outright rejection — so the two
+    // states feel emotionally distinct.
+    const accent = isApproved ? colors.green : isRejected ? colors.red : colors.primary;
+    const accentDim = isApproved ? colors.greenDim : isRejected ? colors.redDim : colors.primaryDim;
     const iconName = isApproved ? 'checkmark-circle' : isRejected ? 'close-circle' : 'time';
-    const iconColor = isApproved ? colors.green : isRejected ? colors.red : colors.primary;
-    const title = isApproved
-      ? 'You\'re approved!'
-      : isRejected
-      ? 'Application not approved'
-      : 'Under review';
+    const title = isApproved ? 'You\'re approved!' : isRejected ? 'Application not approved' : 'Application received';
     const body = isApproved
       ? isUpgrade
         ? `You're now approved as a RideAlong driver! Tap below to switch to driver mode and start earning.`
         : `Congrats! Check your email at ${email} for a link to set up your password and start driving.`
       : isRejected
-      ? `Your application didn't pass our verification check. You can fix the issues below and reapply.`
-      : isUpgrade
-      ? `Your application is being reviewed by our team. We'll email you at ${email} within 24 hours.`
-      : `Your application is being reviewed by our team. We'll email you at ${email} within 24 hours.`;
+      ? `Your documents didn't pass our automated checks. Fix the issues below and reapply — it only takes a minute.`
+      : `Thanks! Our team is reviewing your documents. We'll email you at ${email} within 24 hours.`;
 
+    // Human, action-first messages — tell the user what to DO, not what our OCR thinks.
     const FLAG_LABELS: Record<string, string> = {
-      expired_license: 'Driver\'s license appears to be expired',
-      expired_insurance: 'Insurance policy appears to be expired',
-      invalid_license_document: 'License document couldn\'t be read — try a clearer photo',
-      invalid_insurance_document: 'Insurance document couldn\'t be read — try a clearer photo',
-      name_mismatch: 'Name on documents doesn\'t match your application',
-      car_mismatch: 'Vehicle details don\'t match your insurance document',
-      missing_license_fields: 'License missing required information',
-      missing_insurance_fields: 'Insurance missing required information',
-      suspicious_document: 'Document flagged as potentially invalid',
-      invalid_state: 'License state could not be verified',
+      expired_license: 'Your license looks expired — upload a current one',
+      expired_insurance: 'Your insurance looks expired — upload a current policy',
+      invalid_license_document: 'We couldn\'t read your license — upload a clearer, well-lit photo',
+      invalid_insurance_document: 'We couldn\'t read your insurance — upload a clearer photo of the full card',
+      name_mismatch: 'The name on your documents doesn\'t match your application',
+      car_mismatch: 'Your vehicle details don\'t match your insurance',
+      missing_license_fields: 'Retake your license photo with all four corners visible',
+      missing_insurance_fields: 'Upload the full insurance document (policy number must show)',
+      suspicious_document: 'A document couldn\'t be verified — please re-upload it',
+      invalid_state: 'We couldn\'t verify your license state — upload a clearer photo',
     };
+
+    const CHECKLIST = [
+      'All four corners of your license are visible',
+      'Good lighting, no glare or shadows',
+      'Insurance card is current and shows the policy number',
+    ];
 
     return (
       <SafeAreaView style={s.safe}>
         <StatusBar style="auto" />
         <ScrollView contentContainerStyle={s.submittedContainer}>
-          <View style={[s.submittedIcon, { backgroundColor: isApproved ? colors.greenDim : isRejected ? colors.redDim : colors.primaryDim }]}>
-            <Ionicons name={iconName} size={56} color={iconColor} />
+          <View style={[s.submittedIcon, { backgroundColor: accentDim }]}>
+            <Ionicons name={iconName} size={56} color={accent} />
           </View>
           <Text style={s.submittedTitle}>{title}</Text>
           <Text style={s.submittedBody}>{body}</Text>
 
-          {flags.length > 0 && (
+          {/* Issues — red + urgent for rejection, soft + optional for review */}
+          {!isApproved && flags.length > 0 && (
             <View style={s.flagsList}>
+              {isReview && (
+                <Text style={s.flagsSoftHeader}>A couple of things may speed up your approval:</Text>
+              )}
               {flags.map((flag) => (
                 <View key={flag} style={s.flagRow}>
-                  <Ionicons name="alert-circle-outline" size={16} color={colors.red} />
-                  <Text style={s.flagText}>{FLAG_LABELS[flag] ?? flag}</Text>
+                  <Ionicons name="alert-circle-outline" size={16} color={isRejected ? colors.red : colors.primary} style={{ marginTop: 1 }} />
+                  <Text style={[s.flagText, { color: isRejected ? colors.red : colors.textSecondary }]}>{FLAG_LABELS[flag] ?? flag}</Text>
                 </View>
               ))}
             </View>
           )}
 
-          {reasoning && !isApproved && (
-            <View style={s.reasoningCard}>
-              <Text style={s.reasoningText}>{reasoning}</Text>
+          {/* Photo checklist — helps them not fail again */}
+          {!isApproved && (
+            <View style={s.checklistCard}>
+              <Text style={s.checklistTitle}>For the fastest approval, check:</Text>
+              {CHECKLIST.map((item) => (
+                <View key={item} style={s.checklistRow}>
+                  <Ionicons name="checkmark-circle" size={16} color={colors.green} style={{ marginTop: 1 }} />
+                  <Text style={s.checklistText}>{item}</Text>
+                </View>
+              ))}
             </View>
+          )}
+
+          {/* Raw AI explanation — collapsed, for the curious only */}
+          {reasoning && !isApproved && (
+            <>
+              <TouchableOpacity onPress={() => setShowDetails((v) => !v)} hitSlop={hitSlop} style={s.detailsToggle}>
+                <Text style={s.detailsToggleText}>{showDetails ? 'Hide details' : 'Show details'}</Text>
+                <Ionicons name={showDetails ? 'chevron-up' : 'chevron-down'} size={14} color={colors.textSecondary} />
+              </TouchableOpacity>
+              {showDetails && (
+                <View style={s.reasoningCard}>
+                  <Text style={s.reasoningText}>{reasoning}</Text>
+                </View>
+              )}
+            </>
           )}
 
           <TouchableOpacity
             style={[s.submittedBtn, loading && { opacity: 0.6 }]}
             disabled={loading}
             onPress={async () => {
+              if (isRejected) {
+                // Let them fix documents and resubmit without losing their info.
+                setShowDetails(false);
+                setVerificationResult(null);
+                setProcessingStatus('idle');
+                setStep(2);
+                return;
+              }
               if (isUpgrade && isApproved) {
                 setLoading(true);
                 try {
@@ -686,7 +753,7 @@ export function DriverSignUpScreen() {
                 {isApproved
                   ? isUpgrade ? 'Start driving →' : 'Go to sign in →'
                   : isRejected
-                  ? isUpgrade ? 'Back to my profile' : 'Back to sign in'
+                  ? 'Fix & reapply'
                   : 'Got it'}
               </Text>
             )}

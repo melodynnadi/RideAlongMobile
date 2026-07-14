@@ -11,12 +11,14 @@ import { useAppTheme } from '@/hooks/ThemeContext';
 import { useAuthStore } from '@/stores/authStore';
 import { useRiderUnreadCounts } from '@/hooks/useRiderUnreadCounts';
 import { usePendingRatingGate } from '@/src/hooks/usePendingRatingGate';
+import { useGlobalRiderTracking } from '@/src/hooks/useGlobalRiderTracking';
 
 export default function RiderTabLayout() {
   const { colors } = useAppTheme();
   const { isAuthenticated, isEmailVerified, checkEmailVerification } = useAuthStore();
   const { messageCount: totalUnread } = useRiderUnreadCounts();
   usePendingRatingGate('rider', isAuthenticated && isEmailVerified);
+  useGlobalRiderTracking(isAuthenticated && isEmailVerified);
 
   useEffect(() => {
     if (isAuthenticated && !isEmailVerified) {

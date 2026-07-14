@@ -547,7 +547,7 @@ export function RiderHomeReference() {
   }, [uid]);
   useEffect(() => {
     if (!uid) return undefined;
-    const inactive = new Set(['cancelled', 'canceled', 'completed', 'rejected', 'declined']);
+    const inactive = new Set(['cancelled', 'canceled', 'completed', 'rejected', 'declined', 'expired']);
     const seen = new Map<string, any>();
     let snapA: any[] = [];
     let snapB: any[] = [];
