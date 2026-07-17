@@ -44,7 +44,8 @@ export function RidePaymentModal({
   onError,
 }: RidePaymentModalProps) {
   const theme = useTheme();
-  const { user } = useAuthStore();
+  const { uid } = useAuthStore();
+  const user = uid ? { id: uid } : null;
   const {
     paymentMethods,
     selectedPaymentMethodId,

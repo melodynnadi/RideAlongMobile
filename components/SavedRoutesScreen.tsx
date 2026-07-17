@@ -201,7 +201,7 @@ export default function SavedRoutesScreen() {
             <View style={styles.emptyState}>
               <View style={styles.emptyIcon}><Ionicons name="git-branch-outline" size={27} color={colors.primary} /></View>
               <Text style={styles.emptyTitle}>No saved routes yet</Text>
-              <Text style={styles.emptyText}>Add a route you travel often and we'll let you know when a matching ride appears.</Text>
+              <Text style={styles.emptyText}>Add a route you travel often and we&apos;ll let you know when a matching ride appears.</Text>
               <TouchableOpacity style={styles.emptyButton} onPress={openAdd}><Text style={styles.emptyButtonText}>Add your first route</Text></TouchableOpacity>
             </View>
           ) : (

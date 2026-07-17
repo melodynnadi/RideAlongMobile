@@ -25,7 +25,8 @@ import { setDefaultPaymentMethod } from '@/services/payments';
 export default function EnhancedPaymentMethodsScreen() {
   const { goBack } = useReturnNavigation('/(rider)/settings');
   const theme = useTheme();
-  const { user } = useAuthStore();
+  const { uid } = useAuthStore();
+  const user = uid ? { id: uid } : null;
   const {
     paymentMethods,
     selectedPaymentMethodId,

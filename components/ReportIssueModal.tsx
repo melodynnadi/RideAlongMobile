@@ -122,7 +122,7 @@ export function ReportIssueModal({ visible, onClose, confirmedRideId, reportedDu
             {selectedType === 'safety' && (
               <View style={s.safetyBanner}>
                 <Ionicons name="warning-outline" size={16} color="#DC2626" />
-                <Text style={s.safetyText}>If you're in immediate danger, call 911.</Text>
+                <Text style={s.safetyText}>If you&apos;re in immediate danger, call 911.</Text>
               </View>
             )}
           </ScrollView>

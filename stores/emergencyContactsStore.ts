@@ -54,7 +54,8 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
 
     try {
       set({ isLoading: true });
-      const updatedContacts = [...get().contacts, newContact];
+      const contactWithId: EmergencyContact = { id: Date.now().toString(), ...newContact };
+      const updatedContacts = [...get().contacts, contactWithId];
       await updateDoc(usersDoc(uid), { emergencyContacts: updatedContacts, updatedAt: serverTimestamp() });
       set({ contacts: updatedContacts });
     } catch (error) {
@@ -74,7 +75,7 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
       const { contacts } = get();
       if (index < 0 || index >= contacts.length) throw new Error('Invalid contact index');
       const updatedContacts = [...contacts];
-      updatedContacts[index] = updatedContact;
+      updatedContacts[index] = { ...updatedContact, id: contacts[index].id };
       await updateDoc(usersDoc(uid), { emergencyContacts: updatedContacts, updatedAt: serverTimestamp() });
       set({ contacts: updatedContacts });
     } catch (error) {

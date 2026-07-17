@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { firebaseAuth } from '@/constants/services';
+import EmailTriggerService from '@/services/EmailTriggerService';
 import type { PayoutStatus, EarningsData, AddBankAccountPayload, BankAccount } from '@/types';
 import {
   getPayoutStatusByUserId,

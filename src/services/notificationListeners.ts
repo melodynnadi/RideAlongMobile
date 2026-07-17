@@ -11,7 +11,7 @@ import { chatBelongsToRole, roleUnreadField } from '@/src/utils/roleIdentity';
 export function setupDriverNotificationListeners(driverId: string, driverEmail?: string): () => void {
   const unsubscribers: Unsubscribe[] = [];
   const processedDocs = new Set<string>(); // Track already-processed docs to avoid duplicate notifications
-  const isFirstSnapshot = { requests: true, confirmed: true, offers: true }; // Track first snapshot for each listener
+  const isFirstSnapshot: { requests: boolean; confirmed: boolean; offers: boolean; chats?: boolean } = { requests: true, confirmed: true, offers: true }; // Track first snapshot for each listener
   const lastKnownStatus = new Map<string, string>(); // Track previous status per confirmedRide doc
 
   // Listen for new ride posting requests (riders requesting driver's posted rides)

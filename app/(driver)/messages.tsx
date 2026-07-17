@@ -41,7 +41,7 @@ import {
 import { showErrorToast, showSuccessToast } from '@/src/utils/showToast';
 import { chatBelongsToRole, legacyUnreadField, roleKey, roleUnreadField } from '@/src/utils/roleIdentity';
 import { useAppTheme } from '@/hooks/ThemeContext';
-import { resolveChatAvailability } from '@/src/services/chatAvailability';
+import { resolveChatAvailability, type ChatAvailability } from '@/src/services/chatAvailability';
 
 interface Chat {
   id: string;
@@ -353,7 +353,7 @@ export default function MessagesScreen() {
             }
 
             const chatsList: Chat[] = await Promise.all(chatDocs.map(async ({ id: docId, data: chatData }) => {
-              const availability = await resolveChatAvailability(chatData).catch(() => ({ available: true }));
+              const availability = await resolveChatAvailability(chatData).catch((): ChatAvailability => ({ status: null, available: true }));
               const { riderId, driverId, rideId, lastMessage, lastMessageTimestamp } = chatData;
 
               const participants = Array.isArray(chatData.participants) ? chatData.participants : [];

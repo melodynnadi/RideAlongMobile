@@ -31,3 +31,13 @@ export function useStripe() {
 export async function isPlatformPaySupported() {
   return false;
 }
+
+// Web stub mirroring the native @stripe/stripe-react-native PlatformPay namespace
+// (only the PaymentType enum values are referenced in shared code).
+export const PlatformPay = {
+  PaymentType: {
+    Immediate: 'Immediate',
+    Deferred: 'Deferred',
+    Recurring: 'Recurring',
+  },
+} as any;

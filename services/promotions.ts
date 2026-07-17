@@ -82,10 +82,10 @@ export class PromotionService {
         const promotion: Promotion = {
           id: doc.id,
           ...data,
-          startDate: this.convertToDate(data.startDate),
-          endDate: this.convertToDate(data.endDate),
-          createdAt: this.convertToDate(data.createdAt),
-          updatedAt: this.convertToDate(data.updatedAt),
+          startDate: this.convertToDate(data.startDate).toISOString(),
+          endDate: this.convertToDate(data.endDate).toISOString(),
+          createdAt: this.convertToDate(data.createdAt).toISOString(),
+          updatedAt: this.convertToDate(data.updatedAt).toISOString(),
         } as Promotion;
 
         const isTargetMatch = promotion.target === 'riders' || promotion.target === 'both';
@@ -93,7 +93,7 @@ export class PromotionService {
         const isTimeValid =
           promotion.type === 'informational'
             ? true
-            : promotion.startDate && promotion.endDate && now >= promotion.startDate && now <= promotion.endDate;
+            : promotion.startDate && promotion.endDate && now >= new Date(promotion.startDate) && now <= new Date(promotion.endDate);
 
         if (isTargetMatch && isPlatformMatch && isTimeValid) {
           promotions.push(promotion);
@@ -106,7 +106,7 @@ export class PromotionService {
     return promotions.sort((a, b) => {
       if (a.priority !== b.priority) return a.priority - b.priority;
       if (a.featured !== b.featured) return b.featured ? 1 : -1;
-      return b.createdAt.getTime() - a.createdAt.getTime();
+      return new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime();
     });
   }
 
@@ -123,10 +123,10 @@ export class PromotionService {
         return {
           id: docSnap.id,
           ...data,
-          startDate: this.convertToDate(data.startDate),
-          endDate: this.convertToDate(data.endDate),
-          createdAt: this.convertToDate(data.createdAt),
-          updatedAt: this.convertToDate(data.updatedAt),
+          startDate: this.convertToDate(data.startDate).toISOString(),
+          endDate: this.convertToDate(data.endDate).toISOString(),
+          createdAt: this.convertToDate(data.createdAt).toISOString(),
+          updatedAt: this.convertToDate(data.updatedAt).toISOString(),
         } as Promotion;
       }
 
@@ -159,12 +159,12 @@ export class PromotionService {
       }
 
       const now = new Date();
-      if (now < promotion.startDate || now > promotion.endDate) {
+      if (now < new Date(promotion.startDate) || now > new Date(promotion.endDate)) {
         throw new Error('Promotion is not available');
       }
 
       // Check usage limit
-      if (promotion.usageLimit && promotion.usageCount && promotion.usageCount >= promotion.usageLimit) {
+      if (promotion.usageLimit && promotion.currentUsageCount && promotion.currentUsageCount >= promotion.usageLimit) {
         throw new Error('Promotion usage limit reached');
       }
 
@@ -182,10 +182,10 @@ export class PromotionService {
       });
 
       // Update promotion usage count
-      if (promotion.usageCount !== undefined) {
+      if (promotion.currentUsageCount !== undefined) {
         const promotionRef = doc(firestore, this.COLLECTION_NAME, promotionId);
         await updateDoc(promotionRef, {
-          usageCount: (promotion.usageCount || 0) + 1,
+          currentUsageCount: (promotion.currentUsageCount || 0) + 1,
           updatedAt: Timestamp.fromDate(now),
         });
       }
@@ -288,10 +288,10 @@ export class PromotionService {
     switch (promotion.valueType) {
       case 'percentage':
         return `${promotion.value}% OFF`;
-      case 'fixed':
+      case 'fixed_amount':
         return `$${promotion.value} OFF`;
-      case 'credit':
-        return `$${promotion.value} CREDIT`;
+      case 'multiplier':
+        return `${promotion.value}x REWARDS`;
       default:
         return `${promotion.value}`;
     }
@@ -302,7 +302,7 @@ export class PromotionService {
    */
   isExpiringSoon(promotion: Promotion): boolean {
     const now = new Date();
-    const timeDiff = promotion.endDate.getTime() - now.getTime();
+    const timeDiff = new Date(promotion.endDate).getTime() - now.getTime();
     const hoursDiff = timeDiff / (1000 * 3600);
     return hoursDiff <= 24 && hoursDiff > 0;
   }
@@ -312,7 +312,7 @@ export class PromotionService {
    */
   getDaysUntilExpiry(promotion: Promotion): number {
     const now = new Date();
-    const timeDiff = promotion.endDate.getTime() - now.getTime();
+    const timeDiff = new Date(promotion.endDate).getTime() - now.getTime();
     return Math.ceil(timeDiff / (1000 * 3600 * 24));
   }
 

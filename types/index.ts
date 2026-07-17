@@ -201,6 +201,16 @@ export interface Promotion {
   createdBy?: string;
 }
 
+// A promotion a user has claimed (mobile-side record in `claimedPromotions`)
+export interface ClaimedPromotion {
+  id: string;
+  userId: string;
+  promotionId: string;
+  claimedAt: Date;
+  usedAt?: Date;
+  status: 'claimed' | 'used' | 'expired';
+}
+
 // For tracking user's active promotions and progress
 export interface UserPromotionProgress {
   id: string;

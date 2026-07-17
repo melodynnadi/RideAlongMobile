@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { computeTotals } from '@/utils/fees';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs, addDoc, Timestamp } from 'firebase/firestore';
-import { useStripe, isPlatformPaySupported } from '@/components/platform/stripe';
+import { useStripe, isPlatformPaySupported, PlatformPay } from '@/components/platform/stripe';
 import { useAppTheme } from '@/hooks/ThemeContext';
 
 export type PaymentModalProps = {
@@ -240,7 +240,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       setConfirming(true);
 
       const authToken = await firebaseAuth.currentUser?.getIdToken().catch(() => null);
-      const authHeaders = authToken
+      const authHeaders: Record<string, string> = authToken
         ? { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }
         : { 'Content-Type': 'application/json' };
 
@@ -389,12 +389,11 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
               {
                 label: 'RideAlong Total',
                 amount: (totals.rideFee + totals.platformFee + totals.stripeFee).toFixed(2),
-                paymentType: 'Immediate',
+                paymentType: PlatformPay.PaymentType.Immediate,
               },
             ],
             merchantCountryCode: 'US',
             currencyCode: 'USD',
-            merchantIdentifier: 'merchant.com.ridealong.rider',
           },
         });
         if (error) {

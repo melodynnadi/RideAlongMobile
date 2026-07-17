@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { ref } from 'firebase/storage';
+import { ref, deleteObject } from 'firebase/storage';
 import { doc, getDoc, setDoc, serverTimestamp, deleteField } from 'firebase/firestore';
 import { updateProfile } from 'firebase/auth';
 import { firebaseAuth, firestore, storage, firebaseApp, firebaseConfig } from '@/constants/services';

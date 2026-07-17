@@ -47,7 +47,16 @@ interface CancelPaymentParams {
 
 export function useRidePayments() {
   const { confirmSetupIntent, confirmPayment } = useStripe();
-  const { user } = useAuthStore();
+  const { uid, email, riderProfile, driverProfile } = useAuthStore();
+  const profile = riderProfile ?? driverProfile;
+  const user = uid
+    ? {
+        id: uid,
+        email: email ?? '',
+        firstName: (profile as any)?.firstName ?? '',
+        lastName: (profile as any)?.lastName ?? '',
+      }
+    : null;
   const {
     paymentMethods,
     selectedPaymentMethodId,

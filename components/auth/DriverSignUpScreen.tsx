@@ -893,7 +893,7 @@ export function DriverSignUpScreen() {
             </View>
 
             <AgreementRow checked={agreedTerms} onToggle={() => setAgreedTerms((v) => !v)} s={s}>
-              I agree to RideAlong's{' '}
+              I agree to RideAlong&apos;s{' '}
               <Text style={s.link} onPress={() => router.push('/(auth)/terms' as any)}>Terms of Service</Text>
               {' '}&amp;{' '}
               <Text style={s.link} onPress={() => router.push('/(auth)/privacy' as any)}>Privacy Policy</Text>.

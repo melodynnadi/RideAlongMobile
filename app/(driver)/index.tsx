@@ -478,7 +478,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
         'Ask your rider for their 4-digit verification code',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Confirm', onPress: async (code) => {
+          { text: 'Confirm', onPress: async (code?: string) => {
             if (!code || code.trim().length === 0) {
               Alert.alert('Code required', 'Please enter the rider\'s verification code.');
               return;
@@ -3842,15 +3842,15 @@ export default function HomeScreen() {
                 longitudeDelta: 0.045,
               }}
               region={driverLocation ? {
-                latitude: driverLocation.latitude,
-                longitude: driverLocation.longitude,
+                latitude: driverLocation!.latitude,
+                longitude: driverLocation!.longitude,
                 latitudeDelta: 0.045,
                 longitudeDelta: 0.045,
               } : undefined}
             >
               {driverLocation && Circle && (
                 <Circle
-                  center={driverLocation}
+                  center={driverLocation!}
                   radius={1800}
                   strokeColor="rgba(244,98,31,0.22)"
                   fillColor="rgba(244,98,31,0.08)"

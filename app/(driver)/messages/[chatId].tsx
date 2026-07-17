@@ -411,7 +411,7 @@ export default function ChatDetailScreen() {
                   </View>
                   <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '700', marginBottom: 8, textAlign: 'center' }}>Coordinate your ride</Text>
                   <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 20 }}>
-                    Use this chat to discuss pickup location, timing, any last-minute changes, or if you're running late.
+                    Use this chat to discuss pickup location, timing, any last-minute changes, or if you&apos;re running late.
                   </Text>
                 </View>
               ) : null

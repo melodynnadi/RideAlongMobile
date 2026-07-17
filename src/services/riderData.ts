@@ -29,7 +29,7 @@ import {
   legacyUnreadField,
   type RideAlongRole,
 } from '@/src/utils/roleIdentity';
-import { resolveChatAvailability } from '@/src/services/chatAvailability';
+import { resolveChatAvailability, type ChatAvailability } from '@/src/services/chatAvailability';
 
 function handleSnapshotError(scope: string, error: unknown) {
   const code = (error as { code?: string } | null)?.code;
@@ -546,7 +546,7 @@ export function subscribeRiderConversations(uid: string, onData: (items: MobileC
       const riderChats = snapshot.docs.filter((chat) => chatBelongsToRole(chat.data(), uid, 'rider'));
       const items = await Promise.all(riderChats.map(async (chat) => {
         const data = chat.data();
-        const availability = await resolveChatAvailability(data).catch(() => ({ available: true }));
+        const availability = await resolveChatAvailability(data).catch((): ChatAvailability => ({ status: null, available: true }));
         const participants = Array.isArray(data.participants) ? data.participants.map(String) : [];
         const otherUserId = textValue(data.driverId, data.driverUID, data.driverUid)
           || participants.find((id) => id !== uid);

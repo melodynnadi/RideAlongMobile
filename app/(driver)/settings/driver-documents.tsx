@@ -189,7 +189,7 @@ export default function DriverDocumentsScreen() {
           </View>
 
           <Text style={s.intro}>
-            Upload your driver's license and auto insurance. These are kept private and used only for safety verification.
+            Upload your driver&apos;s license and auto insurance. These are kept private and used only for safety verification.
           </Text>
 
           <Text style={s.sectionLabel}>REQUIRED DOCUMENTS</Text>

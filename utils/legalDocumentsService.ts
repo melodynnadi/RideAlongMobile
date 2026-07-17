@@ -10,10 +10,10 @@
 import { doc, getDoc } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { firestore } from '@/constants/services';
-import type { 
-  LegalDocument, 
-  LegalDocumentResponse, 
-  CachedLegalDocument 
+import type {
+  LegalDocument,
+  LegalDocumentServiceResponse,
+  LegalDocumentCache
 } from '@/types';
 
 // Cache configuration
@@ -39,22 +39,15 @@ const CacheManager = {
         return null;
       }
 
-      const parsed: CachedLegalDocument = JSON.parse(cachedData);
-      
+      const parsed: LegalDocumentCache = JSON.parse(cachedData);
+
       // Check if cache is still valid
       if (Date.now() - parsed.timestamp > CACHE_DURATION) {
         await AsyncStorage.removeItem(cacheKey);
         return null;
       }
 
-      // Convert date strings back to Date objects
-      return {
-        ...parsed.document,
-        lastUpdated: new Date(parsed.document.lastUpdated),
-        effectiveDate: parsed.document.effectiveDate 
-          ? new Date(parsed.document.effectiveDate) 
-          : undefined,
-      };
+      return parsed.document;
     } catch (error) {
       console.warn(`Error reading cache for ${documentType}:`, error);
       return null;
@@ -67,9 +60,10 @@ const CacheManager = {
   async setCached(documentType: string, document: LegalDocument): Promise<void> {
     try {
       const cacheKey = `${CACHE_KEY_PREFIX}${documentType}`;
-      const cachedData: CachedLegalDocument = {
+      const cachedData: LegalDocumentCache = {
         document,
         timestamp: Date.now(),
+        expiresAt: Date.now() + CACHE_DURATION,
       };
       
       await AsyncStorage.setItem(cacheKey, JSON.stringify(cachedData));
@@ -131,7 +125,7 @@ async function fetchLegalDocumentFromFirestore(documentType: string): Promise<Le
 /**
  * Generic function to fetch legal document with caching
  */
-async function fetchLegalDocument(documentType: string): Promise<LegalDocumentResponse> {
+async function fetchLegalDocument(documentType: string): Promise<LegalDocumentServiceResponse> {
   try {
     // First, try to get from cache
     const cachedDocument = await CacheManager.getCached(documentType);
@@ -175,14 +169,14 @@ async function fetchLegalDocument(documentType: string): Promise<LegalDocumentRe
 /**
  * Fetch Terms of Service
  */
-export async function fetchTermsOfService(): Promise<LegalDocumentResponse> {
+export async function fetchTermsOfService(): Promise<LegalDocumentServiceResponse> {
   return await fetchLegalDocument('terms');
 }
 
 /**
  * Fetch Privacy Policy
  */
-export async function fetchPrivacyPolicy(): Promise<LegalDocumentResponse> {
+export async function fetchPrivacyPolicy(): Promise<LegalDocumentServiceResponse> {
   return await fetchLegalDocument('privacy');
 }
 
@@ -237,7 +231,7 @@ export const getFallbackContent = (documentType: 'terms' | 'privacy'): LegalDocu
   const baseDocument = {
     id: documentType === 'terms' ? 'terms-of-service' : 'privacy-policy',
     version: '1.0',
-    lastUpdated: new Date(),
+    lastUpdated: new Date().toISOString(),
     documentType,
     platform: 'mobile' as const,
     status: 'active' as const,

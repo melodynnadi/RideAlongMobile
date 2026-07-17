@@ -1,1 +1,1 @@
-export { CardField, useStripe, isPlatformPaySupported } from '@stripe/stripe-react-native';
+export { CardField, useStripe, isPlatformPaySupported, PlatformPay } from '@stripe/stripe-react-native';

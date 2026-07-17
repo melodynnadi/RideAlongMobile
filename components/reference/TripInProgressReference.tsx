@@ -561,7 +561,7 @@ export function RiderTripInProgressReference() {
             <View style={{ backgroundColor: colors.greenDim, borderRadius: 20, borderWidth: 1, borderColor: colors.greenBorder, padding: 20, marginBottom: 16, alignItems: 'center' }}>
               <Ionicons name="checkmark-circle" size={28} color={colors.green} style={{ marginBottom: 10 }} />
               <Text style={{ fontSize: 17, fontWeight: '800', color: colors.textPrimary, marginBottom: 6 }}>Driver marked the ride complete</Text>
-              <Text style={{ fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: 18 }}>Please confirm you've arrived at your destination.</Text>
+              <Text style={{ fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: 18 }}>Please confirm you&apos;ve arrived at your destination.</Text>
               <TouchableOpacity
                 style={{ backgroundColor: colors.primary, borderRadius: 27, paddingVertical: 14, paddingHorizontal: 32, opacity: confirming ? 0.6 : 1 }}
                 onPress={confirmRideComplete}
@@ -770,7 +770,7 @@ export function DriverTripInProgressReference() {
   // For multi-seat postings, track every sibling rider — pending-confirmation count
   // and full passenger info so the live map can show everyone, not just this one.
   useEffect(() => {
-    if (!trip?.ridePostingId || trip.totalSeats <= 1) { setGroupPendingCount(1); setGroupRiders([]); return; }
+    if (!trip?.ridePostingId || (trip.totalSeats ?? 1) <= 1) { setGroupPendingCount(1); setGroupRiders([]); return; }
     const qy = query(collection(firestore, 'confirmedRides'), where('ridePostingId', '==', trip.ridePostingId));
     const unsub = onSnapshot(qy, async (snap) => {
       const pending = snap.docs.filter((d) => String(d.data()?.status || '').toUpperCase() !== 'COMPLETED').length;
@@ -1146,7 +1146,7 @@ export function DriverTripInProgressReference() {
       setCompleting(true);
       // Multi-seat postings have one confirmedRide per rider — completing here
       // must mark every sibling seat, not just the one this trip page is bound to.
-      if (trip?.ridePostingId && trip.totalSeats > 1) {
+      if (trip?.ridePostingId && (trip.totalSeats ?? 1) > 1) {
         await groupComplete(trip.ridePostingId);
       } else {
         await completeRide({ confirmedId: confirmedRideId });

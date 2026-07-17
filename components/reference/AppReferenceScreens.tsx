@@ -739,7 +739,7 @@ function RiderRequestsReferenceInner() {
           <Text style={{ color: colors.textSecondary, fontSize: 14 }}>Loading requests…</Text>
         </View>
       ) : filtered.length === 0 ? (
-        <View style={s.emptyState ?? { alignItems: 'center', justifyContent: 'center', paddingVertical: 48, paddingHorizontal: 24 }}>
+        <View style={(s as any).emptyState ?? { alignItems: 'center', justifyContent: 'center', paddingVertical: 48, paddingHorizontal: 24 }}>
           <Ionicons name="car-outline" size={32} color={colors.primary} />
           <Text style={{ color: colors.textPrimary, fontSize: 18, fontWeight: '700', marginTop: 14, textAlign: 'center' }}>
             {filter === 'open' ? 'No open requests' : 'No past requests'}
@@ -2076,7 +2076,7 @@ function RiderChatReferenceInner() {
                 </View>
                 <RNText style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '700', marginBottom: 8, textAlign: 'center' }}>Coordinate your ride</RNText>
                 <RNText style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 20 }}>
-                  Use this chat to discuss pickup location, timing, any last-minute changes, or if you're running late.
+                  Use this chat to discuss pickup location, timing, any last-minute changes, or if you&apos;re running late.
                 </RNText>
               </View>
             ) : null}

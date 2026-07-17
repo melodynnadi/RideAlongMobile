@@ -34,8 +34,8 @@ function getPayoutsModule() {
 const defaultDeps: Omit<LoadEarningsDependencies, 'firestoreInstance'> = {
   docFn: doc,
   getDocFn: getDoc,
-  getEarningsSummaryFn: (...args) => getPayoutsModule().getDriverEarnings(...(args as any)),
-  getAccountStatusFn: (...args) => getPayoutsModule().getPayoutStatusByUserId(...(args as any)),
+  getEarningsSummaryFn: (...args: Parameters<typeof GetDriverEarnings>) => getPayoutsModule().getDriverEarnings(...args),
+  getAccountStatusFn: (...args: Parameters<typeof GetStatusByUser>) => getPayoutsModule().getPayoutStatusByUserId(...args),
 };
 
 function getDefaultFirestore(): Firestore {

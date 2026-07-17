@@ -224,7 +224,7 @@ export default function DriverMapScreen() {
 
       {/* Loading state */}
       {!driverLoc && !notFound && (
-        <View style={[s.overlay, { backgroundColor: colors.bgPrimary || '#FBFAF7' }]}>
+        <View style={[s.overlay, { backgroundColor: colors.bg || '#FBFAF7' }]}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={[s.overlayText, { color: colors.textSecondary }]}>Waiting for driver location…</Text>
         </View>
@@ -232,11 +232,11 @@ export default function DriverMapScreen() {
 
       {/* Not found state */}
       {notFound && (
-        <View style={[s.overlay, { backgroundColor: colors.bgPrimary || '#FBFAF7' }]}>
+        <View style={[s.overlay, { backgroundColor: colors.bg || '#FBFAF7' }]}>
           <Ionicons name="location-outline" size={40} color={colors.textSecondary} />
-          <Text style={[s.overlayText, { color: colors.textSecondary }]}>Still connecting to your driver's location.</Text>
+          <Text style={[s.overlayText, { color: colors.textSecondary }]}>Still connecting to your driver&apos;s location.</Text>
           <Text style={[s.overlayText, { fontSize: 13, marginTop: 4, color: colors.textSecondary }]}>
-            This can take a minute once they're on the way — we'll keep trying in the background.
+            This can take a minute once they&apos;re on the way — we&apos;ll keep trying in the background.
           </Text>
           <TouchableOpacity
             style={[s.retryBtn, { borderColor: colors.primary }]}

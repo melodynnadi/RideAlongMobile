@@ -279,10 +279,11 @@ export default function EarningsScreen() {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Continue', onPress: async () => {
+          let slowTimer: ReturnType<typeof setTimeout> | undefined;
           try {
             setDepositing(true);
             setDepositSlowWarning(false);
-            const slowTimer = setTimeout(() => setDepositSlowWarning(true), 10000);
+            slowTimer = setTimeout(() => setDepositSlowWarning(true), 10000);
             const res = await instantDeposit(accountId, grossDollars);
             if (res.ok) {
               try { await logActivity({ type: 'payout_initiated', entityType: 'payout', entityId: res.payoutId ?? null, metadata: { accountId, requestedGrossDollars: grossDollars, feePhase: 'deducted_server_side', payoutId: res.payoutId ?? null, message: res.message ?? null } }); } catch {}

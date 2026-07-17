@@ -706,7 +706,7 @@ export function RiderHomeReference() {
       setVerificationCode(rideData.verificationCode || null);
       if (status === 'COMPLETED' && !ratingNavRef.current.has(docId)) {
         ratingNavRef.current.add(docId);
-        const alreadyRated = !!rideData.riderRated || await hasUserRatedRide(docId, uid);
+        const alreadyRated = !!rideData.riderRated || await hasUserRatedRide(docId, uid ?? '');
         if (!alreadyRated) router.push({ pathname: '/(rider)/rate-trip', params: { confirmedRideId: docId } } as any);
       }
     };
@@ -1478,7 +1478,7 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
                   )}
                   activeOpacity={0.75}
                 >
-                  <Text style={[styles.actionBtnSecondaryText, { color: colors.red }]}>Didn't show?</Text>
+                  <Text style={[styles.actionBtnSecondaryText, { color: colors.red }]}>Didn&apos;t show?</Text>
                 </TouchableOpacity>
               );
             })()}
@@ -2212,7 +2212,7 @@ export function RiderAvailableReference() {
     const buckets = new Map<string, Set<string>>();
     const applySnapshot = (key: string, snap: any) => {
       const ids = new Set<string>();
-      snap.forEach((d) => {
+      snap.forEach((d: any) => {
         const r = d.data() as any;
         const status = String(r.status || r.state || 'pending').replace(/[-\s]+/g, '_').toLowerCase();
         if (inactive.has(status)) return;
@@ -3593,7 +3593,7 @@ export function RiderConfirmedReference() {
               ['Driver', [firstName, driverRating != null ? `★ ${driverRating.toFixed(2)}` : null].filter(Boolean).join('  ')],
               seats != null ? ['Seats available', `${seats}`] : null,
               price != null ? ['Charged', `$${price.toFixed(2)}`] : null,
-            ].filter(Boolean).map(([label, value]) => (
+            ].filter((row): row is string[] => Boolean(row)).map(([label, value]) => (
               <View key={label as string} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <RNText style={{ fontSize: 13, color: colors.textSecondary, fontWeight: '500' }}>{label}</RNText>
                 <RNText style={{ fontSize: 13, color: colors.textPrimary, fontWeight: '700', flexShrink: 1, textAlign: 'right', marginLeft: 12 }}>{value}</RNText>
