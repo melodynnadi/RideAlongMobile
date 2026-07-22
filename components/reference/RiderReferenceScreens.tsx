@@ -1975,6 +1975,18 @@ export function RiderRequestReference() {
         }
       } catch {}
 
+      // Parse time into start/end fields — supports both "3:00 PM" and "3:00 PM – 5:00 PM"
+      const rawTime = time.trim() || null;
+      let timeStart: string | null = rawTime;
+      let timeEnd: string | null = null;
+      let timeFlexible = false;
+      if (rawTime?.includes('–')) {
+        const parts = rawTime.split('–').map((s) => s.trim());
+        timeStart = parts[0] || null;
+        timeEnd = parts[1] || null;
+        timeFlexible = true;
+      }
+
       // Store the resolved data and open the payment modal.
       // The Firestore doc is created only after payment is authorized.
       pendingRequestDataRef.current = {
@@ -1991,7 +2003,10 @@ export function RiderRequestReference() {
         dropoffLat: submitDropoffCoords?.lat ?? null,
         dropoffLng: submitDropoffCoords?.lng ?? null,
         date: date.trim(),
-        time: time.trim() || null,
+        time: rawTime,
+        timeStart,
+        timeEnd,
+        timeFlexible,
         seats: 1,
         maxPrice: resolvedPrice,
         estimatedFare: resolvedPrice,
@@ -2081,8 +2096,8 @@ export function RiderRequestReference() {
           <TouchableOpacity style={styles.metaPill} onPress={() => setDateModalOpen(true)} activeOpacity={0.78} accessibilityRole="button">
             <Text style={[styles.metaText, !date && styles.metaPlaceholderText]}>{date ? formatDateLabel(date) : 'Fri, Nov 20'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.metaPill} onPress={() => setTimeModalOpen(true)} activeOpacity={0.78} accessibilityRole="button">
-            <Text style={[styles.metaText, !time && styles.metaPlaceholderText]}>{time || 'Anytime'}</Text>
+          <TouchableOpacity style={[styles.metaPill, time?.includes('–') && styles.metaPillWide]} onPress={() => setTimeModalOpen(true)} activeOpacity={0.78} accessibilityRole="button">
+            <Text style={[styles.metaText, !time && styles.metaPlaceholderText]} numberOfLines={1}>{time || 'Anytime'}</Text>
           </TouchableOpacity>
           <DatePickerModal visible={dateModalOpen} selectedDate={date} onClose={() => setDateModalOpen(false)} onSelect={setDate} />
           <TimePickerModal visible={timeModalOpen} selectedTime={time} onClose={() => setTimeModalOpen(false)} onSelect={setTime} />
@@ -2362,9 +2377,15 @@ export function RiderAvailableReference() {
       {!loading && filteredRides.map((ride) => {
         const isBooked = myRequestedPostingIds.has(ride.id);
         const initials = ride.driverName.split(/\s+/).map((p) => p[0]).join('').slice(0, 2);
+        const genericVehicleType = (
+          ride.raw?.vehicleInfo?.type ||
+          ride.raw?.vehicleType ||
+          ride.raw?.vehicleInfo?.category ||
+          ''
+        ).trim() || null;
         const meta = [
           ride.driverRating ? `★ ${ride.driverRating.toFixed(2)}` : null,
-          ride.vehicle,
+          genericVehicleType,
           ride.seats ? `${ride.seats} seats` : null,
         ].filter(Boolean).join(' · ');
 
@@ -2432,20 +2453,41 @@ export function RiderAvailableReference() {
       {!loading && !filteredRides.length ? (
         <View style={styles.availableEmptyState}>
           <View style={styles.availableEmptyIcon}><Ionicons name="car-outline" size={27} color={colors.primary} /></View>
-          <Text style={styles.availableEmptyTitle}>{visibleRidePool.length ? 'No rides match' : 'No rides posted yet'}</Text>
+          <Text style={styles.availableEmptyTitle}>{visibleRidePool.length ? 'No rides available' : 'No rides posted yet'}</Text>
           <Text style={styles.availableEmptyText}>
             {visibleRidePool.length
-              ? 'Try a different search or clear the filters.'
+              ? "No drivers are heading that way yet. Clear your filters or post a ride request and we'll notify drivers on your route."
               : 'Request your trip and let nearby drivers send you an offer.'}
           </Text>
-          <TouchableOpacity
-            style={styles.availableEmptyPrimary}
-            onPress={() => visibleRidePool.length ? (setSearchQuery(''), setTimeFilter('all'), setFilterOptions(getDefaultFilters())) : router.push('/(rider)/book')}
-            accessibilityRole="button"
-          >
-            <Ionicons name={visibleRidePool.length ? 'refresh-outline' : 'add-circle-outline'} size={18} color="#FFFFFF" />
-            <Text style={styles.availableEmptyPrimaryText}>{visibleRidePool.length ? 'Clear filters' : 'Request a ride'}</Text>
-          </TouchableOpacity>
+          {visibleRidePool.length ? (
+            <>
+              <TouchableOpacity
+                style={styles.availableEmptyPrimary}
+                onPress={() => { setSearchQuery(''); setTimeFilter('all'); setFilterOptions(getDefaultFilters()); }}
+                accessibilityRole="button"
+              >
+                <Ionicons name="refresh-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.availableEmptyPrimaryText}>Clear filters</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.availableEmptySecondary}
+                onPress={() => router.push({ pathname: '/(rider)/book', params: { pickup: from || '', dropoff: to || '' } } as any)}
+                accessibilityRole="button"
+              >
+                <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                <Text style={styles.availableEmptySecondaryText}>Request a Ride</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity
+              style={styles.availableEmptyPrimary}
+              onPress={() => router.push('/(rider)/book')}
+              accessibilityRole="button"
+            >
+              <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.availableEmptyPrimaryText}>Request a ride</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : null}
 
@@ -3288,8 +3330,10 @@ export function RiderDetailReference() {
             )}
           </View>
           <View style={styles.detailInfoCopy}>
-            <Text style={styles.detailInfoTitle}>{ride.vehicle}</Text>
-            <Text style={styles.detailInfoText}>Driver and vehicle details are verified through RideAlong.</Text>
+            <Text style={styles.detailInfoTitle}>
+              {(ride.raw?.vehicleInfo?.type || ride.raw?.vehicleType || ride.raw?.vehicleInfo?.category || '').trim() || 'Verified vehicle'}
+            </Text>
+            <Text style={styles.detailInfoText}>Full vehicle details are shared once your booking is confirmed.</Text>
           </View>
         </View>
 
@@ -3702,6 +3746,7 @@ function makeStyles(colors: AppColors) {
   metaRow: { flexDirection: 'row', gap: 9, paddingLeft: 28, marginTop: 9 },
   homeMetaRowFullWidth: { paddingLeft: 0 },
   metaPill: { flex: 1, height: 44, borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, justifyContent: 'center', paddingHorizontal: 13 },
+  metaPillWide: { flex: 2 },
   metaText: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
   metaPlaceholderText: { color: colors.textSecondary },
   primaryBtn: { height: 54, borderRadius: 27, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 34 },
@@ -3850,6 +3895,8 @@ function makeStyles(colors: AppColors) {
   availableFilterDot: { position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: 4, backgroundColor: colors.primary, borderWidth: 1.5, borderColor: colors.bgCard },
   availableEmptyPrimary: { minHeight: 46, borderRadius: 23, backgroundColor: colors.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 22, marginTop: 18 },
   availableEmptyPrimaryText: { color: colors.textInverse, fontSize: 14, fontWeight: '700' },
+  availableEmptySecondary: { minHeight: 46, borderRadius: 23, borderWidth: 1.5, borderColor: colors.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 22, marginTop: 10 },
+  availableEmptySecondaryText: { color: colors.primary, fontSize: 14, fontWeight: '700' },
   bottomNav: { position: 'absolute', left: 24, right: 24, bottom: 14, height: 58, backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border, borderRadius: 29, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 5, paddingVertical: 5, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.14, shadowRadius: 16, elevation: 10 },
   navItem: { flex: 1, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 24, gap: 1 },
   navItemActive: { backgroundColor: colors.bgSecondary },

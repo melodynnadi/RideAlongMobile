@@ -84,19 +84,27 @@ export function DatePickerModal({
   onClose,
   onSelect,
   title = 'Select date',
+  eyebrow,
+  minDate,
+  maxDate,
+  initialDisplayDate,
 }: {
   visible: boolean;
   selectedDate?: string;
   onClose: () => void;
   onSelect: (value: string) => void;
   title?: string;
+  eyebrow?: string;
+  minDate?: string;
+  maxDate?: string;
+  initialDisplayDate?: string;
 }) {
   const { colors } = useAppTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const [month, setMonth] = useState(() => parseSelectedDate(selectedDate));
+  const [month, setMonth] = useState(() => parseSelectedDate(selectedDate || initialDisplayDate));
   useEffect(() => {
-    if (visible) setMonth(parseSelectedDate(selectedDate));
-  }, [selectedDate, visible]);
+    if (visible) setMonth(parseSelectedDate(selectedDate || initialDisplayDate));
+  }, [selectedDate, visible, initialDisplayDate]);
 
   const weeks = useMemo(() => monthGrid(month), [month]);
   const today = toYMD(new Date());
@@ -108,7 +116,7 @@ export function DatePickerModal({
         <View style={styles.card}>
           <View style={styles.modalHeader}>
             <View>
-              <Text style={styles.modalEyebrow}>Ride date</Text>
+              {eyebrow ? <Text style={styles.modalEyebrow}>{eyebrow}</Text> : null}
               <Text style={styles.modalTitle}>{title}</Text>
             </View>
             <TouchableOpacity style={styles.closeIcon} onPress={onClose} accessibilityRole="button">
@@ -136,20 +144,35 @@ export function DatePickerModal({
             <View key={rowIndex} style={styles.dayRow}>
               {week.map((date, colIndex) => {
                 const value = date ? toYMD(date) : '';
-                const selected = !!date && value === selectedDate;
+                const outOfRange = !!date && ((!!minDate && value < minDate) || (!!maxDate && value > maxDate));
+                const isDisabled = !date || outOfRange;
+                const selected = !!date && !outOfRange && value === selectedDate;
                 const isToday = !!date && value === today;
                 return (
                   <TouchableOpacity
                     key={`${rowIndex}-${colIndex}`}
-                    disabled={!date}
-                    style={[styles.dayButton, !date && styles.dayButtonEmpty, isToday && !selected && styles.dayButtonToday, selected && styles.dayButtonSelected]}
+                    disabled={isDisabled}
+                    style={[
+                      styles.dayButton,
+                      !date && styles.dayButtonEmpty,
+                      outOfRange && styles.dayButtonDisabled,
+                      isToday && !selected && !outOfRange && styles.dayButtonToday,
+                      selected && styles.dayButtonSelected,
+                    ]}
                     onPress={() => {
-                      if (!date) return;
+                      if (isDisabled) return;
                       onSelect(value);
                       onClose();
                     }}
                   >
-                    <Text style={[styles.dayText, selected && styles.dayTextSelected, isToday && !selected && styles.dayTextToday]}>{date ? date.getDate() : ''}</Text>
+                    <Text style={[
+                      styles.dayText,
+                      outOfRange && styles.dayTextDisabled,
+                      selected && styles.dayTextSelected,
+                      isToday && !selected && !outOfRange && styles.dayTextToday,
+                    ]}>
+                      {date ? date.getDate() : ''}
+                    </Text>
                   </TouchableOpacity>
                 );
               })}
@@ -159,6 +182,14 @@ export function DatePickerModal({
       </View>
     </Modal>
   );
+}
+
+function parseTimeRange(value?: string) {
+  if (value?.includes('–')) {
+    const [fromStr, toStr] = value.split('–').map((s) => s.trim());
+    return { mode: 'range' as const, from: parseTime(fromStr), to: parseTime(toStr) };
+  }
+  return { mode: 'exact' as const, from: parseTime(value), to: null };
 }
 
 export function TimePickerModal({
@@ -176,22 +207,73 @@ export function TimePickerModal({
 }) {
   const { colors } = useAppTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const initial = parseTime(selectedTime);
-  const [hour, setHour] = useState(initial.hour);
-  const [minute, setMinute] = useState(initial.minute);
-  const [period, setPeriod] = useState<'AM' | 'PM'>(initial.period);
+
+  const [mode, setMode] = useState<'exact' | 'range'>('exact');
+
+  // FROM (or exact) time
+  const [hour, setHour] = useState(3);
+  const [minute, setMinute] = useState(0);
+  const [period, setPeriod] = useState<'AM' | 'PM'>('PM');
+
+  // TO time (range mode only)
+  const [toHour, setToHour] = useState(5);
+  const [toMinute, setToMinute] = useState(0);
+  const [toPeriod, setToPeriod] = useState<'AM' | 'PM'>('PM');
+
+  // Which side the shared controls (minute chips, steppers) are editing
+  const [active, setActive] = useState<'from' | 'to'>('from');
 
   useEffect(() => {
     if (!visible) return;
-    const next = parseTime(selectedTime);
-    setHour(next.hour);
-    setMinute(next.minute);
-    setPeriod(next.period);
+    const parsed = parseTimeRange(selectedTime);
+    setMode(parsed.mode);
+    setHour(parsed.from.hour);
+    setMinute(parsed.from.minute);
+    setPeriod(parsed.from.period);
+    if (parsed.to) {
+      setToHour(parsed.to.hour);
+      setToMinute(parsed.to.minute);
+      setToPeriod(parsed.to.period);
+    }
+    setActive('from');
   }, [selectedTime, visible]);
+
+  const switchToRange = () => {
+    if (mode === 'range') return;
+    // Default TO = FROM + 2 hours
+    const from24 = period === 'PM' ? (hour === 12 ? 12 : hour + 12) : (hour === 12 ? 0 : hour);
+    const to24 = (from24 + 2) % 24;
+    setToHour(to24 % 12 || 12);
+    setToMinute(minute);
+    setToPeriod(to24 >= 12 ? 'PM' : 'AM');
+    setMode('range');
+    setActive('from');
+  };
 
   const minuteOptions = [0, 15, 30, 45];
   const presetTimes = ['8:00 AM', '12:00 PM', '3:00 PM', '6:00 PM'];
-  const value = `${hour}:${pad2(minute)} ${period}`;
+
+  const fromValue = `${hour}:${pad2(minute)} ${period}`;
+  const toValue = `${toHour}:${pad2(toMinute)} ${toPeriod}`;
+
+  // Shared controls operate on whichever side is "active"
+  const activeHour = active === 'from' ? hour : toHour;
+  const activeMinute = active === 'from' ? minute : toMinute;
+  const activePeriod = active === 'from' ? period : toPeriod;
+  const stepActiveHour = (dir: 1 | -1) => {
+    const fn = (h: number) => dir === 1 ? (h === 12 ? 1 : h + 1) : (h === 1 ? 12 : h - 1);
+    if (active === 'from') setHour(fn); else setToHour(fn);
+  };
+  const setActiveMinute = (m: number) => { if (active === 'from') setMinute(m); else setToMinute(m); };
+  const toggleActivePeriod = () => {
+    if (active === 'from') setPeriod((p) => p === 'AM' ? 'PM' : 'AM');
+    else setToPeriod((p) => p === 'AM' ? 'PM' : 'AM');
+  };
+
+  const handleConfirm = () => {
+    onSelect(mode === 'range' ? `${fromValue} – ${toValue}` : fromValue);
+    onClose();
+  };
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -207,42 +289,93 @@ export function TimePickerModal({
             </TouchableOpacity>
           </View>
 
+          {/* Mode toggle */}
+          <View style={styles.modeToggle}>
+            <TouchableOpacity
+              style={[styles.modeBtn, mode === 'exact' && styles.modeBtnActive]}
+              onPress={() => setMode('exact')}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.modeBtnText, mode === 'exact' && styles.modeBtnTextActive]}>Exact time</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modeBtn, mode === 'range' && styles.modeBtnActive]}
+              onPress={switchToRange}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.modeBtnText, mode === 'range' && styles.modeBtnTextActive]}>Time window</Text>
+            </TouchableOpacity>
+          </View>
+
+          {mode === 'range' && (
+            <>
+              {/* FROM / TO summary with active selector */}
+              <View style={styles.rangeSummaryRow}>
+                <TouchableOpacity
+                  style={[styles.rangeSide, active === 'from' && styles.rangeSideActive]}
+                  onPress={() => setActive('from')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.rangeSideLabel}>FROM</Text>
+                  <Text style={[styles.rangeSideTime, active === 'from' && styles.rangeSideTimeActive]}>{fromValue}</Text>
+                </TouchableOpacity>
+                <Ionicons name="arrow-forward" size={18} color={colors.textSecondary} style={styles.rangeArrow} />
+                <TouchableOpacity
+                  style={[styles.rangeSide, active === 'to' && styles.rangeSideActive]}
+                  onPress={() => setActive('to')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.rangeSideLabel}>TO</Text>
+                  <Text style={[styles.rangeSideTime, active === 'to' && styles.rangeSideTimeActive]}>{toValue}</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.rangeHint}>Tap a side to edit it</Text>
+            </>
+          )}
+
+          {/* Main time display (shared for exact + active side of range) */}
           <View style={styles.timeDisplay}>
-            <TouchableOpacity style={[styles.timeStepper, styles.timeStepperUp]} onPress={() => setHour((current) => current === 12 ? 1 : current + 1)}>
+            <TouchableOpacity style={[styles.timeStepper, styles.timeStepperUp]} onPress={() => stepActiveHour(1)}>
               <Ionicons name="chevron-up" size={18} color={colors.primary} />
             </TouchableOpacity>
-            <Text style={styles.timeValue}>{hour}:{pad2(minute)}</Text>
-            <TouchableOpacity style={styles.periodButton} onPress={() => setPeriod(period === 'AM' ? 'PM' : 'AM')}>
-              <Text style={styles.periodText}>{period}</Text>
+            <Text style={styles.timeValue}>{activeHour}:{pad2(activeMinute)}</Text>
+            <TouchableOpacity style={styles.periodButton} onPress={toggleActivePeriod}>
+              <Text style={styles.periodText}>{activePeriod}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.timeStepper, styles.timeStepperDown]} onPress={() => setHour((current) => current === 1 ? 12 : current - 1)}>
+            <TouchableOpacity style={[styles.timeStepper, styles.timeStepperDown]} onPress={() => stepActiveHour(-1)}>
               <Ionicons name="chevron-down" size={18} color={colors.primary} />
             </TouchableOpacity>
           </View>
 
           <View style={styles.minuteRow}>
             {minuteOptions.map((option) => (
-              <TouchableOpacity key={option} style={[styles.minuteChip, minute === option && styles.minuteChipActive]} onPress={() => setMinute(option)}>
-                <Text style={[styles.minuteChipText, minute === option && styles.minuteChipTextActive]}>{pad2(option)}</Text>
+              <TouchableOpacity
+                key={option}
+                style={[styles.minuteChip, activeMinute === option && styles.minuteChipActive]}
+                onPress={() => setActiveMinute(option)}
+              >
+                <Text style={[styles.minuteChipText, activeMinute === option && styles.minuteChipTextActive]}>{pad2(option)}</Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          <View style={styles.presetRow}>
-            {presetTimes.map((preset) => (
-              <TouchableOpacity key={preset} style={styles.presetChip} onPress={() => {
-                const parsed = parseTime(preset);
-                setHour(parsed.hour);
-                setMinute(parsed.minute);
-                setPeriod(parsed.period);
-              }}>
-                <Text style={styles.presetText}>{preset}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          {mode === 'exact' && (
+            <View style={styles.presetRow}>
+              {presetTimes.map((preset) => (
+                <TouchableOpacity key={preset} style={styles.presetChip} onPress={() => {
+                  const parsed = parseTime(preset);
+                  setHour(parsed.hour);
+                  setMinute(parsed.minute);
+                  setPeriod(parsed.period);
+                }}>
+                  <Text style={styles.presetText}>{preset}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
-          <TouchableOpacity style={styles.primaryButton} onPress={() => { onSelect(value); onClose(); }}>
-            <Text style={styles.primaryText}>Set time</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleConfirm}>
+            <Text style={styles.primaryText}>{mode === 'range' ? 'Set time window' : 'Set time'}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -266,9 +399,11 @@ function makeStyles(colors: AppColors) {
   dayRow: { flexDirection: 'row', gap: 5, marginBottom: 5 },
   dayButton: { flex: 1, aspectRatio: 1, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border },
   dayButtonEmpty: { opacity: 0, borderWidth: 0 },
+  dayButtonDisabled: { opacity: 0.28 },
   dayButtonToday: { borderColor: colors.primary, backgroundColor: colors.primaryDim },
   dayButtonSelected: { borderColor: colors.primary, backgroundColor: colors.primary },
   dayText: { color: colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  dayTextDisabled: { color: colors.textSecondary },
   dayTextToday: { color: colors.primary },
   dayTextSelected: { color: colors.textInverse, fontWeight: '900' },
   timeDisplay: { minHeight: 110, borderRadius: 18, backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
@@ -288,5 +423,20 @@ function makeStyles(colors: AppColors) {
   presetText: { color: colors.primary, fontSize: 12, fontWeight: '800' },
   primaryButton: { height: 50, borderRadius: 25, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   primaryText: { color: colors.textInverse, fontSize: 16, fontWeight: '800' },
+  // Mode toggle
+  modeToggle: { flexDirection: 'row', borderRadius: 14, backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border, padding: 3, marginBottom: 14, gap: 3 },
+  modeBtn: { flex: 1, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  modeBtnActive: { backgroundColor: colors.bgCard, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 2 },
+  modeBtnText: { color: colors.textSecondary, fontSize: 13, fontWeight: '700' },
+  modeBtnTextActive: { color: colors.textPrimary, fontWeight: '800' },
+  // Range summary
+  rangeSummaryRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  rangeSide: { flex: 1, borderRadius: 14, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.bgSecondary, paddingVertical: 10, paddingHorizontal: 12 },
+  rangeSideActive: { borderColor: colors.primary, backgroundColor: colors.primaryDim },
+  rangeSideLabel: { color: colors.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 2 },
+  rangeSideTime: { color: colors.textPrimary, fontSize: 17, fontWeight: '800' },
+  rangeSideTimeActive: { color: colors.primary },
+  rangeArrow: { flexShrink: 0 },
+  rangeHint: { color: colors.textSecondary, fontSize: 11, fontWeight: '600', textAlign: 'center', marginBottom: 10 },
   });
 }

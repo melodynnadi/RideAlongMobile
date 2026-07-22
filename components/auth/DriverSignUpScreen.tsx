@@ -18,7 +18,9 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as DocumentPicker from 'expo-document-picker';
 
 import { UniversitySearch } from '@/components/ui/UniversitySearch';
-import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
+import { DatePickerModal } from '@/components/DateTimePickerModals';
+import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { type SignupUniversity } from '@/services/authSignup';
 import { hitSlop } from '@/theme/designSystem';
 import { useAppTheme } from '@/hooks/ThemeContext';
@@ -39,53 +41,37 @@ const STEPS = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Auto-inserts slashes as the user types: MM/DD/YYYY
-function formatDobInput(raw: string): string {
-  const digits = raw.replace(/\D/g, '').slice(0, 8);
-  if (digits.length <= 2) return digits;
-  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
-}
-
-// Auto-inserts slash as the user types: MM/YYYY
-function formatMonthYearInput(raw: string): string {
-  const digits = raw.replace(/\D/g, '').slice(0, 6);
-  if (digits.length <= 2) return digits;
-  return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-}
-
 function validateEduEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.edu$/i.test(email.trim());
 }
 
-function parseDob(str: string): Date | null {
-  const parts = str.split('/');
-  if (parts.length !== 3) return null;
-  const [m, d, y] = parts.map(Number);
-  if (!m || !d || !y || y < 1900 || y > new Date().getFullYear()) return null;
-  const date = new Date(y, m - 1, d);
-  if (date.getMonth() !== m - 1) return null;
-  return date;
+// Converts YYYY-MM-DD (from DatePickerModal) → MM/DD/YYYY for display and backend.
+function isoToDisplay(ymd: string): string {
+  if (!ymd) return '';
+  const [y, m, d] = ymd.split('-');
+  if (!y || !m || !d) return '';
+  return `${m}/${d}/${y}`;
 }
 
-function isAdult(dob: string): boolean {
-  const date = parseDob(dob);
-  if (!date) return false;
-  const ageDays = (Date.now() - date.getTime()) / 86400000;
-  return ageDays >= 18 * 365.25;
+// Converts YYYY-MM-DD → MM/YYYY for expiry backend fields.
+function isoToMonthYear(ymd: string): string {
+  if (!ymd) return '';
+  const [y, m] = ymd.split('-');
+  if (!y || !m) return '';
+  return `${m}/${y}`;
 }
 
-function parseExpiry(str: string): Date | null {
-  const parts = str.split('/');
-  if (parts.length !== 2) return null;
-  const [m, y] = parts.map(Number);
-  if (!m || m < 1 || m > 12 || !y || y < 2020) return null;
-  return new Date(y, m, 0); // last day of that month
+function isAdult(isoDate: string): boolean {
+  if (!isoDate) return false;
+  const date = new Date(isoDate);
+  if (isNaN(date.getTime())) return false;
+  return (Date.now() - date.getTime()) / 86400000 >= 18 * 365.25;
 }
 
-function isNotExpired(str: string): boolean {
-  const date = parseExpiry(str);
-  return date ? date > new Date() : false;
+function isNotExpired(isoDate: string): boolean {
+  if (!isoDate) return false;
+  const date = new Date(isoDate);
+  return !isNaN(date.getTime()) && date > new Date();
 }
 
 function fileField(asset: { uri: string; mimeType?: string }, name: string) {
@@ -173,6 +159,31 @@ function DocumentUploadField({ label, asset, onPick, s, colors }: {
             <Text style={s.uploadHint}>PDF, JPG or PNG · max 5MB</Text>
           </View>
         )}
+      </TouchableOpacity>
+    </Field>
+  );
+}
+
+function DatePickerField({ label, value, placeholder = 'MM/DD/YYYY', onPress, s, colors }: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  onPress: () => void;
+  s: ReturnType<typeof makeStyles>;
+  colors: AppColors;
+}) {
+  return (
+    <Field label={label} s={s}>
+      <TouchableOpacity
+        style={[s.input, { flexDirection: 'row', alignItems: 'center' }]}
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+      >
+        <Text style={{ flex: 1, fontSize: 15, color: value ? colors.textPrimary : colors.textSecondary }}>
+          {value ? isoToDisplay(value) : placeholder}
+        </Text>
+        <Ionicons name="calendar-outline" size={18} color={colors.textSecondary} />
       </TouchableOpacity>
     </Field>
   );
@@ -357,6 +368,7 @@ export function DriverSignUpScreen() {
   const [step, setStep] = useState(1);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [checkingDriver, setCheckingDriver] = useState(true);
   const [processingStatus, setProcessingStatus] = useState<'idle' | 'uploading' | 'verifying' | 'done'>('idle');
   const [verificationResult, setVerificationResult] = useState<{
     decision: 'approved' | 'rejected' | 'requires_manual_review';
@@ -373,6 +385,23 @@ export function DriverSignUpScreen() {
   const [phone, setPhone] = useState('');
   const [university, setUniversity] = useState<SignupUniversity | null>(null);
   const [dob, setDob] = useState('');
+  const [dobPickerOpen, setDobPickerOpen] = useState(false);
+
+  // Fix 1: Redirect guard — if this user already has a drivers doc, they should not
+  // be in the signup flow at all. Check once on mount before rendering the form.
+  useEffect(() => {
+    const user = firebaseAuth.currentUser;
+    if (!user) { setCheckingDriver(false); return; }
+    getDoc(doc(firestore, 'drivers', user.uid))
+      .then((snap) => {
+        if (snap.exists()) {
+          router.replace('/(driver)' as any);
+        } else {
+          setCheckingDriver(false);
+        }
+      })
+      .catch(() => setCheckingDriver(false));
+  }, []);
 
   // Pre-fill from rider profile when upgrading
   useEffect(() => {
@@ -391,6 +420,7 @@ export function DriverSignUpScreen() {
   const [licenseNumber, setLicenseNumber] = useState('');
   const [licenseState, setLicenseState] = useState('TX');
   const [licenseExpiry, setLicenseExpiry] = useState('');
+  const [licenseExpiryPickerOpen, setLicenseExpiryPickerOpen] = useState(false);
   const [licenseFront, setLicenseFront] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [licenseBack, setLicenseBack] = useState<ImagePicker.ImagePickerAsset | null>(null);
 
@@ -406,6 +436,7 @@ export function DriverSignUpScreen() {
   const [insuranceCompany, setInsuranceCompany] = useState('');
   const [policyNumber, setPolicyNumber] = useState('');
   const [insuranceExpiry, setInsuranceExpiry] = useState('');
+  const [insuranceExpiryPickerOpen, setInsuranceExpiryPickerOpen] = useState(false);
   const [insuranceDoc, setInsuranceDoc] = useState<DocAsset | null>(null);
 
   // Step 5 – Agreements
@@ -455,12 +486,12 @@ export function DriverSignUpScreen() {
       if (!validateEduEmail(email)) return 'Use a valid .edu student email.';
       if (!phone.trim()) return 'Enter your phone number.';
       if (!university?.name) return 'Select your university.';
-      if (!parseDob(dob)) return 'Enter your date of birth as MM/DD/YYYY.';
+      if (!dob) return 'Select your date of birth.';
       if (!isAdult(dob)) return 'You must be at least 18 years old to drive.';
     }
     if (step === 2) {
       if (!licenseNumber.trim()) return 'Enter your license number.';
-      if (!licenseExpiry.trim()) return 'Enter your license expiry as MM/YYYY.';
+      if (!licenseExpiry) return 'Select your license expiry date.';
       if (!isNotExpired(licenseExpiry)) return 'Your license must not be expired.';
       if (!licenseFront) return 'Upload the front of your driver\'s license.';
       if (!licenseBack) return 'Upload the back of your driver\'s license.';
@@ -475,7 +506,7 @@ export function DriverSignUpScreen() {
     if (step === 4) {
       if (!insuranceCompany.trim()) return 'Enter your insurance company.';
       if (!policyNumber.trim()) return 'Enter your policy number.';
-      if (!insuranceExpiry.trim()) return 'Enter your insurance expiry as MM/YYYY.';
+      if (!insuranceExpiry) return 'Select your insurance expiry date.';
       if (!isNotExpired(insuranceExpiry)) return 'Your insurance must not be expired.';
       if (!insuranceDoc) return 'Upload your insurance document.';
     }
@@ -521,23 +552,42 @@ export function DriverSignUpScreen() {
       form.append('licensePlate', licensePlate.trim());
       form.append('carColor', vehicleColor.trim());
       form.append('university', university!.name);
-      form.append('dateOfBirth', dob.trim());
+      form.append('dateOfBirth', isoToDisplay(dob));
       form.append('licenseNumber', licenseNumber.trim());
       form.append('licenseState', licenseState);
-      form.append('licenseExpiry', licenseExpiry.trim());
+      form.append('licenseExpiry', isoToMonthYear(licenseExpiry));
       form.append('insuranceCompany', insuranceCompany.trim());
       form.append('policyNumber', policyNumber.trim());
-      form.append('insuranceExpiry', insuranceExpiry.trim());
+      form.append('insuranceExpiry', isoToMonthYear(insuranceExpiry));
       form.append('seats', seats);
       form.append('licenseFront', fileField(licenseFront!, `license_front.${(licenseFront!.mimeType ?? 'image/jpeg').split('/')[1]}`) as any);
       form.append('licenseBack', fileField(licenseBack!, `license_back.${(licenseBack!.mimeType ?? 'image/jpeg').split('/')[1]}`) as any);
       form.append('insurance', fileField(insuranceDoc!, `insurance.${(insuranceDoc!.mimeType ?? 'application/pdf').split('/')[1]}`) as any);
 
-      const submitHeaders: Record<string, string> = {};
-      if (isUpgrade) {
-        const idToken = await firebaseAuth.currentUser?.getIdToken();
-        if (idToken) submitHeaders['Authorization'] = `Bearer ${idToken}`;
+      // Fix 2: Detect stale driver records — a document in 'drivers' that matches
+      // this email but belongs to a deleted Auth user (different UID). When found,
+      // tell the backend which stale document to overwrite so it doesn't block
+      // re-registration with "Already a driver".
+      let staleDriverId: string | null = null;
+      try {
+        const staleSnap = await getDocs(
+          query(collection(firestore, 'drivers'), where('email', '==', email.trim()))
+        );
+        const currentUid = firebaseAuth.currentUser?.uid;
+        staleSnap.forEach((d) => {
+          if (d.id !== currentUid) staleDriverId = d.id;
+        });
+      } catch { /* ignore — stale check is best-effort */ }
+
+      if (staleDriverId) {
+        form.append('staleDriverId', staleDriverId);
       }
+
+      // Always send the auth token so the backend can verify the submitting user
+      // and, in the stale case, confirm the UID mismatch and allow the overwrite.
+      const submitHeaders: Record<string, string> = {};
+      const idToken = await firebaseAuth.currentUser?.getIdToken();
+      if (idToken) submitHeaders['Authorization'] = `Bearer ${idToken}`;
 
       const submitRes = await fetch(`${base}/api/driver-applications/submit`, {
         method: 'POST',
@@ -763,6 +813,19 @@ export function DriverSignUpScreen() {
     );
   }
 
+  // Show a blank loading screen while we verify the user doesn't already have a
+  // driver profile. This prevents the form from flashing before the redirect.
+  if (checkingDriver) {
+    return (
+      <SafeAreaView style={s.safe}>
+        <StatusBar style="auto" />
+        <View style={s.submittedContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   const { title, accent } = STEPS[step - 1];
   const subtitle = isUpgrade && step === 1
     ? 'Your info is pre-filled from your rider account. Add your date of birth to continue.'
@@ -803,20 +866,20 @@ export function DriverSignUpScreen() {
           <>
             <View style={s.nameRow}>
               <View style={s.nameField}>
-                <Input label="FIRST NAME" value={firstName} onChangeText={setFirstName} placeholder="Melody" autoCapitalize="words" textContentType="givenName" s={s} colors={colors} />
+                <Input label="FIRST NAME" value={firstName} onChangeText={setFirstName} placeholder="First Name" autoCapitalize="words" textContentType="givenName" s={s} colors={colors} />
               </View>
               <View style={s.nameField}>
-                <Input label="LAST NAME" value={lastName} onChangeText={setLastName} placeholder="Adeyemi" autoCapitalize="words" textContentType="familyName" s={s} colors={colors} />
+                <Input label="LAST NAME" value={lastName} onChangeText={setLastName} placeholder="Last Name" autoCapitalize="words" textContentType="familyName" s={s} colors={colors} />
               </View>
             </View>
             <Input label="SCHOOL EMAIL" value={email} onChangeText={isUpgrade ? undefined : setEmail} placeholder="yourname@school.edu" keyboardType="email-address" textContentType="emailAddress" autoCapitalize="none" editable={!isUpgrade} s={s} colors={colors} />
-            <Input label="PHONE NUMBER" value={phone} onChangeText={setPhone} placeholder="(512) 555-0123" keyboardType="phone-pad" textContentType="telephoneNumber" s={s} colors={colors} />
+            <Input label="PHONE NUMBER" value={phone} onChangeText={setPhone} placeholder="(000) 000-0000" keyboardType="phone-pad" textContentType="telephoneNumber" s={s} colors={colors} />
             <Field label="UNIVERSITY" s={s}>
               <View style={s.universityWrap}>
                 <UniversitySearch value={university?.name ?? ''} onSelect={setUniversity} placeholder="Search your university" allowCustom />
               </View>
             </Field>
-            <Input label="DATE OF BIRTH" value={dob} onChangeText={(v) => setDob(formatDobInput(v))} placeholder="MM/DD/YYYY" keyboardType="number-pad" s={s} colors={colors} />
+            <DatePickerField label="DATE OF BIRTH" value={dob} onPress={() => setDobPickerOpen(true)} s={s} colors={colors} />
           </>
         )}
 
@@ -829,7 +892,7 @@ export function DriverSignUpScreen() {
                 <Input label="STATE ISSUED" value={licenseState} onChangeText={(v) => setLicenseState(v.toUpperCase())} placeholder="TX" autoCapitalize="characters" maxLength={2} s={s} colors={colors} />
               </View>
               <View style={[s.nameField, { flex: 2 }]}>
-                <Input label="EXPIRY DATE" value={licenseExpiry} onChangeText={(v) => setLicenseExpiry(formatMonthYearInput(v))} placeholder="MM/YYYY" keyboardType="number-pad" s={s} colors={colors} />
+                <DatePickerField label="EXPIRY DATE" value={licenseExpiry} placeholder="MM/DD/YYYY" onPress={() => setLicenseExpiryPickerOpen(true)} s={s} colors={colors} />
               </View>
             </View>
             <ImageUploadField label="FRONT OF LICENSE" asset={licenseFront} onPick={() => pickImage(setLicenseFront)} s={s} colors={colors} />
@@ -874,7 +937,7 @@ export function DriverSignUpScreen() {
           <>
             <Input label="INSURANCE COMPANY" value={insuranceCompany} onChangeText={setInsuranceCompany} placeholder="State Farm" autoCapitalize="words" s={s} colors={colors} />
             <Input label="POLICY NUMBER" value={policyNumber} onChangeText={setPolicyNumber} placeholder="POL-123456789" autoCapitalize="characters" s={s} colors={colors} />
-            <Input label="POLICY EXPIRY" value={insuranceExpiry} onChangeText={(v) => setInsuranceExpiry(formatMonthYearInput(v))} placeholder="MM/YYYY" keyboardType="number-pad" s={s} colors={colors} />
+            <DatePickerField label="POLICY EXPIRY" value={insuranceExpiry} placeholder="MM/DD/YYYY" onPress={() => setInsuranceExpiryPickerOpen(true)} s={s} colors={colors} />
             <DocumentUploadField label="INSURANCE DOCUMENT" asset={insuranceDoc} onPick={() => pickDocument(setInsuranceDoc)} s={s} colors={colors} />
           </>
         )}
@@ -933,6 +996,33 @@ export function DriverSignUpScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Date pickers — rendered as modals outside the scroll view */}
+      <DatePickerModal
+        visible={dobPickerOpen}
+        selectedDate={dob}
+        maxDate={(() => { const d = new Date(); d.setFullYear(d.getFullYear() - 18); return d.toISOString().split('T')[0]; })()}
+        initialDisplayDate={(() => { const d = new Date(); d.setFullYear(d.getFullYear() - 25); return d.toISOString().split('T')[0]; })()}
+        title="Date of birth"
+        onClose={() => setDobPickerOpen(false)}
+        onSelect={(v) => { setDob(v); setDobPickerOpen(false); }}
+      />
+      <DatePickerModal
+        visible={licenseExpiryPickerOpen}
+        selectedDate={licenseExpiry}
+        minDate={(() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().split('T')[0]; })()}
+        title="License expiry"
+        onClose={() => setLicenseExpiryPickerOpen(false)}
+        onSelect={(v) => { setLicenseExpiry(v); setLicenseExpiryPickerOpen(false); }}
+      />
+      <DatePickerModal
+        visible={insuranceExpiryPickerOpen}
+        selectedDate={insuranceExpiry}
+        minDate={(() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().split('T')[0]; })()}
+        title="Insurance expiry"
+        onClose={() => setInsuranceExpiryPickerOpen(false)}
+        onSelect={(v) => { setInsuranceExpiry(v); setInsuranceExpiryPickerOpen(false); }}
+      />
     </SafeAreaView>
   );
 }

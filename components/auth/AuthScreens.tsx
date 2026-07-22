@@ -820,10 +820,10 @@ export function SignUpScreen({ forcedRole }: { forcedRole?: Role }) {
         <>
           <View style={styles.nameRow}>
             <View style={styles.nameField}>
-              <AuthInput label="FIRST NAME" value={firstName} onChangeText={setFirstName} placeholder="Melody" autoCapitalize="words" textContentType="givenName" />
+              <AuthInput label="FIRST NAME" value={firstName} onChangeText={setFirstName} placeholder="First Name" autoCapitalize="words" textContentType="givenName" />
             </View>
             <View style={styles.nameField}>
-              <AuthInput label="LAST NAME" value={lastName} onChangeText={setLastName} placeholder="Adeyemi" autoCapitalize="words" textContentType="familyName" />
+              <AuthInput label="LAST NAME" value={lastName} onChangeText={setLastName} placeholder="Last Name" autoCapitalize="words" textContentType="familyName" />
             </View>
           </View>
           <AuthInput label="SCHOOL EMAIL" value={email} onChangeText={setEmail} placeholder="yourname@school.edu" keyboardType="email-address" textContentType="emailAddress" />

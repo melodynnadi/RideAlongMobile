@@ -7,7 +7,7 @@ import {
   View, Text, Modal, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert, Platform,
 } from 'react-native';
-import { CardField, useStripe } from '@/components/platform/stripe';
+import { CardForm, useStripe } from '@/components/platform/stripe';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,10 +29,15 @@ export function AddCardModal({ visible, onClose, onSuccess }: AddCardModalProps)
   const { uid, email, riderProfile } = useAuthStore();
   const { loadPaymentMethods } = usePaymentStore();
 
-  const [cardDetails,  setCardDetails]  = useState<{ complete: boolean } | null>(null);
+  const [formComplete, setFormComplete] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const cardReady = cardDetails?.complete && !isProcessing;
+  const cardReady = formComplete && !isProcessing;
+
+  // Reset completion state whenever the modal closes.
+  React.useEffect(() => {
+    if (!visible) setFormComplete(false);
+  }, [visible]);
 
   const s = useMemo(() => StyleSheet.create({
     overlay:  { flex: 1, justifyContent: 'flex-end' },
@@ -53,12 +58,11 @@ export function AddCardModal({ visible, onClose, onSuccess }: AddCardModalProps)
     subtitle:   { fontSize: 13, fontWeight: '400', marginTop: 1 },
     closeBtn:   { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
 
-    cardFieldWrap: {
+    cardFormWrap: {
       marginHorizontal: 24, marginBottom: 16,
-      borderRadius: 16, borderWidth: 1.5, overflow: 'hidden', height: 56,
-      justifyContent: 'center',
+      borderRadius: 16, borderWidth: 1.5, overflow: 'hidden',
     },
-    cardField: { height: 52, marginHorizontal: 4 },
+    cardForm: { height: 220 },
 
     securityBox:  { marginHorizontal: 24, marginBottom: 16, flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderWidth: 1, borderRadius: 14, padding: 12 },
     securityText: { flex: 1, fontSize: 12, lineHeight: 18, fontWeight: '400' },
@@ -84,7 +88,7 @@ export function AddCardModal({ visible, onClose, onSuccess }: AddCardModalProps)
   };
 
   const handleAddCard = async () => {
-    if (!cardDetails?.complete) {
+    if (!formComplete) {
       Alert.alert('Incomplete Card', 'Please enter valid card details.');
       return;
     }
@@ -169,21 +173,16 @@ export function AddCardModal({ visible, onClose, onSuccess }: AddCardModalProps)
             </TouchableOpacity>
           </View>
 
-          {/* Card Field */}
-          <View style={[s.cardFieldWrap, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {/* Card Form — separate rows for number, expiry, CVC, and postal code */}
+          <View style={[s.cardFormWrap, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
             {isDark ? <BlurView intensity={15} tint="dark" style={StyleSheet.absoluteFillObject} /> : null}
-            <CardField
-              postalCodeEnabled
-              placeholders={{ number: '1234 1234 1234 1234' }}
+            <CardForm
               cardStyle={{
                 backgroundColor: colors.bgCard,
-                textColor: colors.textPrimary,
-                placeholderColor: colors.textTertiary,
-                borderColor: 'transparent',
-                borderWidth: 0,
+                cursorColor: colors.primary,
               }}
-              style={s.cardField}
-              onCardChange={setCardDetails}
+              style={s.cardForm}
+              onFormComplete={() => setFormComplete(true)}
             />
           </View>
 

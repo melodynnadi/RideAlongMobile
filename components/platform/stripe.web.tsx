@@ -13,6 +13,14 @@ export function CardField({ onCardChange, style }: any) {
   );
 }
 
+export function CardForm({ style }: any) {
+  return (
+    <View style={[style, { alignItems: 'center', justifyContent: 'center' }]}>
+      <Text>Card entry is available in the mobile app.</Text>
+    </View>
+  );
+}
+
 export function useStripe() {
   return {
     confirmSetupIntent: async () => ({

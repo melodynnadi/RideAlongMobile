@@ -69,8 +69,8 @@ function AuthGate() {
       return;
     }
 
-    // Allow authenticated users to visit driver-signup for the upgrade flow.
-    if (inAuth && segments[1] === 'driver-signup') return;
+    // Only allow driver-signup for riders upgrading — already-registered drivers go to /(driver).
+    if (inAuth && segments[1] === 'driver-signup' && activeRole !== 'driver') return;
 
     if (activeRole === 'driver') {
       if (!inDriver) router.replace('/(driver)');
