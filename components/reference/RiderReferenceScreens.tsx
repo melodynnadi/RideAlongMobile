@@ -8,10 +8,9 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { firebaseAuth, firestore, GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import { PaymentModal } from '@/components/PaymentModal';
 import { RideFiltersModal } from '@/components/RideFiltersModal';
-import { usePromotions } from '@/hooks/usePromotions';
-import { Promotion } from '@/types';
+import { useProfileCompleteness, ProfileCompletionItem } from '@/hooks/useProfileCompleteness';
 import { applyFiltersToRide, getDefaultFilters, hasActiveFilters, type RideFilterOptions } from '@/utils/rideFilters';
-import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, limit as fsLimit, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
 import { StatusBar } from 'expo-status-bar';
 import {
   getRidePosting,
@@ -129,6 +128,7 @@ function PhoneScreen({
   bottomAction,
   onBack,
   compactContent = false,
+  scrollRef,
 }: {
   title?: string;
   activeTab?: TabKey;
@@ -139,6 +139,7 @@ function PhoneScreen({
   bottomAction?: React.ReactNode;
   onBack?: () => void;
   compactContent?: boolean;
+  scrollRef?: React.RefObject<ScrollView | null>;
 }) {
   const insets = useSafeAreaInsets();
   const { goBack } = useReturnNavigation('/(rider)');
@@ -169,6 +170,7 @@ function PhoneScreen({
         ) : null}
 
         <ScrollView
+          ref={scrollRef}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
@@ -378,17 +380,9 @@ function SectionHeader({ title, action }: { title: string; action?: string }) {
   );
 }
 
-function UberStylePromotionCard({ promotion, claimed, onPress, width, secondary = false }: { promotion: Promotion; claimed: boolean; onPress: () => void; width: number; secondary?: boolean }) {
+function ProfileTaskCard({ item, onPress, width, secondary = false }: { item: ProfileCompletionItem; onPress: () => void; width: number; secondary?: boolean }) {
   const styles = useRiderStyles();
   const { colors } = useAppTheme();
-  const icon: keyof typeof Ionicons.glyphMap = promotion.type === 'referral'
-    ? 'people-outline'
-    : promotion.type === 'informational'
-      ? 'information-circle-outline'
-      : promotion.type === 'reward'
-        ? 'gift-outline'
-        : 'pricetag-outline';
-  const action = claimed ? 'Claimed' : promotion.linkText || (promotion.type === 'referral' ? 'Refer now' : 'View offer');
 
   return (
     <TouchableOpacity
@@ -396,24 +390,23 @@ function UberStylePromotionCard({ promotion, claimed, onPress, width, secondary 
       onPress={onPress}
       activeOpacity={0.88}
       accessibilityRole="button"
-      accessibilityLabel={`${promotion.title}. ${action}`}
+      accessibilityLabel={`${item.title}. ${item.cta}`}
     >
       <View style={styles.uberPromoCopy}>
-        <Text style={styles.uberPromoTitle} numberOfLines={3}>{promotion.title}</Text>
-        <Text style={styles.uberPromoDescription} numberOfLines={2}>{promotion.description}</Text>
-        <View style={[styles.uberPromoCta, claimed && styles.uberPromoCtaClaimed]}>
-          {claimed ? <Ionicons name="checkmark" size={15} color={colors.textPrimary} /> : null}
-          <Text style={styles.uberPromoCtaText}>{action}</Text>
+        <Text style={styles.uberPromoTitle} numberOfLines={3}>{item.title}</Text>
+        <Text style={styles.uberPromoDescription} numberOfLines={2}>{item.description}</Text>
+        <View style={styles.uberPromoCta}>
+          <Text style={styles.uberPromoCtaText}>{item.cta}</Text>
         </View>
       </View>
       <View style={[styles.uberPromoVisual, secondary && styles.uberPromoVisualSecondary]}>
         <View style={[styles.promoBubble, styles.promoBubbleTop, secondary && styles.promoBubbleSecondary]} />
         <View style={[styles.promoBubble, styles.promoBubbleBottom, secondary && styles.promoBubbleSecondary]} />
         <View style={[styles.promoIconLarge, secondary && styles.promoIconLargeSecondary]}>
-          <Ionicons name={icon} size={40} color="#FFFFFF" />
+          <Ionicons name={item.icon} size={40} color="#FFFFFF" />
         </View>
         <View style={styles.promoIconSmall}>
-          <Ionicons name="car-outline" size={22} color={secondary ? colors.textPrimary : colors.primary} />
+          <Ionicons name="arrow-forward" size={22} color={secondary ? colors.textPrimary : colors.primary} />
         </View>
       </View>
     </TouchableOpacity>
@@ -497,9 +490,10 @@ export function RiderHomeReference() {
   const triedHomeLocationRef = useRef(false);
   const [promotionIndex, setPromotionIndex] = useState(0);
   const promotionScrollRef = useRef<ScrollView>(null);
-  const { promotions, loading: promotionsLoading, isPromotionClaimed } = usePromotions();
-  const promotionCardWidth = Math.min(windowWidth, 430) - 52;
-  const promotionSnapInterval = promotionCardWidth + 12;
+  const { items: profileTasks, loading: profileTasksLoading } = useProfileCompleteness('rider');
+  const promotionCardWidth = Math.min(windowWidth, 430) - 40;
+  const promotionSnapInterval = promotionCardWidth;
+  const [monthlyStats, setMonthlyStats] = useState<{ rides: number; spent: number; rating: number | null; loaded: boolean }>({ rides: 0, spent: 0, rating: null, loaded: false });
 
   const [initialized, setInitialized] = useState(false);
   useEffect(() => {
@@ -520,6 +514,78 @@ export function RiderHomeReference() {
     });
   }, [uid]);
   useEffect(() => uid ? subscribeRiderConfirmedRides(uid, setConfirmed) : undefined, [uid]);
+  useEffect(() => {
+    if (!uid) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const toTs = (v: any): Date | null => {
+          if (!v) return null;
+          if (v instanceof Timestamp) return v.toDate();
+          if (v instanceof Date) return v;
+          if (typeof v === 'number') return new Date(v);
+          if (typeof v === 'string') { const d = new Date(v); return isNaN(d.getTime()) ? null : d; }
+          return null;
+        };
+        const parseAmount = (raw: any): number => {
+          if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+          if (typeof raw === 'string') {
+            const parsed = Number(raw.replace(/[^0-9.-]/g, ''));
+            return Number.isFinite(parsed) ? parsed : 0;
+          }
+          return 0;
+        };
+
+        const [byRiderId, byUserId] = await Promise.all([
+          getDocs(query(collection(firestore, 'confirmedRides'), where('riderId', '==', uid), where('status', '==', 'COMPLETED'), fsLimit(500))),
+          getDocs(query(collection(firestore, 'confirmedRides'), where('userId', '==', uid), where('status', '==', 'COMPLETED'), fsLimit(500))),
+        ]);
+
+        const seen = new Map<string, any>();
+        [...byRiderId.docs, ...byUserId.docs].forEach((d) => seen.set(d.id, d.data()));
+
+        let rides = 0;
+        let spent = 0;
+        const monthlyRideIds: string[] = [];
+        seen.forEach((r, id) => {
+          const rideDate = toTs(r.completedAt ?? r.confirmedAt ?? r.updatedAt ?? r.createdAt);
+          if (!rideDate || rideDate < startOfMonth) return;
+          rides++;
+          monthlyRideIds.push(id);
+          spent += parseAmount(
+            r.paymentAmount ?? r.contributionAmount ?? r.pricePerSeat ?? r.price ?? r.fare ?? r.estimatedFare?.total ?? r.estimatedFare
+          );
+        });
+
+        let monthlyRating: number | null = null;
+        if (monthlyRideIds.length > 0) {
+          const stars: number[] = [];
+          for (let i = 0; i < monthlyRideIds.length; i += 10) {
+            const chunk = monthlyRideIds.slice(i, i + 10);
+            try {
+              const ratingSnap = await getDocs(query(
+                collection(firestore, 'rideRatings'),
+                where('rateeId', '==', uid),
+                where('rideId', 'in', chunk),
+              ));
+              ratingSnap.forEach((rd) => {
+                const s = (rd.data() as any).stars;
+                if (typeof s === 'number' && isFinite(s)) stars.push(s);
+              });
+            } catch { /* ignore chunk errors */ }
+          }
+          if (stars.length > 0) monthlyRating = stars.reduce((a, b) => a + b, 0) / stars.length;
+        }
+
+        if (mounted) setMonthlyStats({ rides, spent, rating: monthlyRating, loaded: true });
+      } catch {
+        if (mounted) setMonthlyStats((s) => ({ ...s, loaded: true }));
+      }
+    })();
+    return () => { mounted = false; };
+  }, [uid]);
   useEffect(() => {
     if (!uid) {
       setCompletedRideSourceKeys(new Set());
@@ -625,16 +691,16 @@ export function RiderHomeReference() {
     });
   }, [uid]);
   useEffect(() => {
-    if (promotions.length < 2) return;
+    if (profileTasks.length < 2) return;
     const interval = setInterval(() => {
       setPromotionIndex((current) => {
-        const next = (current + 1) % promotions.length;
+        const next = (current + 1) % profileTasks.length;
         promotionScrollRef.current?.scrollTo({ x: next * promotionSnapInterval, animated: true });
         return next;
       });
     }, 5000);
     return () => clearInterval(interval);
-  }, [promotions.length, promotionSnapInterval]);
+  }, [profileTasks.length, promotionSnapInterval]);
 
   useEffect(() => {
     if (from.trim()) return;
@@ -819,6 +885,44 @@ export function RiderHomeReference() {
           </View>
         )}
 
+        {profileTasksLoading && profileTasks.length === 0 ? (
+          <View style={styles.promotionLoading}><ActivityIndicator color={colors.primary} /></View>
+        ) : profileTasks.length > 0 ? (
+          <>
+          <ScrollView
+            ref={promotionScrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.promotionList}
+            snapToInterval={promotionSnapInterval}
+            snapToAlignment="start"
+            decelerationRate="fast"
+            disableIntervalMomentum
+            onMomentumScrollEnd={(event) => {
+              const next = Math.round(event.nativeEvent.contentOffset.x / promotionSnapInterval);
+              setPromotionIndex(Math.max(0, Math.min(next, profileTasks.length - 1)));
+            }}
+          >
+            {profileTasks.map((item, index) => (
+              <ProfileTaskCard
+                key={item.id}
+                item={item}
+                onPress={() => router.push(item.route as any)}
+                width={promotionCardWidth}
+                secondary={index % 2 === 1}
+              />
+            ))}
+          </ScrollView>
+          {profileTasks.length > 1 ? (
+            <View style={styles.promotionDots}>
+              {profileTasks.map((item, index) => (
+                <View key={item.id} style={[styles.promotionDot, index === promotionIndex && styles.promotionDotActive]} />
+              ))}
+            </View>
+          ) : null}
+          </>
+        ) : null}
+
         {/* Also upcoming — additional rides/requests beyond the hero */}
         {(() => {
           const now = Date.now();
@@ -863,52 +967,48 @@ export function RiderHomeReference() {
           );
         })()}
 
-        {promotionsLoading && promotions.length === 0 ? (
-          <View style={styles.promotionLoading}><ActivityIndicator color={colors.primary} /></View>
-        ) : promotions.length > 0 ? (
-          <>
-          <ScrollView
-            ref={promotionScrollRef}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.promotionList}
-            snapToInterval={promotionSnapInterval}
-            snapToAlignment="start"
-            decelerationRate="fast"
-            disableIntervalMomentum
-            onMomentumScrollEnd={(event) => {
-              const next = Math.round(event.nativeEvent.contentOffset.x / promotionSnapInterval);
-              setPromotionIndex(Math.max(0, Math.min(next, promotions.length - 1)));
-            }}
-          >
-            {promotions.map((promotion, index) => (
-              <UberStylePromotionCard
-                key={promotion.id}
-                promotion={promotion}
-                claimed={isPromotionClaimed(promotion.id)}
-                onPress={() => router.push('/(rider)/profile' as any)}
-                width={promotionCardWidth}
-                secondary={index % 2 === 1}
-              />
-            ))}
-          </ScrollView>
-          {promotions.length > 1 ? (
-            <View style={styles.promotionDots}>
-              {promotions.map((promotion, index) => (
-                <View key={promotion.id} style={[styles.promotionDot, index === promotionIndex && styles.promotionDotActive]} />
-              ))}
+        <View style={[styles.homeSection, { marginTop: 8 }]}>
+          <SectionHeader title="Rider summary (month)" action="View rides" />
+          <View style={styles.monthCard}>
+            <View style={styles.monthStatRow}>
+              <View style={styles.monthStat}>
+                <View style={styles.monthStatIconWrap}>
+                  <Ionicons name="car-outline" size={18} color={colors.primary} />
+                </View>
+                <Text style={styles.monthStatValue}>
+                  {monthlyStats.loaded ? String(monthlyStats.rides) : '—'}
+                </Text>
+                <Text style={styles.monthStatLabel}>Month rides</Text>
+              </View>
+              <View style={styles.monthDivider} />
+              <View style={styles.monthStat}>
+                <View style={styles.monthStatIconWrap}>
+                  <Ionicons name="cash-outline" size={18} color={colors.primary} />
+                </View>
+                <Text style={styles.monthStatValue}>
+                  {monthlyStats.loaded ? `$${Math.round(monthlyStats.spent)}` : '—'}
+                </Text>
+                <Text style={styles.monthStatLabel}>Total spent</Text>
+              </View>
+              <View style={styles.monthDivider} />
+              <View style={styles.monthStat}>
+                <View style={styles.monthStatIconWrap}>
+                  <Ionicons name="star-outline" size={18} color={colors.primary} />
+                </View>
+                <Text style={styles.monthStatValue}>
+                  {monthlyStats.loaded ? (monthlyStats.rating != null ? monthlyStats.rating.toFixed(1) : '—') : '—'}
+                </Text>
+                <Text style={styles.monthStatLabel}>Month rating</Text>
+              </View>
             </View>
-          ) : null}
-          </>
-        ) : (
-          <View style={styles.promotionEmptyCard}>
-            <Ionicons name="gift-outline" size={24} color={colors.primary} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.promotionEmptyTitle}>No active promotions</Text>
-              <Text style={styles.promotionEmptyText}>Check back soon for new student offers.</Text>
-            </View>
+            {monthlyStats.loaded && monthlyStats.rides === 0 && (
+              <View style={styles.monthEmptyRow}>
+                <Text style={styles.monthEmptyText}>No completed rides yet this month — go find one.</Text>
+              </View>
+            )}
           </View>
-        )}
+        </View>
+
         <RideAgainSection />
     </PhoneScreen>
   );
@@ -1677,7 +1777,7 @@ function RideAgainSection() {
         <SectionHeader title="Start here" action="Browse" />
         <View style={styles.popularRouteList}>
           <TouchableOpacity
-            style={styles.popularRouteCard}
+            style={[styles.popularRouteCard, styles.rideAgainCardRow]}
             onPress={() => router.push('/(rider)/book' as any)}
             accessibilityRole="button"
           >
@@ -1691,7 +1791,7 @@ function RideAgainSection() {
             <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.popularRouteCard}
+            style={[styles.popularRouteCard, styles.rideAgainCardRow]}
             onPress={() => router.push('/(rider)/available-rides' as any)}
             accessibilityRole="button"
           >
@@ -1720,14 +1820,30 @@ function RideAgainSection() {
             onPress={() => router.push({ pathname: '/(rider)/book', params: { pickup: route.from, dropoff: route.to } } as any)}
             accessibilityRole="button"
           >
-            <View style={styles.popularRouteIcon}>
-              <Ionicons name="refresh-outline" size={18} color={colors.primary} />
+            <View style={styles.rideAgainRouteRow}>
+              <View style={styles.rideAgainMarkers}>
+                <View style={styles.rideAgainDotPickup} />
+                <View style={styles.rideAgainLine} />
+                <View style={styles.rideAgainDotDropoff} />
+              </View>
+              <View style={styles.rideAgainAddresses}>
+                <Text style={styles.rideAgainAddressText} numberOfLines={1}>{route.from}</Text>
+                <Text style={styles.rideAgainAddressText} numberOfLines={1}>{route.to}</Text>
+              </View>
             </View>
-            <View style={styles.popularRouteCopy}>
-              <Text style={styles.popularRouteTitle}>{route.from} {'->'} {route.to}</Text>
-              <Text style={styles.popularRouteMeta}>{route.meta}</Text>
+            <View style={styles.rideAgainFooterRow}>
+              <View style={styles.rideAgainMetaPill}>
+                <Ionicons name="refresh-outline" size={12} color={colors.textSecondary} />
+                <Text style={styles.rideAgainMetaText}>{route.meta}</Text>
+              </View>
+              {route.price ? (
+                <View style={styles.rideAgainPriceChip}>
+                  <Text style={styles.rideAgainPriceText}>${Math.round(route.price)}</Text>
+                </View>
+              ) : (
+                <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+              )}
             </View>
-            {route.price ? <Text style={styles.popularRoutePrice}>${Math.round(route.price)}</Text> : <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />}
           </TouchableOpacity>
         ))}
       </View>
@@ -1811,6 +1927,7 @@ export function RiderRequestReference() {
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [requestPaymentVisible, setRequestPaymentVisible] = useState(false);
+  const requestScrollRef = useRef<ScrollView>(null);
   const pendingRequestDataRef = useRef<any>(null);
   const triedRequestLocationRef = useRef(false);
   const suggestedPrice = distanceMiles && distanceMiles > 0 ? computeRiderSuggestedPrice(distanceMiles, 1) : 0;
@@ -2061,7 +2178,7 @@ export function RiderRequestReference() {
   };
 
   return (
-    <PhoneScreen activeTab="find" compactContent>
+    <PhoneScreen activeTab="find" compactContent scrollRef={requestScrollRef}>
       <View style={styles.pageIntro}>
         <Text style={[styles.pageTitle, { color: riderPageTitleColor }]}>Request a ride</Text>
       </View>
@@ -2125,7 +2242,15 @@ export function RiderRequestReference() {
         </View>
       </View>
       <Text style={styles.eyebrow}>NOTE</Text>
-      <TextInput style={styles.noteBox} multiline value={notes} onChangeText={setNotes} placeholder="Luggage, pickup flexibility, or anything drivers should know" placeholderTextColor={colors.textSecondary} />
+      <TextInput
+        style={styles.noteBox}
+        multiline
+        value={notes}
+        onChangeText={setNotes}
+        placeholder="Luggage, pickup flexibility, or anything drivers should know"
+        placeholderTextColor={colors.textSecondary}
+        onFocus={() => setTimeout(() => requestScrollRef.current?.scrollToEnd({ animated: true }), 120)}
+      />
       <TouchableOpacity disabled={submitting} style={[styles.primaryBtnFull, styles.requestSubmitButton]} onPress={submit}><Text style={styles.primaryText}>{submitting ? 'Posting...' : 'Post request ->'}</Text></TouchableOpacity>
       <PaymentModal
         visible={requestPaymentVisible}
@@ -2617,23 +2742,6 @@ export function RiderDetailReference() {
           return;
         }
 
-      // Guard: ensure rider has at least one saved payment method
-      const { listPaymentMethods } = await import('@/services/payments');
-      const methods = await listPaymentMethods(user.uid).catch(() => [] as any[]);
-      if (!methods || methods.length === 0) {
-        Alert.alert(
-          'No payment method',
-          'Add a card before booking a ride.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Add card',
-              onPress: () => router.push('/(rider)/settings/payment-methods' as any),
-            },
-          ],
-        );
-        return;
-      }
     } catch {} finally {
       setCheckingVerification(false);
     }
@@ -3757,16 +3865,15 @@ function makeStyles(colors: AppColors) {
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   sectionTitle: { fontFamily: FONT_SANS, flex: 1, color: colors.textPrimary, fontSize: 17, fontWeight: '700' },
   sectionAction: { fontFamily: FONT_MONO, color: colors.primary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
-  promotionList: { paddingBottom: 12, paddingRight: 8 },
+  promotionList: { paddingBottom: 12 },
   promotionDots: { height: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, marginBottom: 18 },
   promotionDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.border },
   promotionDotActive: { width: 20, backgroundColor: colors.textPrimary },
-  uberPromoCard: { height: 174, marginRight: 12, flexDirection: 'row', overflow: 'hidden', borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 12, elevation: 2 },
-  uberPromoCopy: { width: '62%', paddingHorizontal: 18, paddingVertical: 17, justifyContent: 'space-between' },
-  uberPromoTitle: { color: colors.textPrimary, fontSize: 21, lineHeight: 25, fontWeight: '800', letterSpacing: -0.35 },
-  uberPromoDescription: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 5 },
+  uberPromoCard: { height: 174, flexDirection: 'row', overflow: 'hidden', borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 12, elevation: 2 },
+  uberPromoCopy: { width: '68%', paddingHorizontal: 18, paddingVertical: 17, justifyContent: 'space-between' },
+  uberPromoTitle: { color: colors.textPrimary, fontSize: 18, lineHeight: 22, fontWeight: '800', letterSpacing: -0.3 },
+  uberPromoDescription: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 6 },
   uberPromoCta: { minHeight: 38, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 19, backgroundColor: colors.bgSecondary, paddingHorizontal: 15, justifyContent: 'center' },
-  uberPromoCtaClaimed: { backgroundColor: colors.primaryDim },
   uberPromoCtaText: { color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
   uberPromoVisual: { flex: 1, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   uberPromoVisualSecondary: { backgroundColor: colors.bgSecondary },
@@ -3782,13 +3889,34 @@ function makeStyles(colors: AppColors) {
   promotionEmptyTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
   promotionEmptyText: { color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginTop: 3 },
   homeSection: { marginBottom: 28 },
-  popularRouteList: { gap: 10 },
-  popularRouteCard: { minHeight: 66, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
+  monthCard: { borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, overflow: 'hidden', marginTop: 2 },
+  monthStatRow: { flexDirection: 'row', alignItems: 'stretch', paddingVertical: 4 },
+  monthStat: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 18, paddingHorizontal: 8, gap: 6 },
+  monthStatIconWrap: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
+  monthStatValue: { fontSize: 22, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.5 },
+  monthStatLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  monthDivider: { width: 1, backgroundColor: colors.border, marginVertical: 16 },
+  monthEmptyRow: { borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: 16, paddingVertical: 14 },
+  monthEmptyText: { fontSize: 13, color: colors.textSecondary, lineHeight: 18, textAlign: 'center' },
+  popularRouteList: { gap: 12 },
+  popularRouteCard: { borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, paddingHorizontal: 16, paddingVertical: 16, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
+  rideAgainCardRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 34 },
   popularRouteIcon: { width: 38, height: 38, borderRadius: 14, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
   popularRouteCopy: { flex: 1, minWidth: 0 },
   popularRouteTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
   popularRouteMeta: { color: colors.textSecondary, fontSize: 12, fontWeight: '600', marginTop: 3 },
-  popularRoutePrice: { color: colors.primary, fontSize: 20, fontWeight: '500' },
+  rideAgainRouteRow: { flexDirection: 'row', gap: 12 },
+  rideAgainMarkers: { width: 10, alignItems: 'center', paddingTop: 5, paddingBottom: 5 },
+  rideAgainDotPickup: { width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: colors.primary, backgroundColor: colors.bgCard },
+  rideAgainLine: { width: 2, flex: 1, minHeight: 14, backgroundColor: colors.border, marginVertical: 4, borderRadius: 1 },
+  rideAgainDotDropoff: { width: 8, height: 8, borderRadius: 2, backgroundColor: colors.primary },
+  rideAgainAddresses: { flex: 1, minWidth: 0, justifyContent: 'space-between', gap: 14 },
+  rideAgainAddressText: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
+  rideAgainFooterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
+  rideAgainMetaPill: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  rideAgainMetaText: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  rideAgainPriceChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: colors.primaryDim },
+  rideAgainPriceText: { color: colors.primary, fontSize: 14, fontWeight: '700' },
   quickList: { gap: 12, paddingBottom: 16 },
   quickCard: { width: 132, height: 94, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 14 },
   quickKicker: { fontFamily: FONT_MONO, color: colors.textTertiary, fontSize: 10, fontWeight: '700', letterSpacing: 1.2 },

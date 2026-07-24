@@ -7,7 +7,7 @@ import {
   View, Text, Modal, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert, Platform,
 } from 'react-native';
-import { CardForm, useStripe } from '@/components/platform/stripe';
+import { CardField, useStripe } from '@/components/platform/stripe';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -62,7 +62,7 @@ export function AddCardModal({ visible, onClose, onSuccess }: AddCardModalProps)
       marginHorizontal: 24, marginBottom: 16,
       borderRadius: 16, borderWidth: 1.5, overflow: 'hidden',
     },
-    cardForm: { height: 220 },
+    cardForm: { height: 50, marginHorizontal: 14, marginVertical: 14 },
 
     securityBox:  { marginHorizontal: 24, marginBottom: 16, flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderWidth: 1, borderRadius: 14, padding: 12 },
     securityText: { flex: 1, fontSize: 12, lineHeight: 18, fontWeight: '400' },
@@ -173,16 +173,23 @@ export function AddCardModal({ visible, onClose, onSuccess }: AddCardModalProps)
             </TouchableOpacity>
           </View>
 
-          {/* Card Form — separate rows for number, expiry, CVC, and postal code */}
+          {/* Card field — single row: number, expiry, CVC, postal code.
+              Uses CardField (not CardForm) because on iOS the Stripe SDK's
+              CardForm wrapper ignores textColor/placeholderColor entirely —
+              only CardField actually applies them. */}
           <View style={[s.cardFormWrap, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
             {isDark ? <BlurView intensity={15} tint="dark" style={StyleSheet.absoluteFillObject} /> : null}
-            <CardForm
+            <CardField
               cardStyle={{
                 backgroundColor: colors.bgCard,
+                textColor: colors.textPrimary,
+                placeholderColor: colors.textSecondary,
+                borderWidth: 0,
+                fontSize: 15,
                 cursorColor: colors.primary,
               }}
               style={s.cardForm}
-              onFormComplete={() => setFormComplete(true)}
+              onCardChange={(card) => setFormComplete(card.complete)}
             />
           </View>
 

@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Modal, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform } from 'react-native';
-import { Check, CreditCard, ShieldCheck, Smartphone, X } from 'lucide-react-native';
+import { Check, CreditCard, Plus, ShieldCheck, Smartphone, X } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { computeTotals } from '@/utils/fees';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs, addDoc, Timestamp } from 'firebase/firestore';
 import { useStripe, isPlatformPaySupported, PlatformPay } from '@/components/platform/stripe';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { AddCardModal } from '@/components/AddCardModal';
 
 export type PaymentModalProps = {
   visible: boolean;
@@ -28,6 +29,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
   const [savedCards, setSavedCards] = useState<{ id: string; brand: string; last4: string; isDefault?: boolean }[]>([]);
   const [appleSupported, setAppleSupported] = useState(false);
   const [pendingIntentId, setPendingIntentId] = useState<string | null>(null);
+  const [showAddCard, setShowAddCard] = useState(false);
   const { confirmPayment, confirmPlatformPayPayment } = useStripe();
   const loadKeyRef = useRef<string | null>(null);
 
@@ -78,6 +80,9 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
     cardText: { color: colors.textPrimary, fontSize: 13, fontWeight: '700', textTransform: 'capitalize' },
     cardMeta: { color: colors.textSecondary, fontSize: 11, fontWeight: '500', marginTop: 2 },
     addCardHint: { color: colors.textSecondary, fontSize: 12, lineHeight: 18, fontWeight: '500', paddingVertical: 10 },
+    addCardRow: { minHeight: 52, borderWidth: 1.5, borderStyle: 'dashed', borderColor: colors.primary, borderRadius: 14, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 10 },
+    addCardIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
+    addCardRowText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
     securityNote: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 14 },
     securityText: { color: colors.green, fontSize: 12, fontWeight: '600' },
     errorBanner: { backgroundColor: colors.redDim, borderWidth: 1, borderColor: colors.redBorder, borderRadius: 14, padding: 12 },
@@ -214,6 +219,30 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       setConfirming(false);
     };
   }, [visible, riderId, appleSupported, baseUrl, onClose]);
+
+  // Re-fetch saved cards after a new card is added, and select it as the default choice.
+  const refetchSavedCards = async () => {
+    if (!riderId) return;
+    try {
+      const url = `${baseUrl}/api/payment-methods?userId=${encodeURIComponent(riderId)}`;
+      const resp = await fetch(url);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const arr = (data?.paymentMethods ?? []) as any[];
+      const normalized = arr.map((m) => ({
+        id: String(m.id),
+        brand: String(m.brand || m.type || 'card'),
+        last4: String(m.last4 || m.lastFour || '0000'),
+        isDefault: Boolean(m.isDefault || m.default || m.is_default),
+      }));
+      setSavedCards(normalized);
+      const def = normalized.find((x) => x.isDefault) || normalized[normalized.length - 1];
+      if (def) {
+        setSelectedMethod('card');
+        setSelectedPaymentMethodId(def.id);
+      }
+    } catch {}
+  };
 
   const handleCancel = async () => {
     try {
@@ -515,7 +544,8 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
   const canConfirm = selectedMethod === 'apple' || (selectedMethod === 'card' && !!selectedPaymentMethodId);
 
   return (
-    <Modal animationType="slide" transparent visible={visible} onRequestClose={handleCancel}>
+    <>
+    <Modal animationType="slide" transparent visible={visible && !showAddCard} onRequestClose={handleCancel}>
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.sheetHandle} />
@@ -599,25 +629,37 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
                 <View style={styles.savedCardList}>
                   {creating ? (
                     <ActivityIndicator color={colors.primary} />
-                  ) : savedCards.length ? (
-                    savedCards.map((card) => (
-                      <TouchableOpacity
-                        key={card.id}
-                        style={[styles.cardRow, selectedPaymentMethodId === card.id && styles.cardRowSelected]}
-                        onPress={() => { setSelectedMethod('card'); setSelectedPaymentMethodId(card.id); }}
-                      >
-                        <View style={styles.cardBrand}><CreditCard size={17} color={colors.primary} /></View>
-                        <View style={styles.cardCopy}>
-                          <Text style={styles.cardText}>{card.brand || 'Card'} ending in {card.last4}</Text>
-                          <Text style={styles.cardMeta}>{card.isDefault ? 'Default payment method' : 'Saved payment method'}</Text>
-                        </View>
-                        <View style={[styles.selection, selectedPaymentMethodId === card.id && styles.selectionActive]}>
-                          {selectedPaymentMethodId === card.id ? <Check size={13} color={colors.textInverse} strokeWidth={3} /> : null}
-                        </View>
-                      </TouchableOpacity>
-                    ))
                   ) : (
-                    <Text style={styles.addCardHint}>Add a card from Payment Methods before requesting this ride.</Text>
+                    <>
+                      {savedCards.map((card) => (
+                        <TouchableOpacity
+                          key={card.id}
+                          style={[styles.cardRow, selectedPaymentMethodId === card.id && styles.cardRowSelected]}
+                          onPress={() => { setSelectedMethod('card'); setSelectedPaymentMethodId(card.id); }}
+                        >
+                          <View style={styles.cardBrand}><CreditCard size={17} color={colors.primary} /></View>
+                          <View style={styles.cardCopy}>
+                            <Text style={styles.cardText}>{card.brand || 'Card'} ending in {card.last4}</Text>
+                            <Text style={styles.cardMeta}>{card.isDefault ? 'Default payment method' : 'Saved payment method'}</Text>
+                          </View>
+                          <View style={[styles.selection, selectedPaymentMethodId === card.id && styles.selectionActive]}>
+                            {selectedPaymentMethodId === card.id ? <Check size={13} color={colors.textInverse} strokeWidth={3} /> : null}
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                      {!savedCards.length ? (
+                        <Text style={styles.addCardHint}>Add a card to pay for this ride.</Text>
+                      ) : null}
+                      <TouchableOpacity
+                        style={styles.addCardRow}
+                        onPress={() => setShowAddCard(true)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Add new payment method"
+                      >
+                        <View style={styles.addCardIcon}><Plus size={17} color={colors.primary} /></View>
+                        <Text style={styles.addCardRowText}>Add new card</Text>
+                      </TouchableOpacity>
+                    </>
                   )}
                 </View>
               ) : null}
@@ -646,5 +688,11 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
         </View>
       </View>
     </Modal>
+    <AddCardModal
+      visible={showAddCard}
+      onClose={() => setShowAddCard(false)}
+      onSuccess={() => void refetchSavedCards()}
+    />
+    </>
   );
 }

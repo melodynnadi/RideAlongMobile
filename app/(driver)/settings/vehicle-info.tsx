@@ -205,10 +205,12 @@ export default function VehicleInfoScreen() {
       let applicationData: any = {};
 
       if (data.applicationId) {
-        const applicationSnap = await getDoc(
-          doc(firestore, 'driverApplications', String(data.applicationId)),
-        );
-        if (applicationSnap.exists()) applicationData = applicationSnap.data();
+        try {
+          const applicationSnap = await getDoc(
+            doc(firestore, 'driverApplications', String(data.applicationId)),
+          );
+          if (applicationSnap.exists()) applicationData = applicationSnap.data();
+        } catch {}
       }
       if (!Object.keys(applicationData).length) {
         try {

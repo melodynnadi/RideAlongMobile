@@ -67,7 +67,7 @@ export default function DriverProfileScreen() {
   const insets = useSafeAreaInsets();
   const { colors } = useAppTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { signOut, role, activeRole, switchRole, becomeRider } = useAuthStore();
+  const { role, activeRole, switchRole, becomeRider } = useAuthStore();
   const { isVerified, verificationStatus } = useVerificationStore();
   const [loading, setLoading] = useState(true);
   const [roleActionLoading, setRoleActionLoading] = useState(false);
@@ -262,10 +262,6 @@ export default function DriverProfileScreen() {
             <MenuRow icon="notifications" title="Notifications" href="/(driver)/notifications" returnTo="/(driver)/profile" />
           </View>
 
-          <TouchableOpacity style={styles.logoutBtn} onPress={signOut} activeOpacity={0.85}>
-            <Text style={styles.logoutText}>Log out</Text>
-          </TouchableOpacity>
-
         </ScrollView>
         <DriverBottomNav activeTab="profile" />
       </SafeAreaView>
@@ -318,7 +314,5 @@ function makeStyles(colors: AppColors) {
   menuIcon: { width: 22, alignItems: 'center', justifyContent: 'center' },
   menuTitle: { fontFamily: FONT_SANS, color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
   menuSub: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
-  logoutBtn: { height: 52, borderRadius: 26, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  logoutText: { color: colors.textInverse, fontSize: 15, fontWeight: '700' },
   });
 }

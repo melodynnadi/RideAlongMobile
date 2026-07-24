@@ -783,6 +783,7 @@ export default function BookScreen() {
   const [showCapBanner, setShowCapBanner] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const listRef = useRef<FlatList>(null);
   // Recurring ride state
   const [isRecurring, setIsRecurring] = useState(false);
   const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
@@ -1362,6 +1363,7 @@ export default function BookScreen() {
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
 
           <FlatList
+            ref={listRef}
             style={{ flex: 1 }}
             contentContainerStyle={{ paddingBottom: 88 + insets.bottom }}
             data={[0]}
@@ -1554,6 +1556,7 @@ export default function BookScreen() {
                   placeholderTextColor={colors.textSecondary}
                   multiline
                   style={styles.notesCeo}
+                  onFocus={() => setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 120)}
                 />
 
                 <TouchableOpacity

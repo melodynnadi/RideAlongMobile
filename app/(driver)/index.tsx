@@ -24,9 +24,7 @@ import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { ReportIssueModal } from '@/components/ReportIssueModal';
 import { Button } from '@/components/ui/Button';
 import { computeFilteredAverageRating, hasUserRatedRide } from '@/src/services/ratings';
-import { PromotionDetailsModal } from '@/components/PromotionDetailsModal';
-import { usePromotions } from '@/hooks/usePromotions';
-import { Promotion } from '@/types';
+import { useProfileCompleteness, ProfileCompletionItem } from '@/hooks/useProfileCompleteness';
 import { StudentVerificationBanner } from '@/components/StudentVerificationBanner';
 import { useVerificationStore } from '@/stores/verificationStore';
 import { AddressLink } from '@/components/AddressLink';
@@ -218,27 +216,19 @@ function DriverHomeAutocomplete({
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-function DriverUberStylePromotionCard({
-  promotion,
+function DriverProfileTaskCard({
+  item,
   onPress,
   width,
   secondary = false,
 }: {
-  promotion: Promotion;
+  item: ProfileCompletionItem;
   onPress: () => void;
   width: number;
   secondary?: boolean;
 }) {
   const { colors } = useAppTheme();
   const s = useDriverHomeStyles();
-  const icon: keyof typeof Ionicons.glyphMap = promotion.type === 'referral'
-    ? 'people-outline'
-    : promotion.type === 'informational'
-      ? 'information-circle-outline'
-      : promotion.type === 'reward'
-        ? 'gift-outline'
-        : 'pricetag-outline';
-  const action = promotion.linkText || (promotion.type === 'referral' ? 'Refer now' : 'View offer');
 
   return (
     <TouchableOpacity
@@ -246,23 +236,23 @@ function DriverUberStylePromotionCard({
       onPress={onPress}
       activeOpacity={0.88}
       accessibilityRole="button"
-      accessibilityLabel={`${promotion.title}. ${action}`}
+      accessibilityLabel={`${item.title}. ${item.cta}`}
     >
       <View style={s.uberPromoCopy}>
-        <Text style={s.uberPromoTitle} numberOfLines={3}>{promotion.title}</Text>
-        <Text style={s.uberPromoDescription} numberOfLines={2}>{promotion.description}</Text>
+        <Text style={s.uberPromoTitle} numberOfLines={3}>{item.title}</Text>
+        <Text style={s.uberPromoDescription} numberOfLines={2}>{item.description}</Text>
         <View style={s.uberPromoCta}>
-          <Text style={s.uberPromoCtaText}>{action}</Text>
+          <Text style={s.uberPromoCtaText}>{item.cta}</Text>
         </View>
       </View>
       <View style={[s.uberPromoVisual, secondary && s.uberPromoVisualSecondary]}>
         <View style={[s.promoBubble, s.promoBubbleTop, secondary && s.promoBubbleSecondary]} />
         <View style={[s.promoBubble, s.promoBubbleBottom, secondary && s.promoBubbleSecondary]} />
         <View style={[s.promoIconLarge, secondary && s.promoIconLargeSecondary]}>
-          <Ionicons name={icon} size={40} color="#FFFFFF" />
+          <Ionicons name={item.icon} size={40} color="#FFFFFF" />
         </View>
         <View style={s.promoIconSmall}>
-          <Ionicons name="car-outline" size={22} color={secondary ? colors.textPrimary : colors.primary} />
+          <Ionicons name="arrow-forward" size={22} color={secondary ? colors.textPrimary : colors.primary} />
         </View>
       </View>
     </TouchableOpacity>
@@ -640,13 +630,13 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
       )}
 
       {/* Actions */}
-      <View style={{ flexDirection: 'row', gap: 8, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
         {isConfirmedOnly && (
           <>
             {/* I'm on my way — notify riders before pickup */}
             {!enRouteSent ? (
               <TouchableOpacity
-                style={{ flex: 1, borderRadius: 20, paddingVertical: 10, alignItems: 'center', borderWidth: 1.5, borderColor: colors.primary, opacity: sendingEnRoute ? 0.6 : 1 }}
+                style={{ flex: 1, minHeight: 40, borderRadius: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, overflow: 'hidden', borderWidth: 1.5, borderColor: colors.primary, opacity: sendingEnRoute ? 0.6 : 1 }}
                 onPress={async () => {
                   if (sendingEnRoute || !activeConfirmedRideId) return;
                   setSendingEnRoute(true);
@@ -669,27 +659,27 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
               >
                 {sendingEnRoute
                   ? <ActivityIndicator size="small" color={colors.primary} />
-                  : <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>{"I'm on my way"}</Text>}
+                  : <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }} numberOfLines={1}>{"I'm on my way"}</Text>}
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                style={{ flex: 1, borderRadius: 20, paddingVertical: 10, alignItems: 'center', backgroundColor: colors.primaryDim, flexDirection: 'row', justifyContent: 'center', gap: 5 }}
+                style={{ flex: 1, minHeight: 40, borderRadius: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, overflow: 'hidden', backgroundColor: colors.primaryDim, gap: 5 }}
                 onPress={() => activeConfirmedRideId && router.push(`/(driver)/trip/${activeConfirmedRideId}` as any)}
                 activeOpacity={0.8}
               >
                 <Ionicons name="navigate" size={13} color={colors.primary} />
-                <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>Navigate to pickup</Text>
+                <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }} numberOfLines={1}>Navigate</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity
-              style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 10, alignItems: 'center', opacity: pickingUp ? 0.6 : 1 }}
+              style={{ flex: 1, minHeight: 40, backgroundColor: colors.primary, borderRadius: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, overflow: 'hidden', opacity: pickingUp ? 0.6 : 1 }}
               onPress={handlePickup}
               disabled={pickingUp}
               activeOpacity={0.8}
             >
               {pickingUp
                 ? <ActivityIndicator size="small" color="#FFF" />
-                : <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>Pick Up</Text>}
+                : <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }} numberOfLines={1}>Pick Up</Text>}
             </TouchableOpacity>
             {/* Rider no-show — only visible 30 min after scheduled departure */}
             {(() => {
@@ -699,7 +689,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
               if (!gracePassed) return null;
               return (
                 <TouchableOpacity
-                  style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center' }}
+                  style={{ minHeight: 40, paddingHorizontal: 12, borderRadius: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: 1.5, borderColor: colors.border }}
                   onPress={() => Alert.alert(
                     'Rider no-show?',
                     'Report that the rider did not show up after 30 minutes. The full ride amount will be charged to the rider.',
@@ -723,7 +713,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
                   )}
                   activeOpacity={0.75}
                 >
-                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700' }}>No-show</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700' }} numberOfLines={1}>No-show</Text>
                 </TouchableOpacity>
               );
             })()}
@@ -1025,10 +1015,8 @@ export default function HomeScreen() {
   const [showVerificationSuccess, setShowVerificationSuccess] = useState<boolean>(false);
   const verificationInitialSnapshotRef = useRef<Record<string, boolean>>({});
 
-  // Promotions state
-  const { promotions, loading: promotionsLoading } = usePromotions();
-  const [selectedPromotion, setSelectedPromotion] = useState<Promotion | null>(null);
-  const [promotionModalVisible, setPromotionModalVisible] = useState(false);
+  // Profile completeness state (replaces backend-driven promotions)
+  const { items: profileTasks, loading: profileTasksLoading } = useProfileCompleteness('driver');
   // Guard to auto-capture payments once per posting when all riders are completed
   const captureSentRef = useRef<Record<string, boolean>>({});
 
@@ -3534,30 +3522,30 @@ export default function HomeScreen() {
     return () => { cancelled = true; };
   }, [modalVisible, selectedRide]);
 
-  // Auto-scroll promotions every 5 seconds
+  // Auto-scroll profile tasks every 5 seconds
   useEffect(() => {
-    if (!promotions || promotions.length <= 1) return;
-    
+    if (!profileTasks || profileTasks.length <= 1) return;
+
     const interval = setInterval(() => {
       setCurrentPromotionIndex((prevIndex) => {
-        const nextIndex = (prevIndex + 1) % promotions.length;
-        const cardWidth = Math.min(Dimensions.get('window').width, 430) - 52;
-        const scrollPosition = nextIndex * (cardWidth + 12);
-        
-        // Scroll to the next promotion using scrollTo
+        const nextIndex = (prevIndex + 1) % profileTasks.length;
+        const cardWidth = Math.min(Dimensions.get('window').width, 430) - 32;
+        const scrollPosition = nextIndex * cardWidth;
+
+        // Scroll to the next card using scrollTo
         if (promotionScrollRef.current) {
           promotionScrollRef.current.scrollTo({
             x: scrollPosition,
             animated: true,
           });
         }
-        
+
         return nextIndex;
       });
     }, 5000); // 5 seconds
 
     return () => clearInterval(interval);
-  }, [promotions]);
+  }, [profileTasks]);
 
   // ── Pulse animations ────────────────────────────────────────────────────
   const pulse1 = useRef(new Animated.Value(0)).current;
@@ -3586,8 +3574,8 @@ export default function HomeScreen() {
   // ─── RENDER ─────────────────────────────────────────────────────────────
 
   const { width: SW } = Dimensions.get('window');
-  const promotionCardWidth = Math.min(SW, 430) - 44;
-  const promotionSnapInterval = promotionCardWidth + 12;
+  const promotionCardWidth = Math.min(SW, 430) - 32;
+  const promotionSnapInterval = promotionCardWidth;
 
   const badgeProps = (
     isOfferReceived: boolean, isOfferSent: boolean, isPosted: boolean,
@@ -3924,55 +3912,49 @@ export default function HomeScreen() {
               FIND NEARBY RIDERS CTA
           ══════════════════════════════════════════════════════════ */}
           {/* ══════════════════════════════════════════════════════════
-              PROMOTIONS
+              PROFILE COMPLETENESS
           ══════════════════════════════════════════════════════════ */}
-          <View style={s.section}>
-            {promotionsLoading && promotions.length === 0 ? (
-              <View style={s.promotionLoading}><ActivityIndicator color={colors.primary} /></View>
-            ) : promotions.length > 0 ? (
-              <>
-                <ScrollView
-                  ref={promotionScrollRef}
-                  horizontal showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={s.promotionList}
-                  snapToInterval={promotionSnapInterval}
-                  snapToAlignment="start"
-                  decelerationRate="fast"
-                  disableIntervalMomentum
-                  onScroll={(e) => {
-                    const idx = Math.round(e.nativeEvent.contentOffset.x / promotionSnapInterval);
-                    setCurrentPromotionIndex(Math.max(0, Math.min(idx, promotions.length - 1)));
-                  }}
-                  scrollEventThrottle={16}
-                >
-                  {promotions.map((item, index) => (
-                    <DriverUberStylePromotionCard
-                      key={item.id}
-                      promotion={item}
-                      onPress={() => router.push('/(driver)/profile' as any)}
-                      width={promotionCardWidth}
-                      secondary={index % 2 === 1}
-                    />
-                  ))}
-                </ScrollView>
-                {promotions.length > 1 && (
-                  <View style={s.dotsRow}>
-                    {promotions.map((_, i) => (
-                      <View key={i} style={[s.dot, i === currentPromotionIndex && s.dotActive]} />
+          {(profileTasksLoading || profileTasks.length > 0) && (
+            <View style={s.section}>
+              {profileTasksLoading && profileTasks.length === 0 ? (
+                <View style={s.promotionLoading}><ActivityIndicator color={colors.primary} /></View>
+              ) : (
+                <>
+                  <ScrollView
+                    ref={promotionScrollRef}
+                    horizontal showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={s.promotionList}
+                    snapToInterval={promotionSnapInterval}
+                    snapToAlignment="start"
+                    decelerationRate="fast"
+                    disableIntervalMomentum
+                    onScroll={(e) => {
+                      const idx = Math.round(e.nativeEvent.contentOffset.x / promotionSnapInterval);
+                      setCurrentPromotionIndex(Math.max(0, Math.min(idx, profileTasks.length - 1)));
+                    }}
+                    scrollEventThrottle={16}
+                  >
+                    {profileTasks.map((item, index) => (
+                      <DriverProfileTaskCard
+                        key={item.id}
+                        item={item}
+                        onPress={() => router.push(item.route as any)}
+                        width={promotionCardWidth}
+                        secondary={index % 2 === 1}
+                      />
                     ))}
-                  </View>
-                )}
-              </>
-            ) : (
-              <View style={s.promotionEmptyCard}>
-                <Ionicons name="gift-outline" size={24} color={colors.primary} />
-                <View style={{ flex: 1 }}>
-                  <Text style={s.promotionEmptyTitle}>No active promotions</Text>
-                  <Text style={s.promotionEmptyText}>Check back soon for new driver offers.</Text>
-                </View>
-              </View>
-            )}
-          </View>
+                  </ScrollView>
+                  {profileTasks.length > 1 && (
+                    <View style={s.dotsRow}>
+                      {profileTasks.map((_, i) => (
+                        <View key={i} style={[s.dot, i === currentPromotionIndex && s.dotActive]} />
+                      ))}
+                    </View>
+                  )}
+                </>
+              )}
+            </View>
+          )}
 
           {false && <View style={s.section}>
   <View style={s.sectionHdrRow}>
@@ -4233,34 +4215,46 @@ export default function HomeScreen() {
                   activeOpacity={0.75}
                   accessibilityRole="button"
                 >
-                  <View style={s.postAgainRow}>
-                    <View style={s.postAgainIcon}>
-                      <Ionicons name="refresh-outline" size={18} color={colors.primary} />
+                  <View style={s.postAgainRouteRow}>
+                    <View style={s.postAgainMarkers}>
+                      <View style={s.postAgainDotPickup} />
+                      <View style={s.postAgainLine} />
+                      <View style={s.postAgainDotDropoff} />
                     </View>
-                    <View style={s.postAgainCopy}>
-                      <Text style={s.postAgainTitle} numberOfLines={1}>{route.from} {'->'} {route.to}</Text>
+                    <View style={s.postAgainAddresses}>
+                      <Text style={s.postAgainAddressText} numberOfLines={1}>{route.from}</Text>
+                      <Text style={s.postAgainAddressText} numberOfLines={1}>{route.to}</Text>
+                    </View>
+                  </View>
+                  <View style={s.postAgainFooterRow}>
+                    <View style={s.postAgainMetaPill}>
+                      <Ionicons name="refresh-outline" size={12} color={colors.textSecondary} />
                       <Text style={s.postAgainMeta}>{route.meta}</Text>
                     </View>
-                    {route.price ? <Text style={s.postAgainPrice}>${Math.round(route.price)}</Text> : <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />}
+                    {route.price ? (
+                      <View style={s.postAgainPriceChip}>
+                        <Text style={s.postAgainPrice}>${Math.round(route.price)}</Text>
+                      </View>
+                    ) : (
+                      <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                    )}
                   </View>
                 </TouchableOpacity>
               )) : (
                 <TouchableOpacity
-                  style={s.postAgainCard}
+                  style={[s.postAgainCard, s.postAgainRow]}
                   onPress={() => router.push('/(driver)/book' as any)}
                   activeOpacity={0.75}
                   accessibilityRole="button"
                 >
-                  <View style={s.postAgainRow}>
-                    <View style={s.postAgainIcon}>
-                      <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
-                    </View>
-                    <View style={s.postAgainCopy}>
-                      <Text style={s.postAgainTitle}>Post your first ride</Text>
-                      <Text style={s.postAgainMeta}>Riders near you are looking for drivers</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                  <View style={s.postAgainIcon}>
+                    <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
                   </View>
+                  <View style={s.postAgainCopy}>
+                    <Text style={s.postAgainTitle}>Post your first ride</Text>
+                    <Text style={s.postAgainMeta}>Riders near you are looking for drivers</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                 </TouchableOpacity>
               )}
             </View>
@@ -4465,18 +4459,6 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* Promotion Details Modal */}
-      <PromotionDetailsModal
-        promotion={selectedPromotion}
-        visible={promotionModalVisible}
-        onClose={() => { setPromotionModalVisible(false); setSelectedPromotion(null); }}
-        onClaim={(promotionId: string) => {
-          Alert.alert('Promotion Claimed!', 'Your promotion has been activated.');
-          setPromotionModalVisible(false);
-          setSelectedPromotion(null);
-        }}
-        isClaimed={false}
-      />
 
       <DriverBottomNav activeTab="home" />
     </View>
@@ -5153,14 +5135,11 @@ function useDriverHomeStyles() {
   dotActive:        { backgroundColor:colors.textPrimary, width:20, borderRadius:3 },
 
   // ── Hot Zones ─────────────────────────────────────────────────────────────
-  promotionList: { paddingBottom: 12, paddingRight: 8 },
+  promotionList: { paddingBottom: 12 },
   promotionLoading: { minHeight: 120, alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
-  promotionEmptyCard: { minHeight: 92, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 18 },
-  promotionEmptyTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
-  promotionEmptyText: { color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginTop: 3 },
-  uberPromoCard: { height: 174, marginRight: 12, flexDirection: 'row', overflow: 'hidden', borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 12, elevation: 2 },
-  uberPromoCopy: { width: '62%', paddingHorizontal: 18, paddingVertical: 17, justifyContent: 'space-between' },
-  uberPromoTitle: { color: colors.textPrimary, fontSize: 21, lineHeight: 25, fontWeight: '800', letterSpacing: -0.35 },
+  uberPromoCard: { height: 174, flexDirection: 'row', overflow: 'hidden', borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.07, shadowRadius: 12, elevation: 2 },
+  uberPromoCopy: { width: '68%', paddingHorizontal: 18, paddingVertical: 17, justifyContent: 'space-between' },
+  uberPromoTitle: { color: colors.textPrimary, fontSize: 18, lineHeight: 22, fontWeight: '800', letterSpacing: -0.3 },
   uberPromoDescription: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 6 },
   uberPromoCta: { alignSelf: 'flex-start', minHeight: 34, borderRadius: 17, backgroundColor: colors.bgSecondary, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 6 },
   uberPromoCtaText: { color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
@@ -5209,14 +5188,24 @@ function useDriverHomeStyles() {
   iconBtn:          { width:36, height:36, borderRadius:18, alignItems:'center', justifyContent:'center', backgroundColor:colors.bgSecondary },
   waitingText:      { fontSize:12, color:colors.textSecondary, textAlign:'right', marginTop:8, fontStyle:'italic' },
 
-  postAgainList:    { gap:10 },
-  postAgainCard:    { minHeight:66, borderRadius:18, borderWidth:1, borderColor:colors.border, backgroundColor:colors.bgCard, paddingHorizontal:14, paddingVertical:12, shadowColor:colors.textPrimary, shadowOffset:{width:0,height:3}, shadowOpacity:0.04, shadowRadius:8, elevation:1 },
-  postAgainRow:     { flexDirection:'row', alignItems:'center', gap:12 },
+  postAgainList:    { gap:12 },
+  postAgainCard:    { borderRadius:20, borderWidth:1, borderColor:colors.border, backgroundColor:colors.bgCard, paddingHorizontal:16, paddingVertical:16, shadowColor:colors.textPrimary, shadowOffset:{width:0,height:3}, shadowOpacity:0.04, shadowRadius:8, elevation:1 },
+  postAgainRow:     { flexDirection:'row', alignItems:'center', gap:12, minHeight:34 },
   postAgainIcon:    { width:38, height:38, borderRadius:14, backgroundColor:colors.primaryDim, alignItems:'center', justifyContent:'center', flexShrink:0 },
   postAgainCopy:    { flex:1, minWidth:0 },
   postAgainTitle:   { color:colors.textPrimary, fontSize:15, fontWeight:'700' },
   postAgainMeta:    { color:colors.textSecondary, fontSize:12, fontWeight:'600', marginTop:3 },
-  postAgainPrice:   { color:colors.primary, fontSize:20, fontWeight:'500' },
+  postAgainRouteRow:    { flexDirection:'row', gap:12 },
+  postAgainMarkers:     { width:10, alignItems:'center', paddingTop:5, paddingBottom:5 },
+  postAgainDotPickup:   { width:8, height:8, borderRadius:4, borderWidth:2, borderColor:colors.primary, backgroundColor:colors.bgCard },
+  postAgainLine:        { width:2, flex:1, minHeight:14, backgroundColor:colors.border, marginVertical:4, borderRadius:1 },
+  postAgainDotDropoff:  { width:8, height:8, borderRadius:2, backgroundColor:colors.primary },
+  postAgainAddresses:   { flex:1, minWidth:0, justifyContent:'space-between', gap:14 },
+  postAgainAddressText: { color:colors.textPrimary, fontSize:14, fontWeight:'600' },
+  postAgainFooterRow:   { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginTop:14, paddingTop:12, borderTopWidth:1, borderTopColor:colors.border },
+  postAgainMetaPill:    { flexDirection:'row', alignItems:'center', gap:5 },
+  postAgainPriceChip:   { paddingHorizontal:10, paddingVertical:4, borderRadius:12, backgroundColor:colors.primaryDim },
+  postAgainPrice:   { color:colors.primary, fontSize:14, fontWeight:'700' },
 
   // ── Campus Activity ───────────────────────────────────────────────────────
   activityCard:     { borderRadius:18, borderWidth:1, borderColor:colors.border, overflow:'hidden', marginTop:2, backgroundColor:colors.bgCard },

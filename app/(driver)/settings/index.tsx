@@ -93,7 +93,7 @@ export default function SettingsScreen() {
     }
   };
 
-  const { driverProfile } = useAuthStore();
+  const { driverProfile, signOut } = useAuthStore();
   const university = driverProfile?.university || driverProfile?.personalInfo?.university || null;
   const isVerifiedFinal = isVerified || verificationStatus === 'approved' || verificationStatus === 'auto-approved';
   const isPending = verificationStatus === 'pending' || verificationStatus === 'manual-review';
@@ -238,6 +238,10 @@ export default function SettingsScreen() {
               isLast
             />
           </View>
+
+          <TouchableOpacity style={s.logoutBtn} onPress={signOut} activeOpacity={0.85}>
+            <Text style={s.logoutText}>Log out</Text>
+          </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -344,5 +348,8 @@ function makeStyles(colors: AppColors) {
     rowMid: { flex: 1, minWidth: 0 },
     rowLabel: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
     rowSub: { color: colors.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 3 },
+
+    logoutBtn: { height: 52, borderRadius: 26, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginTop: 18, marginBottom: 8 },
+    logoutText: { color: colors.textInverse, fontSize: 15, fontWeight: '700' },
   });
 }

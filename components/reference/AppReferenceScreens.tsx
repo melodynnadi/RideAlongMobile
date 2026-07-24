@@ -2231,7 +2231,7 @@ export function RiderProfileReference() {
 }
 function RiderProfileReferenceInner() {
   const { colors, s } = useScreenCtx();
-  const { signOut, role, switchRole } = useAuthStore();
+  const { role, switchRole } = useAuthStore();
   const uid = firebaseAuth.currentUser?.uid;
   const [profile, setProfile] = useState<RiderProfile | null>(null);
   const [requests, setRequests] = useState<MobileRideRequest[]>([]);
@@ -2332,9 +2332,6 @@ function RiderProfileReferenceInner() {
         </TouchableOpacity>
       ) : null}
       <View style={s.menuCard}><MenuRow icon="wallet" title="Payment methods" href="/(rider)/settings/payment-methods" returnTo="/(rider)/profile" /><MenuRow icon="time" title="Ride history" href="/(rider)/settings/ride-history" returnTo="/(rider)/profile" /><MenuRow icon="notifications" title="Notifications" href="/(rider)/notifications" returnTo="/(rider)/profile" /></View>
-      <TouchableOpacity style={s.logoutBtn} onPress={signOut} activeOpacity={0.85}>
-        <Text style={s.logoutBtnText}>Log out</Text>
-      </TouchableOpacity>
     </Phone>
   );
 }
@@ -2391,7 +2388,7 @@ export function RiderSettingsReference() {
 function RiderSettingsReferenceInner() {
   const { s } = useScreenCtx();
   const { isDark, setDark } = useAppTheme();
-  const { riderProfile } = useAuthStore();
+  const { riderProfile, signOut } = useAuthStore();
   const { isVerified, verificationStatus } = useVerificationStore();
   const [pushEnabled, setPushEnabled] = useState(true);
 
@@ -2469,6 +2466,9 @@ function RiderSettingsReferenceInner() {
         <MenuRow icon="shield-checkmark" title="Privacy policy" href="https://ridealongapp.com/pages/privacy" />
         <MenuRow icon="document-text" title="Terms of service" href="https://ridealongapp.com/pages/terms" />
       </View>
+      <TouchableOpacity style={s.logoutBtn} onPress={signOut} activeOpacity={0.85}>
+        <Text style={s.logoutBtnText}>Log out</Text>
+      </TouchableOpacity>
     </Phone>
   );
 }
@@ -2690,7 +2690,7 @@ function RiderPaymentMethodsReferenceInner() {
 
   return (
     <>
-      <Phone title="Payment" back backHref="/(rider)/profile" compactContent>
+      <Phone title="Payment" back backHref="/(rider)/profile" compactContent headerGap={0}>
         <View style={s.paymentSectionHeader}>
           <Label>PAYMENT METHODS</Label>
           <TouchableOpacity
