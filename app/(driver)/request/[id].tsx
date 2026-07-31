@@ -446,6 +446,7 @@ export default function RequestDeepLinkScreen() {
   const riderRating   = riderProfile?.rating ?? request.riderRating ?? request.userRating;
   const riderAvatarUrl: string | null = riderProfile?.avatarUrl ?? null;
   const notes    = request.notes || request.riderNotes || '';
+  const eventName: string = request.eventName || '';
   const duration = request.duration?.text || (typeof request.duration === 'string' ? request.duration : '');
   const distance = request.distance?.text || (typeof request.distance === 'string' ? request.distance : '');
   const isConfirmed = ['confirmed', 'completed', 'cancelled', 'canceled'].includes(String(request.status || '').toLowerCase());
@@ -575,6 +576,17 @@ export default function RequestDeepLinkScreen() {
               })}
             </View>
           )}
+
+          {/* ── Event ── */}
+          {eventName ? (
+            <View style={s.card}>
+              <Text style={s.cardTitle}>Going to</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
+                <Text style={s.notesText}>{eventName}</Text>
+              </View>
+            </View>
+          ) : null}
 
           {/* ── Rider Notes ── */}
           <View style={s.card}>

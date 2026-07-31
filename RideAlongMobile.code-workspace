@@ -4,13 +4,11 @@
 			"path": "."
 		},
 		{
-			"path": "../RideAlongWebApp"
+			"path": "../../../Desktop/RideAlongWebApp"
 		},
 		{
-			"path": "../RideAlongAdminApp"
+			"path": "../RideAlongEmployeeApp"
 		}
 	],
-	"settings": {
-		"liveServer.settings.multiRootWorkspaceName": "RideAlongWebApp"
-	}
+	"settings": {}
 }

@@ -15,6 +15,7 @@ import { StatusBar } from 'expo-status-bar';
 import {
   getRidePosting,
   MobileRidePosting,
+  rideDateFromData,
   RiderProfile,
   subscribeAvailableRides,
   subscribeRiderConfirmedRides,
@@ -716,14 +717,63 @@ export function RiderHomeReference() {
     };
   }, [from]);
 
-  const nextRide = useMemo(() => {
-    // Prioritise any ride that's actively in progress (needs rider action)
-    const activeStatuses = new Set(['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED']);
-    const active = confirmed.find((r) => activeStatuses.has(String(r.status || '').toUpperCase()));
-    if (active) return active;
-    return confirmed.find((ride) => !ride.date || ride.date.getTime() >= Date.now()) || null;
-  }, [confirmed]);
-  const nextRequest = activeRequests[0] || null;
+  // The top card should always be whichever ride is happening soonest — an
+  // in-progress ride still wins outright since it needs immediate attention —
+  // matching the driver home screen's single soonest-first timeline instead of
+  // always preferring a confirmed ride over a pending request regardless of date.
+  const activeConfirmedStatuses = useMemo(() => new Set(['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED']), []);
+  const sortedConfirmed = useMemo(() => {
+    return [...confirmed].sort((a, b) => {
+      const aActive = activeConfirmedStatuses.has(String(a.status || '').toUpperCase());
+      const bActive = activeConfirmedStatuses.has(String(b.status || '').toUpperCase());
+      if (aActive !== bActive) return aActive ? -1 : 1;
+      const at = a.date ? a.date.getTime() : Number.MAX_SAFE_INTEGER;
+      const bt = b.date ? b.date.getTime() : Number.MAX_SAFE_INTEGER;
+      return at - bt;
+    });
+  }, [confirmed, activeConfirmedStatuses]);
+  const sortedActiveRequests = useMemo(() => {
+    return [...activeRequests].sort((a, b) => {
+      const at = rideDateFromData(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const bt = rideDateFromData(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      return at - bt;
+    });
+  }, [activeRequests]);
+  const soonestConfirmed = sortedConfirmed[0] || null;
+  const soonestRequest = sortedActiveRequests[0] || null;
+  const soonestConfirmedIsActive = !!soonestConfirmed && activeConfirmedStatuses.has(String(soonestConfirmed.status || '').toUpperCase());
+  const heroIsRequest = !soonestConfirmedIsActive && !!soonestRequest && (
+    !soonestConfirmed
+    || (rideDateFromData(soonestRequest)?.getTime() ?? Number.MAX_SAFE_INTEGER) < (soonestConfirmed.date ? soonestConfirmed.date.getTime() : Number.MAX_SAFE_INTEGER)
+  );
+  const nextRide = heroIsRequest ? null : soonestConfirmed;
+  const nextRequest = heroIsRequest ? soonestRequest : null;
+
+  // Remaining rides/requests for "Also upcoming" — merged and sorted the same way
+  // as the hero pick, so the soonest of what's left always shows first.
+  const upcomingRestEntries = useMemo(() => {
+    type Entry =
+      | { key: string; date: number; kind: 'ride'; ride: MobileRidePosting }
+      | { key: string; date: number; kind: 'request'; request: any };
+    const heroRideId = nextRide?.id;
+    const heroRequestId = nextRequest?.id;
+    const now = Date.now();
+
+    const rideEntries: Entry[] = confirmed
+      .filter((r) => r.id !== heroRideId)
+      .filter((r) => {
+        const s = String(r.status || '').toUpperCase();
+        if (['COMPLETED', 'CANCELLED', 'CANCELED', 'EXPIRED'].includes(s)) return false;
+        return !r.date || r.date.getTime() >= now - 2 * 60 * 60 * 1000;
+      })
+      .map((r) => ({ key: `ride:${r.id}`, date: r.date ? r.date.getTime() : Number.MAX_SAFE_INTEGER, kind: 'ride' as const, ride: r }));
+
+    const requestEntries: Entry[] = activeRequests
+      .filter((r) => r.id !== heroRequestId)
+      .map((r) => ({ key: `request:${r.id}`, date: rideDateFromData(r)?.getTime() ?? Number.MAX_SAFE_INTEGER, kind: 'request' as const, request: r }));
+
+    return [...rideEntries, ...requestEntries].sort((a, b) => a.date - b.date);
+  }, [confirmed, activeRequests, nextRide, nextRequest]);
   const firstName = profile?.firstName || profile?.displayName?.split(' ')[0] || firebaseAuth.currentUser?.displayName?.split(' ')[0] || 'there';
   const nextRequestOfferInfo = useMemo(() => {
     if (!nextRequest) return null;
@@ -923,49 +973,30 @@ export function RiderHomeReference() {
           </>
         ) : null}
 
-        {/* Also upcoming — additional rides/requests beyond the hero */}
-        {(() => {
-          const now = Date.now();
-          // Additional confirmed rides (excluding the one shown as hero)
-          const additionalRides = confirmed.filter((r) => {
-            if (nextRide && r.id === nextRide.id) return false;
-            const s = String(r.status || '').toUpperCase();
-            if (['COMPLETED', 'CANCELLED', 'CANCELED', 'EXPIRED'].includes(s)) return false;
-            return !r.date || r.date.getTime() >= now - 2 * 60 * 60 * 1000;
-          });
-          // Additional requests (excluding the one shown as hero)
-          const additionalRequests = activeRequests.slice(1);
-          const hasMore = additionalRides.length > 0 || additionalRequests.length > 0;
-          if (!hasMore) return null;
-          return (
-            <View style={{ marginTop: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <Text style={{ color: colors.textPrimary, fontSize: 17, fontWeight: '700' }}>Also upcoming</Text>
-              </View>
-              {additionalRides.map((ride) => (
-                <View key={ride.id} style={{ marginBottom: 10 }}>
-                  <LiveRideCard ride={ride} />
-                </View>
-              ))}
-              {additionalRequests.map((req) => {
-                const offer = requestsWithOffers.get(req.id);
-                const offerInfo = offer ? { offerId: offer.offerId, driverId: offer.driverId, offerPrice: offer.offerPrice, offerCount: offer.offerCount } : null;
-                return (
-                  <View key={req.id} style={{ marginBottom: 10 }}>
-                    <RiderActivityCard
-                      request={req}
-                      offerInfo={offerInfo}
-                      confirmedRideStatus={null}
-                      confirmedRideId={null}
-                      driverEnRoute={false}
-                      verificationCode={null}
-                    />
-                  </View>
-                );
-              })}
+        {/* Also upcoming — remaining rides/requests beyond the hero, soonest first */}
+        {upcomingRestEntries.length > 0 && (
+          <View style={{ marginTop: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <Text style={{ color: colors.textPrimary, fontSize: 17, fontWeight: '700' }}>Also upcoming</Text>
             </View>
-          );
-        })()}
+            {upcomingRestEntries.map((entry) => (
+              <View key={entry.key} style={{ marginBottom: 10 }}>
+                {entry.kind === 'ride' ? (
+                  <LiveRideCard ride={entry.ride} />
+                ) : (
+                  <RiderActivityCard
+                    request={entry.request}
+                    offerInfo={requestsWithOffers.get(entry.request.id) ?? null}
+                    confirmedRideStatus={null}
+                    confirmedRideId={null}
+                    driverEnRoute={false}
+                    verificationCode={null}
+                  />
+                )}
+              </View>
+            ))}
+          </View>
+        )}
 
         <View style={[styles.homeSection, { marginTop: 8 }]}>
           <SectionHeader title="Rider summary (month)" action="View rides" />
@@ -1240,15 +1271,28 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
     { pickup: request.pickupAddress || request.pickup, dropoff: request.dropoffAddress || request.dropoff },
   );
 
-  // Fetch code directly if not provided via prop (listener may not have fired yet)
+  // Fetch code directly if not provided via prop (listener may not have fired yet,
+  // or the caller — e.g. secondary cards in "Also upcoming" — doesn't track a
+  // confirmedRideId for this request at all).
   useEffect(() => {
     if (verificationCode) { setLocalCode(verificationCode); return; }
-    if (!confirmedRideId || !isConfirmed) return;
-    getDoc(doc(firestore, 'confirmedRides', confirmedRideId)).then((snap) => {
-      const code = snap.exists() ? snap.data()?.verificationCode : null;
-      if (code) setLocalCode(code);
-    }).catch(() => {});
-  }, [confirmedRideId, verificationCode, isConfirmed]);
+    if (!isConfirmed) return;
+    let cancelled = false;
+    (async () => {
+      if (confirmedRideId) {
+        const snap = await getDoc(doc(firestore, 'confirmedRides', confirmedRideId)).catch(() => null);
+        const code = snap?.exists() ? snap.data()?.verificationCode : null;
+        if (!cancelled && code) { setLocalCode(code); return; }
+      }
+      // No confirmedRideId supplied — look up the confirmedRides doc linked to this
+      // request directly so the code still resolves.
+      const field = (request as any)?._isPostingRequest ? 'ridePostingRequestId' : 'rideRequestId';
+      const snap = await getDocs(query(collection(firestore, 'confirmedRides'), where(field, '==', request.id))).catch(() => null);
+      const code = snap && !snap.empty ? snap.docs[0].data()?.verificationCode : null;
+      if (!cancelled && code) setLocalCode(code);
+    })();
+    return () => { cancelled = true; };
+  }, [confirmedRideId, verificationCode, isConfirmed, request.id]);
   const [driverName, setDriverName] = useState<string>('');
   const [vehicleText, setVehicleText] = useState<string>('');
   const [driverPhotoURL, setDriverPhotoURL] = useState<string | null>(null);
@@ -1398,7 +1442,7 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
   const isEnRoute   = !!driverEnRoute && isConfirmed && !isInProgress && !isDriverCompleted;
   const statusColor = isDriverCompleted ? colors.primary : isInProgress ? colors.primary : isEnRoute ? colors.primary : isConfirmed ? colors.green : hasOffer ? colors.primary : colors.textSecondary;
   const statusBg    = isDriverCompleted ? colors.primaryDim : isInProgress ? colors.primaryDim : isEnRoute ? colors.primaryDim : isConfirmed ? colors.greenDim : hasOffer ? colors.primaryDim : colors.bgSecondary;
-  const statusLabel = isDriverCompleted ? 'CONFIRM ARRIVAL' : isInProgress ? 'IN PROGRESS' : isEnRoute ? '🚗 DRIVER EN ROUTE' : isConfirmed ? 'CONFIRMED' : hasOffer ? 'OFFER RECEIVED' : 'PENDING';
+  const statusLabel = isDriverCompleted ? 'CONFIRM ARRIVAL' : isInProgress ? 'IN PROGRESS' : isEnRoute ? 'DRIVER EN ROUTE' : isConfirmed ? 'CONFIRMED' : hasOffer ? 'OFFER RECEIVED' : 'PENDING';
   const showDriverInfo = (isConfirmed || isInProgress || isDriverCompleted) && !!driverName;
 
   return (
@@ -1925,6 +1969,7 @@ export function RiderRequestReference() {
   const [pickupCoords, setPickupCoords] = useState<Coords | null>(null);
   const [dropoffCoords, setDropoffCoords] = useState<Coords | null>(null);
   const [notes, setNotes] = useState('');
+  const [eventName, setEventName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [requestPaymentVisible, setRequestPaymentVisible] = useState(false);
   const requestScrollRef = useRef<ScrollView>(null);
@@ -2140,6 +2185,7 @@ export function RiderRequestReference() {
           seconds: submitDurationMinutes != null ? Math.round(submitDurationMinutes * 60) : null,
         } : null,
         notes: notes.trim(),
+        eventName: eventName.trim() || null,
         resolvedPrice,
       };
       setRequestPaymentVisible(true);
@@ -2241,6 +2287,14 @@ export function RiderRequestReference() {
           <Text style={styles.requestSuggestedText}>{suggestedText}</Text>
         </View>
       </View>
+      <Text style={styles.eyebrow}>EVENT (OPTIONAL)</Text>
+      <TextInput
+        style={styles.inputPill}
+        value={eventName}
+        onChangeText={setEventName}
+        placeholder="Concert, game day, move-in weekend..."
+        placeholderTextColor={colors.textSecondary}
+      />
       <Text style={styles.eyebrow}>NOTE</Text>
       <TextInput
         style={styles.noteBox}
@@ -2409,7 +2463,7 @@ export function RiderAvailableReference() {
     const q = searchQuery.trim().toLowerCase();
     let result = visibleRidePool.filter((ride) => {
       if (q) {
-        const searchable = [ride.driverName, ride.from, ride.to, ride.vehicle].join(' ').toLowerCase();
+        const searchable = [ride.driverName, ride.from, ride.to, ride.vehicle, ride.raw?.eventName].join(' ').toLowerCase();
         if (!searchable.includes(q)) return false;
       }
       if (timeFilter === 'rating') return (ride.driverRating ?? 0) >= 4.8;
@@ -2463,7 +2517,7 @@ export function RiderAvailableReference() {
         <TextInput
           value={searchQuery}
           onChangeText={setSearchQuery}
-          placeholder="Search by driver, city..."
+          placeholder="Search by driver, city, or event..."
           placeholderTextColor={colors.textSecondary}
           style={styles.availableSearchInput}
           returnKeyType="search"
@@ -2538,6 +2592,12 @@ export function RiderAvailableReference() {
                 </View>
               )}
             </View>
+            {ride.raw?.eventName ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 5, backgroundColor: colors.primaryDim, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 12 }}>
+                <Ionicons name="sparkles-outline" size={11} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '800' }} numberOfLines={1}>{String(ride.raw.eventName)}</Text>
+              </View>
+            ) : null}
             <View style={styles.availableLocationsBlock}>
               <View style={styles.availableRouteRail}>
                 <View style={styles.availablePickupDot} />
@@ -2826,47 +2886,116 @@ export function RiderDetailReference() {
   useEffect(() => {
     if (!rideId) { setLoading(false); return; }
     (async () => {
+      const { getDoc: getDocImpl, doc: dc, collection: col, query: qb, where: wh, getDocs: getDocsImpl } = await import('firebase/firestore');
+      const { firestore: db } = await import('@/constants/services');
+
+      // Each lookup below is caught independently — a permission-denied error on
+      // one collection (e.g. reading a nonexistent doc under strict rules) must
+      // not abort the rest of the fallback chain, or every ride resolves to
+      // "not found" the moment the first guess is wrong.
+      const safeGet = async (ref: any) => {
+        try { return await getDocImpl(ref); } catch { return null; }
+      };
+      const safeQuery = async (q: any) => {
+        try { return await getDocsImpl(q); } catch { return null; }
+      };
+
       try {
-        const posting = await getRidePosting(rideId);
-        if (posting) { setRide(posting); return; }
-        // Fall back: treat rideId as a rideRequests doc
-        const { getDoc: gd, doc: dc, collection: col, query: q, where: wh, getDocs: gds } = await import('firebase/firestore');
-        const { firestore: db } = await import('@/constants/services');
-        const confirmedDirectSnap = await gd(dc(db, 'confirmedRides', rideId));
-        if (confirmedDirectSnap.exists()) {
+        // 1) A live/open ridePostings doc
+        const postingSnap = await safeGet(dc(db, 'ridePostings', rideId));
+        if (postingSnap?.exists()) {
+          const posting = await getRidePosting(rideId).catch(() => null);
+          if (posting) { setRide(posting); return; }
+        }
+
+        // 2) A confirmedRides doc — the common case once a ride is confirmed,
+        // since the card passes the confirmedRides doc id directly.
+        const confirmedDirectSnap = await safeGet(dc(db, 'confirmedRides', rideId));
+        if (confirmedDirectSnap?.exists()) {
           const confirmedData = confirmedDirectSnap.data() as any;
-          const requestId = confirmedData.rideRequestId || confirmedData.requestId || null;
+          const requestId = confirmedData.rideRequestId || confirmedData.requestId || confirmedData.ridePostingRequestId || confirmedData.postingRequestId || null;
           let reqData = confirmedData;
           if (requestId) {
-            const linkedReqSnap = await gd(dc(db, 'rideRequests', String(requestId))).catch(() => null);
-            if (linkedReqSnap?.exists()) reqData = { ...linkedReqSnap.data(), ...confirmedData };
+            const linkedReqSnap = await safeGet(dc(db, 'rideRequests', String(requestId)));
+            if (linkedReqSnap?.exists()) {
+              reqData = { ...(linkedReqSnap.data() as any), ...confirmedData };
+            } else {
+              const linkedPostingReqSnap = await safeGet(dc(db, 'ridePostingRequests', String(requestId)));
+              if (linkedPostingReqSnap?.exists()) reqData = { ...(linkedPostingReqSnap.data() as any), ...confirmedData };
+            }
           }
           const driverId = confirmedData?.driverId || reqData.confirmedDriver || reqData.driverId;
           let driverData: any = null;
           if (driverId) {
-            const driverSnap = await gd(dc(db, 'drivers', driverId));
-            if (driverSnap.exists()) driverData = driverSnap.data();
+            const driverSnap = await safeGet(dc(db, 'drivers', driverId));
+            if (driverSnap?.exists()) driverData = driverSnap.data();
           }
           setConfirmedRequest({ req: { ...reqData, id: requestId || rideId }, confirmed: confirmedData, driver: driverData, driverId, confirmedRideId: rideId });
           return;
         }
-        const reqSnap = await gd(dc(db, 'rideRequests', rideId));
-        if (!reqSnap.exists()) return;
-        const reqData = reqSnap.data() as any;
-        // Also try to get confirmed ride doc for driver info
-        const confirmedSnap = await gds(q(col(db, 'confirmedRides'), wh('rideRequestId', '==', rideId)));
-        const confirmedDoc = !confirmedSnap.empty ? confirmedSnap.docs[0] : null;
-        const confirmedData = confirmedDoc ? confirmedDoc.data() as any : null;
-        // Fetch driver profile if we have driverId
-        const driverId = confirmedData?.driverId || reqData.confirmedDriver || reqData.driverId;
-        let driverData: any = null;
-        if (driverId) {
-          const driverSnap = await gd(dc(db, 'drivers', driverId));
-          if (driverSnap.exists()) driverData = driverSnap.data();
+
+        // 3) A rideRequests doc (rider posted an open request)
+        const reqSnap = await safeGet(dc(db, 'rideRequests', rideId));
+        if (reqSnap?.exists()) {
+          const reqData = reqSnap.data() as any;
+          const confirmedSnap = await safeQuery(qb(col(db, 'confirmedRides'), wh('rideRequestId', '==', rideId)));
+          const confirmedDoc = confirmedSnap && !confirmedSnap.empty ? confirmedSnap.docs[0] : null;
+          const confirmedData = confirmedDoc ? confirmedDoc.data() as any : null;
+          const driverId = confirmedData?.driverId || reqData.confirmedDriver || reqData.driverId;
+          let driverData: any = null;
+          if (driverId) {
+            const driverSnap = await safeGet(dc(db, 'drivers', driverId));
+            if (driverSnap?.exists()) driverData = driverSnap.data();
+          }
+          setConfirmedRequest({ req: reqData, confirmed: confirmedData, driver: driverData, driverId, confirmedRideId: confirmedDoc?.id || null });
+          return;
         }
-        setConfirmedRequest({ req: reqData, confirmed: confirmedData, driver: driverData, driverId, confirmedRideId: confirmedDoc?.id || null });
-      } catch {}
-      finally { setLoading(false); }
+
+        // 4) A ridePostingRequests doc (rider booked an existing driver posting,
+        // rather than posting their own open request). Mirrors the same dual
+        // lookup strategy the home screen's live-status tracker uses, since
+        // confirmedRides docs for these rides aren't reliably keyed by a
+        // ridePostingRequestId field — they use a compound "{postingId}_{requestId}"
+        // doc id, or must be matched by ridePostingId + riderId.
+        const postingReqSnap = await safeGet(dc(db, 'ridePostingRequests', rideId));
+        if (!postingReqSnap?.exists()) return;
+        const postingReqData = postingReqSnap.data() as any;
+        const postingId = postingReqData.ridePostingId || postingReqData.rideId || postingReqData.postingId || null;
+        const currentUid = firebaseAuth.currentUser?.uid;
+
+        let confirmedPostingDoc: any = null;
+        if (postingId) {
+          const directSnap = await safeGet(dc(db, 'confirmedRides', `${postingId}_${rideId}`));
+          if (directSnap?.exists()) {
+            confirmedPostingDoc = directSnap;
+          } else {
+            const postingSnap = await safeQuery(qb(col(db, 'confirmedRides'), wh('ridePostingId', '==', postingId)));
+            const docs = postingSnap?.docs || [];
+            confirmedPostingDoc = docs.find((d: any) => {
+              const data = d.data();
+              return data.riderId === currentUid && (
+                data.ridePostingRequestId === rideId || data.requestId === rideId || d.id === `${postingId}_${rideId}`
+              );
+            }) ?? docs.find((d: any) => d.data().riderId === currentUid) ?? null;
+          }
+        }
+        if (!confirmedPostingDoc) {
+          let snap = await safeQuery(qb(col(db, 'confirmedRides'), wh('ridePostingRequestId', '==', rideId)));
+          if (!snap || snap.empty) snap = await safeQuery(qb(col(db, 'confirmedRides'), wh('postingRequestId', '==', rideId)));
+          confirmedPostingDoc = snap && !snap.empty ? snap.docs[0] : null;
+        }
+
+        const confirmedPostingData = confirmedPostingDoc ? confirmedPostingDoc.data() as any : null;
+        const postingDriverId = confirmedPostingData?.driverId || postingReqData.driverId || postingReqData.confirmedDriver;
+        let postingDriverData: any = null;
+        if (postingDriverId) {
+          const driverSnap = await safeGet(dc(db, 'drivers', postingDriverId));
+          if (driverSnap?.exists()) postingDriverData = driverSnap.data();
+        }
+        setConfirmedRequest({ req: { ...postingReqData, id: rideId }, confirmed: confirmedPostingData, driver: postingDriverData, driverId: postingDriverId, confirmedRideId: confirmedPostingDoc?.id || null });
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [rideId]);
 
@@ -3030,7 +3159,10 @@ export function RiderDetailReference() {
       COMPLETED: { label: 'COMPLETED', color: colors.green, bg: colors.greenDim },
       FLAGGED: { label: 'FLAGGED', color: colors.red, bg: colors.redDim },
     };
-    const currentStatus = statusMeta[rideStatus] || { label: rideStatus.replace(/_/g, ' '), color: colors.textPrimary, bg: colors.bgSecondary };
+    const isDriverEnRoute = rideStatus === 'CONFIRMED' && !!confirmedRequest.confirmed?.driverEnRoute;
+    const currentStatus = isDriverEnRoute
+      ? { label: 'DRIVER EN ROUTE', color: colors.primary, bg: colors.primaryDim }
+      : statusMeta[rideStatus] || { label: rideStatus.replace(/_/g, ' '), color: colors.textPrimary, bg: colors.bgSecondary };
 
     const openDriverChat = async () => {
       const riderId = firebaseAuth.currentUser?.uid;
@@ -3444,6 +3576,18 @@ export function RiderDetailReference() {
             <Text style={styles.detailInfoText}>Full vehicle details are shared once your booking is confirmed.</Text>
           </View>
         </View>
+
+        {ride.raw?.eventName ? (
+          <View style={[styles.detailCard, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
+            <View style={[styles.detailInfoIcon, { width: 40, height: 40 }]}>
+              <Ionicons name="sparkles-outline" size={19} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.eyebrow}>GOING TO</Text>
+              <Text style={[styles.detailInfoTitle, { marginTop: 3 }]} numberOfLines={2}>{String(ride.raw.eventName)}</Text>
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.detailCard}>
           <Text style={styles.eyebrow}>NOTE FROM DRIVER</Text>

@@ -50,6 +50,7 @@ type InboxItem = {
   distanceText?: string | null;
   distanceMiles?: number | null;
   notes?: string | null;
+  eventName?: string | null;
   requesterName?: string | null;
   requesterId?: string | null;
   requesterEmail?: string | null;
@@ -571,7 +572,7 @@ export default function RequestsInboxScreen() {
       if (filter === 'best' && scoreRequest(item) < 60) return false;
       if (!term) return true;
       const userData = item.requesterId ? userDataByUserId[item.requesterId] : undefined;
-      const searchable = [item.pickup, item.dropoff, userData?.name, item.requesterName, item.requesterEmail].filter(Boolean).join(' ').toLowerCase();
+      const searchable = [item.pickup, item.dropoff, userData?.name, item.requesterName, item.requesterEmail, item.eventName].filter(Boolean).join(' ').toLowerCase();
       return searchable.includes(term);
     });
     return applyRideFilters(base, filterOptions) as InboxItem[];
@@ -701,6 +702,7 @@ export default function RequestsInboxScreen() {
           distanceText: distInfo.text || null,
           distanceMiles: typeof distInfo.miles === 'number' ? distInfo.miles : null,
           notes: r.notes || null,
+          eventName: r.eventName || null,
           requesterName: r.userName || r.riderName || r.requesterName || r.name || null,
           requesterId: r.riderId || r.userId || r.requesterId || null,
           requesterEmail: r.userEmail || r.riderEmail || r.requesterEmail || r.email || null,
@@ -774,6 +776,7 @@ export default function RequestsInboxScreen() {
             distanceText: distInfo.text || null,
             distanceMiles: typeof distInfo.miles === 'number' ? distInfo.miles : null,
             notes: r.notes || null,
+            eventName: r.eventName || null,
             requesterName: r.userName || r.riderName || r.requesterName || r.name || null,
             requesterId: r.riderId || r.userId || r.requesterId || null,
             requesterEmail: r.userEmail || r.riderEmail || r.requesterEmail || r.email || null,
@@ -1007,6 +1010,13 @@ export default function RequestsInboxScreen() {
           ) : null}
         </View>
 
+        {item.eventName ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 5, backgroundColor: colors.primaryDim, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 10 }}>
+            <Ionicons name="sparkles-outline" size={11} color={colors.primary} />
+            <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '800' }} numberOfLines={1}>{item.eventName}</Text>
+          </View>
+        ) : null}
+
         <View style={s.routeCard}>
           <View style={s.routeRail}>
             <View style={s.pickupDot} />
@@ -1088,7 +1098,7 @@ export default function RequestsInboxScreen() {
                 <TextInput
                   value={search}
                   onChangeText={setSearch}
-                  placeholder="Search by rider or destination..."
+                  placeholder="Search by rider, destination, or event..."
                   placeholderTextColor={colors.textSecondary}
                   style={s.searchInput}
                   returnKeyType="search"

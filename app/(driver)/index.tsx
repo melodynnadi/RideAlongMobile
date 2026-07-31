@@ -564,7 +564,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
       </View>
 
       {/* Route */}
-      <TouchableOpacity activeOpacity={0.7} onPress={isInProgress && activeConfirmedRideId ? () => router.push(`/(driver)/trip/${activeConfirmedRideId}` as any) : openRequest}>
+      <TouchableOpacity activeOpacity={0.7} onPress={(isInProgress || isConfirmedOnly) && activeConfirmedRideId ? () => router.push(`/(driver)/trip/${activeConfirmedRideId}` as any) : openRequest}>
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <View style={{ alignItems: 'center', paddingTop: 4, gap: 4 }}>
             <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: colors.textPrimary }} />

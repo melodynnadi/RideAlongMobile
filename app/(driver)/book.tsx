@@ -532,6 +532,7 @@ export default function BookScreen() {
   priceInputCeo: { flex: 1, color: colors.textPrimary, fontSize: 30, fontWeight: '400', paddingVertical: 0, textAlignVertical: 'center' },
   suggestedText: { color: colors.textSecondary, fontSize: 11, lineHeight: 15, fontWeight: '600', textAlign: 'right' },
   notesCeo: { marginHorizontal: 20, minHeight: 92, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 14, color: colors.textPrimary, fontSize: 14, lineHeight: 20, textAlignVertical: 'top' },
+  eventInputCeo: { marginHorizontal: 20, height: 52, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, paddingHorizontal: 14, color: colors.textPrimary, fontSize: 15 },
   routeMiniRow: { flexDirection: 'row', gap: 12 },
   routeDots: { width: 22, alignItems: 'center', paddingTop: 19 },
   routeMiniDot: { width: 10, height: 10, borderRadius: 5 },
@@ -782,6 +783,7 @@ export default function BookScreen() {
   const [maxPrice, setMaxPrice] = useState<number>(0);
   const [showCapBanner, setShowCapBanner] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
+  const [eventName, setEventName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const listRef = useRef<FlatList>(null);
   // Recurring ride state
@@ -1063,6 +1065,7 @@ export default function BookScreen() {
         contributionAmount: resolvedPriceNum,
         estimatedFare: null,
         notes: notes || null,
+        eventName: eventName.trim() || null,
         rideVibe: selectedVibes,
         preferences: selectedVibes,
         // Include distance/duration details if available
@@ -1103,6 +1106,7 @@ export default function BookScreen() {
             seats: seatsNum,
             pricePerSeat: resolvedPriceNum,
             notes: notes.trim() || null,
+            eventName: eventName.trim() || null,
             vehicleInfo: payload.vehicleInfo || null,
           };
           const scheduleRes = await fetch(`${apiUrl}/api/ride-schedules`, {
@@ -1161,6 +1165,7 @@ export default function BookScreen() {
         setPriceEdited(false);
         setSeats(1);
         setNotes('');
+        setEventName('');
 
         Alert.alert('Ride Posted!', 'Your ride is now visible to riders.');
         router.replace('/(driver)' as any);
@@ -1547,6 +1552,15 @@ export default function BookScreen() {
                     </View>
                   )}
                 </View>
+
+                <Text style={styles.fieldGroupLabel}>EVENT (OPTIONAL)</Text>
+                <TextInput
+                  value={eventName}
+                  onChangeText={setEventName}
+                  placeholder="Concert, game day, move-in weekend..."
+                  placeholderTextColor={colors.textSecondary}
+                  style={styles.eventInputCeo}
+                />
 
                 <Text style={styles.fieldGroupLabel}>NOTE FOR RIDERS (OPTIONAL)</Text>
                 <TextInput

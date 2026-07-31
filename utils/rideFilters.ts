@@ -30,6 +30,7 @@ export interface RideFilterOptions {
   minPrice: number | null;          // Minimum price
   maxPrice: number | null;          // Maximum price
   seats: number | null;             // Number of seats needed (only for riders)
+  eventName: string | null;         // Event/occasion text (e.g. "Homecoming", "Concert")
 }
 
 /**
@@ -43,7 +44,8 @@ export function getDefaultFilters(): RideFilterOptions {
     dropoffLocation: null,
     minPrice: null,
     maxPrice: null,
-    seats: null
+    seats: null,
+    eventName: null
   };
 }
 
@@ -327,6 +329,14 @@ function extractPrice(ride: any): number | null {
 }
 
 /**
+ * Extract event/occasion text from ride object
+ */
+function extractEventName(ride: any): string | null {
+  const value = ride.eventName ?? ride.raw?.eventName ?? ride.event ?? ride.raw?.event;
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+/**
  * Extract available seats from ride object
  */
 function extractSeats(ride: any): number | null {
@@ -422,7 +432,15 @@ export function applyFiltersToRide(ride: any, filters: RideFilterOptions, isRide
       return false;
     }
   }
-  
+
+  // 7. Event/occasion filter
+  if (filters.eventName && filters.eventName.trim()) {
+    const eventName = extractEventName(ride);
+    if (!eventName || !locationMatches(eventName, filters.eventName)) {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -452,5 +470,6 @@ export function hasActiveFilters(filters: RideFilterOptions): boolean {
          (filters.dropoffLocation !== null && filters.dropoffLocation.trim() !== '') ||
          filters.minPrice !== null ||
          filters.maxPrice !== null ||
-         (filters.seats !== null && filters.seats > 0);
+         (filters.seats !== null && filters.seats > 0) ||
+         (filters.eventName !== null && filters.eventName.trim() !== '');
 }

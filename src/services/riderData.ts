@@ -176,7 +176,7 @@ export const toDate = (value: any): Date | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-const rideDateFromData = (data: DocumentData): Date | null => {
+export const rideDateFromData = (data: DocumentData): Date | null => {
   const direct = toDate(
     data.scheduledAt || data.dateTime || data.requestedTime || data.pickupTime
       || data.originalRideRequest?.requestedTime || data.originalRidePosting?.departureTime,
@@ -671,13 +671,13 @@ export async function markRiderNotificationAsRead(notificationId: string, uid: s
 
 export function subscribeRiderNotifications(uid: string, onData: (items: MobileNotification[]) => void): Unsubscribe {
   const base = collection(firestore, 'notifications');
-  const email = firebaseAuth.currentUser?.email;
+  // Every server-side write to this collection uses only `recipientId` or
+  // `userId` — no doc is ever written with `recipients`, `recipientKeys`, or
+  // `userEmail`, so querying those just trips the Firestore rule (which can't
+  // authorize a query against fields no rule covers) for no benefit.
   const queries = [
     query(base, where('userId', '==', uid)),
     query(base, where('recipientId', '==', uid)),
-    query(base, where('recipients', 'array-contains', uid)),
-    query(base, where('recipientKeys', 'array-contains', roleKey('rider', uid))),
-    ...(email ? [query(base, where('userEmail', '==', email))] : []),
   ];
   const buckets = new Map<number, MobileNotification[]>();
   const flush = () => {

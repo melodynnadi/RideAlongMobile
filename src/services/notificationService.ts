@@ -9,10 +9,12 @@ import * as Device from 'expo-device';
 import { Platform, AppState } from 'react-native';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { showToast, showMessageToast } from '../utils/showToast';
 import { buildToastKey, shouldShowToastEvent } from '../utils/toastDeduper';
 import { settingsService } from './settingsService';
 import { useAuthStore } from '@/stores/authStore';
+import { firebaseAuth, firestore } from '@/constants/services';
 
 // ============================================================================
 // NOTIFICATION DEDUPLICATION
@@ -400,39 +402,46 @@ class NotificationService {
   }
 
   /**
-   * Save push token to backend
+   * Save the push token to Firestore under the field name the backend's push
+   * sender actually reads (server/services/notificationService.js:
+   * getUserPushToken() → `data.pushToken` on riders/{uid} or drivers/{uid}).
+   * Also mirrored onto users/{uid} for anything that might look there instead.
    * @param userId - User ID to associate with the token
-   * @param token - Push token to save
+   * @param token - Expo push token to save
+   * @param role - Which role doc to also write to ('rider' | 'driver')
    */
-  async savePushTokenToBackend(userId: string, token: string): Promise<boolean> {
+  async savePushToken(userId: string, token: string, role: 'rider' | 'driver'): Promise<boolean> {
     try {
-      const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4001';
-      
-      const response = await fetch(`${API_URL}/api/drivers/${userId}/push-token`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          token,
-          platform: Platform.OS,
-          deviceId: Constants.deviceId,
-        }),
-      });
-
-      if (!response.ok) {
-        console.warn('Backend endpoint not available for push token storage');
-        console.log('Push token (save this for testing):', token);
-        return false;
-      }
-
-      console.log('Push token saved to backend successfully');
+      const payload = {
+        pushToken: token,
+        pushTokenPlatform: Platform.OS,
+        pushTokenUpdatedAt: serverTimestamp(),
+      };
+      await Promise.all([
+        setDoc(doc(firestore, 'users', userId), payload, { merge: true }),
+        setDoc(doc(firestore, role === 'driver' ? 'drivers' : 'riders', userId), payload, { merge: true }),
+      ]);
+      console.log(`[notificationService] Push token saved to Firestore (users/${userId}, ${role}s/${userId})`);
       return true;
     } catch (error) {
-      console.warn('Backend not available - push token not saved (this is normal in development)');
-      console.log('Push token (save this for testing):', token);
+      console.error('[notificationService] Error saving push token to Firestore:', error);
       return false;
     }
+  }
+
+  /**
+   * Convenience: request a token (if not already held) and persist it for the
+   * current signed-in user. Safe to call multiple times (e.g. on auth change
+   * and on role switch) — it's a cheap merge write.
+   */
+  async registerAndSaveToken(role: 'rider' | 'driver'): Promise<void> {
+    const uid = firebaseAuth.currentUser?.uid;
+    if (!uid) return;
+    const result = this.expoPushToken
+      ? { token: this.expoPushToken, type: 'expo' as const }
+      : await this.registerForPushNotifications();
+    if (!result?.token) return;
+    await this.savePushToken(uid, result.token, role);
   }
 
   /**

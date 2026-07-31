@@ -123,19 +123,18 @@ export function useDriverUnreadCounts(): UnreadCounts {
     );
 
     const base = collection(firestore, 'notifications');
-    const email = firebaseAuth.currentUser?.email;
     const notificationBuckets = new Map<number, string[]>();
     const flushNotifications = () => {
       const unique = new Set<string>();
       notificationBuckets.forEach((ids) => ids.forEach((id) => unique.add(id)));
       setCounts((current) => ({ ...current, notificationCount: unique.size }));
     };
+    // Every server-side write to this collection uses only `recipientId` or
+    // `userId` — no doc is ever written with `recipients`, `recipientKeys`, or
+    // `userEmail`, so querying those just trips the Firestore rule for no benefit.
     const notificationQueries = [
       query(base, where('userId', '==', uid)),
       query(base, where('recipientId', '==', uid)),
-      query(base, where('recipients', 'array-contains', uid)),
-      query(base, where('recipientKeys', 'array-contains', roleKey('driver', uid))),
-      ...(email ? [query(base, where('userEmail', '==', email))] : []),
     ];
     const notificationUnsubs = notificationQueries.map((qy, index) => onSnapshot(
       qy,

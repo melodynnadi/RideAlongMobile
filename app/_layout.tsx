@@ -18,6 +18,8 @@ import DismissKeyboardView from '@/components/DismissKeyboardView';
 import SplashScreen from '@/components/SplashScreen';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { notificationService } from '@/src/services/notificationService';
+import { setupChatNotificationListeners } from '@/src/services/notificationListeners';
+import { firebaseAuth } from '@/constants/services';
 
 // Crash reporting — set EXPO_PUBLIC_SENTRY_DSN in .env to enable
 const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
@@ -103,6 +105,8 @@ function AppStack() {
 export default function RootLayout() {
   const initializeAuth = useAuthStore((s) => s.initializeAuth);
   const isLoading = useAuthStore((s) => s.isLoading);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const activeRole = useAuthStore((s) => s.activeRole);
   const [minSplashPassed, setMinSplashPassed] = useState(false);
   const [splashVisible, setSplashVisible] = useState(() => !splashAlreadyShown);
   const nativeHiddenRef = useRef(false);
@@ -138,6 +142,25 @@ export default function RootLayout() {
 
     return () => notificationService.cleanup();
   }, []);
+
+  // Request an Expo push token and persist it once signed in, and again on
+  // role switch (dual-role users). Without this, no device ever registers a
+  // token, so nothing server-side has anywhere to send a push to.
+  useEffect(() => {
+    if (!isAuthenticated || !activeRole) return;
+    notificationService.registerAndSaveToken(activeRole).catch((error) => {
+      console.warn('[RootLayout] Failed to register push token:', error);
+    });
+  }, [isAuthenticated, activeRole]);
+
+  // Watch for new chat messages so at least a local (in-process) notification
+  // fires while the app is backgrounded, independent of any server-sent push.
+  useEffect(() => {
+    if (!isAuthenticated || !activeRole) return;
+    const uid = firebaseAuth.currentUser?.uid;
+    if (!uid) return;
+    return setupChatNotificationListeners(uid, activeRole);
+  }, [isAuthenticated, activeRole]);
 
   useEffect(() => {
     if (!splashVisible) return;

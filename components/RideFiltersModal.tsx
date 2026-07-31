@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { View, Text, Modal, TouchableOpacity, TextInput, StyleSheet, ScrollView, Platform, Keyboard } from 'react-native';
-import { X, Calendar, MapPin } from 'lucide-react-native';
+import { X, Calendar, MapPin, PartyPopper } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TimeBucket, type RideFilterOptions, getDefaultFilters } from '@/utils/rideFilters';
 import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
@@ -376,6 +376,7 @@ export function RideFiltersModal({
     if (filters.dropoffLocation) count++;
     if (filters.minPrice !== null || filters.maxPrice !== null) count++;
     if (showSeatsFilter && filters.seats) count++;
+    if (filters.eventName) count++;
     return count;
   };
 
@@ -549,6 +550,27 @@ export function RideFiltersModal({
                   ))}
                 </View>
               )}
+            </View>
+
+            {/* Event / occasion */}
+            <View style={styles.filterGroup}>
+              <Text style={styles.filterLabel}>Event</Text>
+              <View style={styles.inputContainer}>
+                <PartyPopper size={19} color={colors.textSecondary} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Concert, game day, move-in weekend..."
+                  value={filters.eventName || ''}
+                  onChangeText={(text) => updateFilter('eventName', text || null)}
+                  placeholderTextColor={colors.textTertiary}
+                />
+                {filters.eventName ? (
+                  <TouchableOpacity onPress={() => updateFilter('eventName', null)} style={{ paddingRight: 12 }}>
+                    <Ionicons name="close-circle" size={17} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              <Text style={styles.helperText}>Find rides other students posted for the same event</Text>
             </View>
 
             {/* Price Range */}
