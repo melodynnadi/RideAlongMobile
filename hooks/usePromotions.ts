@@ -39,37 +39,11 @@ export const usePromotions = (): UsePromotionsReturn => {
   const fetchPromotions = useCallback(async () => {
     try {
       setError(null);
-      console.log('usePromotions: Starting to fetch promotions...');
-      
-      // Test connection first
-      const connectionTest = await promotionService.testConnection();
-      if (!connectionTest) {
-        throw new Error('Cannot connect to Firestore. Check your internet connection and Firebase configuration.');
-      }
-      
       const activePromotions = await promotionService.getActivePromotions();
-      console.log('usePromotions: Successfully fetched', activePromotions.length, 'promotions');
       setPromotions(activePromotions);
     } catch (err) {
-      let errorMessage = 'Failed to fetch promotions';
-      
-      if (err instanceof Error) {
-        errorMessage = err.message;
-        
-        // Provide more specific error messages based on error type
-        if (err.message.includes('network')) {
-          errorMessage = 'Network error. Please check your internet connection.';
-        } else if (err.message.includes('permission') || err.message.includes('unauthorized')) {
-          errorMessage = 'Permission denied. Please check Firebase security rules.';
-        } else if (err.message.includes('not-found')) {
-          errorMessage = 'Promotions collection not found. Please set up the database.';
-        }
-      }
-      
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch promotions';
       setError(errorMessage);
-      console.error('Error fetching promotions:', err);
-      console.error('Error type:', typeof err);
-      console.error('Error constructor:', err?.constructor?.name);
     }
   }, []);
 
@@ -137,12 +111,11 @@ export const usePromotions = (): UsePromotionsReturn => {
     return claimedPromotions.some(claimed => claimed.promotionId === promotionId);
   }, [claimedPromotions]);
 
-  // Initial data fetch
-  useEffect(() => {
-    refreshPromotions();
-  }, [refreshPromotions]);
+  // Initial data fetch — run once on mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { refreshPromotions(); }, []);
 
-  // Fetch claimed promotions when user changes
+  // Re-fetch claimed promotions when auth state changes
   useEffect(() => {
     if (userId) {
       fetchClaimedPromotions();

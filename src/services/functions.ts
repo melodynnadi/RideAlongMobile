@@ -6,7 +6,7 @@ export const functions = getFunctions(firebaseApp, 'us-central1');
 
 // Callable for ride status updates
 export const updateRideStatus = httpsCallable<
-  { rideId: string; action: 'driver_pickup' | 'driver_complete' },
+  { rideId: string; action: 'driver_pickup' | 'driver_complete' | 'rider_pickup' | 'rider_complete' },
   { ok: boolean }
 >(functions, 'updateRideStatus');
 

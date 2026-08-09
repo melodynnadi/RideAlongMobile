@@ -15,16 +15,18 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, Plus, CreditCard, Trash2, Check } from 'lucide-react-native';
+import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 import { useTheme } from '@/hooks/useTheme';
-import { router } from 'expo-router';
 import { useAuthStore } from '@/stores/authStore';
 import { usePaymentStore } from '@/stores/paymentStore';
 import { AddCardModal } from '@/components/AddCardModal';
 import { setDefaultPaymentMethod } from '@/services/payments';
 
 export default function EnhancedPaymentMethodsScreen() {
+  const { goBack } = useReturnNavigation('/(rider)/settings');
   const theme = useTheme();
-  const { user } = useAuthStore();
+  const { uid } = useAuthStore();
+  const user = uid ? { id: uid } : null;
   const {
     paymentMethods,
     selectedPaymentMethodId,
@@ -104,10 +106,10 @@ export default function EnhancedPaymentMethodsScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.bg }]}>
-      {/* Header */}
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.bg }]}><ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.canGoBack() ? router.back() : router.push('/settings')}>
+        <TouchableOpacity style={styles.backButton} onPress={goBack}>
           <ArrowLeft size={24} color={theme.colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
@@ -117,8 +119,6 @@ export default function EnhancedPaymentMethodsScreen() {
           </Text>
         </View>
       </View>
-
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Add New Card Button */}
         <TouchableOpacity
           style={[styles.addButton, { borderColor: theme.colors.secondary }]}
@@ -250,17 +250,26 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
+    position: 'relative',
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
     paddingTop: 8,
   },
   backButton: {
-    padding: 8,
-    marginRight: 8,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E0D8',
+    backgroundColor: '#FFFFFF',
   },
   headerContent: {
     flex: 1,
+    marginLeft: 12,
   },
   headerTitle: {
     fontSize: 24,
@@ -311,7 +320,6 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 14,
-    textAlign: 'center',
   },
   methodsList: {
     gap: 16,

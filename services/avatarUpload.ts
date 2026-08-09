@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { firebaseAuth, firestore } from '@/constants/services';
+import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export type AvatarUploadResult = { canceled: true } | { canceled: false; avatarUrl: string; photoPath: string };
@@ -36,7 +36,7 @@ export async function pickAndUploadAvatar(): Promise<AvatarUploadResult> {
   );
   if (!manipulated.base64) throw new Error('Missing base64');
 
-  const apiBase = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4001';
+  const apiBase = getApiBaseUrl();
   const idToken = await user.getIdToken();
   const resp = await fetch(`${apiBase}/api/upload-avatar`, {
     method: 'POST',
@@ -44,17 +44,16 @@ export async function pickAndUploadAvatar(): Promise<AvatarUploadResult> {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${idToken}`,
     },
-    body: JSON.stringify({ base64: manipulated.base64, oldPhotoPath }),
+    body: JSON.stringify({ base64: manipulated.base64, oldPhotoPath, role: 'rider' }),
   });
-  if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
-  const json = await resp.json();
+  const json = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(json.error || `Upload failed: ${resp.status}`);
   if (!json.success) throw new Error(json.error || 'Upload failed');
 
-  await setDoc(
-    userRef,
-    { avatarUrl: json.photoURL, photoPath: json.photoPath, updatedAt: serverTimestamp() },
-    { merge: true }
-  );
+  // Only write to riders/{uid} — do NOT write to users/{uid} or call updateProfile,
+  // which would bleed the rider photo into the driver account via auth.currentUser.photoURL.
+  const avatarUpdate = { avatarUrl: json.photoURL, photoURL: json.photoURL, photoPath: json.photoPath, updatedAt: serverTimestamp() };
+  await setDoc(userRef, avatarUpdate, { merge: true });
 
   return { canceled: false, avatarUrl: json.photoURL, photoPath: json.photoPath };
 }

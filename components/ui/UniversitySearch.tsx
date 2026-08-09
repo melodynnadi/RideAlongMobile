@@ -8,10 +8,10 @@ import {
   StyleSheet,
   ActivityIndicator,
   Modal,
-  Pressable,
 } from 'react-native';
 import { Search, X, MapPin, Plus } from 'lucide-react-native';
 import { firebaseAuth } from '@/constants/services';
+import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
 
 interface University {
   id: string;
@@ -29,6 +29,42 @@ interface UniversitySearchProps {
   allowCustom?: boolean;
 }
 
+const normalizeQuery = (text: string): string => text.toLowerCase()
+  .replace(/[^\w\s&]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const tokenize = (text: string): string[] => text.split(/\s+/).filter((token) => token.length > 0);
+
+const rankResults = (results: University[], query: string): University[] => {
+  const qNorm = normalizeQuery(query);
+  const qTokens = tokenize(qNorm);
+  return results
+    .map((university) => {
+      const nNorm = normalizeQuery(university.name || '');
+      const nTokens = tokenize(nNorm);
+      let score = 0;
+      if (nNorm === qNorm) score += 100000;
+      if (nNorm.startsWith(qNorm)) score += 50000;
+      if (qNorm.includes('university of texas')) {
+        if (nNorm.startsWith('the university of texas at')) score += 80000;
+        if (nNorm.startsWith('university of texas at')) score += 75000;
+      }
+      if (qTokens.every((token) => nTokens.some((nameToken) => nameToken.includes(token)))) score += 30000;
+      qTokens.forEach((queryToken) => nTokens.forEach((nameToken) => {
+        if (nameToken === queryToken) score += 800;
+        else if (nameToken.startsWith(queryToken)) score += 500;
+        else if (queryToken.length > 2 && nameToken.includes(queryToken)) score += 250;
+      }));
+      if (nNorm.includes('a and m') && qNorm.includes('a&m')) score += 1500;
+      if (nNorm.includes('a&m') && qNorm.includes('a and m')) score += 1500;
+      if (nNorm.includes('university of texas') && qNorm.includes('ut')) score += 1200;
+      return { university, score: score - nNorm.length };
+    })
+    .sort((a, b) => b.score - a.score)
+    .map(({ university }) => university);
+};
+
 export function UniversitySearch({
   value = '',
   onSelect,
@@ -40,70 +76,11 @@ export function UniversitySearch({
   const [results, setResults] = useState<University[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Normalize and rank results for better search relevance
-  const normalizeQuery = (text: string): string => {
-    return text.toLowerCase()
-      .replace(/[^\w\s&]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  };
-
-  const tokenize = (text: string): string[] => {
-    return text.split(/\s+/).filter(t => t.length > 0);
-  };
-
-  const rankResults = (results: University[], query: string): University[] => {
-    const qNorm = normalizeQuery(query);
-    const qTokens = tokenize(qNorm);
-    
-    const scoredResults = results.map(university => {
-      const name = university.name || '';
-      const nNorm = normalizeQuery(name);
-      const nTokens = tokenize(nNorm);
-
-      let score = 0;
-
-      // Exact normalized match
-      if (nNorm === qNorm) score += 100000;
-
-      // Starts-with normalized
-      if (nNorm.startsWith(qNorm)) score += 50000;
-
-      // Special boost for "The University of Texas at [location]" when searching "university of texas at"
-      if (qNorm.includes('university of texas at') || qNorm.includes('university of texas')) {
-        if (nNorm.startsWith('the university of texas at')) score += 80000;
-        if (nNorm.startsWith('university of texas at')) score += 75000;
-      }
-
-      // Token-level matching: all query tokens present -> big boost
-      const hasAllTokens = qTokens.every(t => nTokens.some(nt => nt.includes(t)));
-      if (hasAllTokens) score += 30000;
-
-      // Per-token partials and starts-with bonuses
-      for (const qt of qTokens) {
-        for (const nt of nTokens) {
-          if (nt === qt) score += 800;
-          else if (nt.startsWith(qt)) score += 500;
-          else if (qt.length > 2 && nt.includes(qt)) score += 250;
-        }
-      }
-
-      // Synonym bonuses (e.g., a&m vs a and m, & vs and)
-      if (nNorm.includes('a and m') && qNorm.includes('a&m')) score += 1500;
-      if (nNorm.includes('a&m') && qNorm.includes('a and m')) score += 1500;
-      if (nNorm.includes('university of texas') && qNorm.includes('ut')) score += 1200;
-
-      // Name length slight penalty to prefer concise matches
-      score -= nNorm.length;
-
-      return { university, score };
-    });
-
-    scoredResults.sort((a, b) => b.score - a.score);
-    return scoredResults.map(r => r.university);
-  };
+  useEffect(() => () => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+  }, []);
 
   const performSearch = useCallback(async (query: string) => {
     if (query.length < 2) {
@@ -235,7 +212,7 @@ export function UniversitySearch({
           <Text style={styles.emptyText}>No universities found</Text>
           {allowCustom && (
             <Text style={styles.emptyHint}>
-              You can enter a custom name if your university isn't listed
+              {"You can enter a custom name if your university isn't listed"}
             </Text>
           )}
         </View>
@@ -272,7 +249,7 @@ export function UniversitySearch({
         presentationStyle="pageSheet"
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.modal}>
+        <KeyboardAwareModalView style={styles.modal}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Select University</Text>
             <TouchableOpacity
@@ -325,13 +302,13 @@ export function UniversitySearch({
                 >
                   <Plus size={20} color="#E05E1A" />
                   <Text style={styles.customButtonText}>
-                    My university isn't listed
+                    {"My university isn't listed"}
                   </Text>
                 </TouchableOpacity>
               ) : null
             }
           />
-        </View>
+        </KeyboardAwareModalView>
       </Modal>
     </View>
   );

@@ -126,7 +126,7 @@ export function formatPaymentMethodDisplay(paymentMethod: {
   exp_year: number;
 }): string {
   const brandName = paymentMethod.brand.charAt(0).toUpperCase() + paymentMethod.brand.slice(1);
-  return `${brandName} ••••${paymentMethod.last4}`;
+  return `${brandName} ****${paymentMethod.last4}`;
 }
 
 /**

@@ -1,5 +1,5 @@
 // ToastNotification Component for React Native
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -21,7 +21,17 @@ export default function ToastNotification({
   duration = 4000,
 }: ToastProps) {
   const translateY = useRef(new Animated.Value(-100)).current;
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const hide = useCallback(() => {
+    Animated.timing(translateY, {
+      toValue: -100,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      onDismiss();
+    });
+  }, [onDismiss, translateY]);
 
   useEffect(() => {
     if (visible) {
@@ -51,17 +61,7 @@ export default function ToastNotification({
         clearTimeout(timerRef.current);
       }
     };
-  }, [visible, duration]);
-
-  const hide = () => {
-    Animated.timing(translateY, {
-      toValue: -100,
-      duration: 200,
-      useNativeDriver: true,
-    }).start(() => {
-      onDismiss();
-    });
-  };
+  }, [visible, duration, hide, translateY]);
 
   const handlePress = () => {
     hide();

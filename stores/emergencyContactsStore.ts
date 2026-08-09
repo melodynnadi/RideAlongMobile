@@ -1,13 +1,17 @@
 import { create } from 'zustand';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { firestore, firebaseAuth } from '@/constants/services';
-import { useAuthStore } from '@/stores/authStore';
-import { EmergencyContact, UserProfile } from '@/types';
+import { EmergencyContact } from '@/types';
+
+// Emergency contacts are stored on users/{uid} so they're shared across rider and driver roles.
+function usersDoc(uid: string) {
+  return doc(firestore, 'users', uid);
+}
 
 interface EmergencyContactsState {
   contacts: EmergencyContact[];
   isLoading: boolean;
-  
+
   // Actions
   setContacts: (contacts: EmergencyContact[]) => void;
   setLoading: (loading: boolean) => void;
@@ -21,28 +25,19 @@ interface EmergencyContactsState {
 export const useEmergencyContactsStore = create<EmergencyContactsState>((set, get) => ({
   contacts: [],
   isLoading: false,
-  
+
   setContacts: (contacts) => set({ contacts }),
-  
+
   setLoading: (isLoading) => set({ isLoading }),
-  
+
   loadContacts: async () => {
     const uid = firebaseAuth.currentUser?.uid;
-    if (!uid) {
-      throw new Error('User not authenticated');
-    }
-    
+    if (!uid) throw new Error('User not authenticated');
+
     try {
       set({ isLoading: true });
-      const userDoc = await getDoc(doc(firestore, useAuthStore.getState().activeRole === 'driver' ? 'drivers' : 'riders', uid));
-      
-      if (!userDoc.exists()) {
-        throw new Error('User document not found');
-      }
-      
-      const userData = userDoc.data() as UserProfile;
-      const contacts = userData.emergencyContacts || [];
-      
+      const snap = await getDoc(usersDoc(uid));
+      const contacts = Array.isArray(snap.data()?.emergencyContacts) ? snap.data()!.emergencyContacts as EmergencyContact[] : [];
       set({ contacts });
       return contacts;
     } catch (error) {
@@ -52,26 +47,16 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
       set({ isLoading: false });
     }
   },
-  
+
   addContact: async (newContact: Omit<EmergencyContact, 'id'>) => {
     const uid = firebaseAuth.currentUser?.uid;
-    if (!uid) {
-      throw new Error('User not authenticated');
-    }
-    
+    if (!uid) throw new Error('User not authenticated');
+
     try {
       set({ isLoading: true });
-      const { contacts } = get();
-      
-      // Create new contact (Firebase stores as array without explicit IDs)
-      const updatedContacts = [...contacts, newContact];
-      
-      // Update Firebase
-      await updateDoc(doc(firestore, useAuthStore.getState().activeRole === 'driver' ? 'drivers' : 'riders', uid), {
-        emergencyContacts: updatedContacts,
-        updatedAt: serverTimestamp(),
-      });
-      
+      const contactWithId: EmergencyContact = { id: Date.now().toString(), ...newContact };
+      const updatedContacts = [...get().contacts, contactWithId];
+      await updateDoc(usersDoc(uid), { emergencyContacts: updatedContacts, updatedAt: serverTimestamp() });
       set({ contacts: updatedContacts });
     } catch (error) {
       console.error('Error adding emergency contact:', error);
@@ -80,30 +65,18 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
       set({ isLoading: false });
     }
   },
-  
+
   updateContact: async (index: number, updatedContact: Omit<EmergencyContact, 'id'>) => {
     const uid = firebaseAuth.currentUser?.uid;
-    if (!uid) {
-      throw new Error('User not authenticated');
-    }
-    
+    if (!uid) throw new Error('User not authenticated');
+
     try {
       set({ isLoading: true });
       const { contacts } = get();
-      
-      if (index < 0 || index >= contacts.length) {
-        throw new Error('Invalid contact index');
-      }
-      
+      if (index < 0 || index >= contacts.length) throw new Error('Invalid contact index');
       const updatedContacts = [...contacts];
-      updatedContacts[index] = updatedContact;
-      
-      // Update Firebase
-      await updateDoc(doc(firestore, useAuthStore.getState().activeRole === 'driver' ? 'drivers' : 'riders', uid), {
-        emergencyContacts: updatedContacts,
-        updatedAt: serverTimestamp(),
-      });
-      
+      updatedContacts[index] = { ...updatedContact, id: contacts[index].id };
+      await updateDoc(usersDoc(uid), { emergencyContacts: updatedContacts, updatedAt: serverTimestamp() });
       set({ contacts: updatedContacts });
     } catch (error) {
       console.error('Error updating emergency contact:', error);
@@ -112,29 +85,17 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
       set({ isLoading: false });
     }
   },
-  
+
   deleteContact: async (index: number) => {
     const uid = firebaseAuth.currentUser?.uid;
-    if (!uid) {
-      throw new Error('User not authenticated');
-    }
-    
+    if (!uid) throw new Error('User not authenticated');
+
     try {
       set({ isLoading: true });
       const { contacts } = get();
-      
-      if (index < 0 || index >= contacts.length) {
-        throw new Error('Invalid contact index');
-      }
-      
+      if (index < 0 || index >= contacts.length) throw new Error('Invalid contact index');
       const updatedContacts = contacts.filter((_, i) => i !== index);
-      
-      // Update Firebase
-      await updateDoc(doc(firestore, useAuthStore.getState().activeRole === 'driver' ? 'drivers' : 'riders', uid), {
-        emergencyContacts: updatedContacts,
-        updatedAt: serverTimestamp(),
-      });
-      
+      await updateDoc(usersDoc(uid), { emergencyContacts: updatedContacts, updatedAt: serverTimestamp() });
       set({ contacts: updatedContacts });
     } catch (error) {
       console.error('Error deleting emergency contact:', error);
@@ -143,9 +104,6 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
       set({ isLoading: false });
     }
   },
-  
-  resetContacts: () => set({ 
-    contacts: [], 
-    isLoading: false 
-  }),
+
+  resetContacts: () => set({ contacts: [], isLoading: false }),
 }));

@@ -36,7 +36,15 @@ export const firestore = _firestore;
 export const storage = getStorage(firebaseApp);
 export const functions = getFunctions(firebaseApp, 'us-central1');
 
-export const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyDWOpCIVn_oPxn4qWYE4eG3teKtn0c5G-w';
+// IMPORTANT: The Maps key must be set in .env — restrict it in Google Cloud Console
+// to your app's bundle ID so it cannot be abused if extracted from the bundle.
+const _mapsKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
+if (!_mapsKey && !__DEV__) {
+  console.error('[Config] EXPO_PUBLIC_GOOGLE_MAPS_API_KEY is not set — map features will not work in production');
+} else if (!_mapsKey) {
+  console.warn('[Config] EXPO_PUBLIC_GOOGLE_MAPS_API_KEY is not set — add it to .env');
+}
+export const GOOGLE_MAPS_API_KEY = _mapsKey;
 
 export const getApiBaseUrl = (): string => {
   let base = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';

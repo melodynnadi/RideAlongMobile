@@ -12,15 +12,16 @@ import {
   Keyboard,
 } from 'react-native';
 import { Star, X } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 export type DriverRatingModalProps = {
-  visible: boolean;
-  riderName?: string | null;
-  onClose: () => void;
-  onSubmit: (args: { stars: number; comment?: string }) => Promise<void> | void;
-  submitting?: boolean;
-  errorText?: string | null;
-};
+  visible: boolean;               // ✅ visible={ratingModalVisible}
+  riderName?: string | null;      // ✅ riderName={ratingQueue[ratingIdx]?.riderName ...}
+  onClose: () => void;            // ✅ onClose={() => { setRatingModalVisible(false)... }}
+  onSubmit: (args: { stars: number; comment?: string }) => Promise<void> | void;  // ✅ matches
+  submitting?: boolean;           // ✅ submitting={ratingSubmitting}
+  errorText?: string | null;      // ✅ errorText={ratingError}
+};;
 
 export function DriverRatingModal({ visible, riderName, onClose, onSubmit, submitting, errorText }: DriverRatingModalProps) {
   // Start with no selection so stars render empty until user interacts
@@ -63,6 +64,9 @@ export function DriverRatingModal({ visible, riderName, onClose, onSubmit, submi
           <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
             <View style={styles.card}>
               <View style={styles.header}>
+                <View style={styles.headerIcon}>
+                  <Ionicons name="star" size={16} color="#DE5D20" />
+                </View>
                 <Text style={styles.title}>Rate your rider</Text>
                 <TouchableOpacity onPress={onClose} style={styles.closeBtn} accessibilityLabel="Close rating modal">
                   <X size={22} color="#64748B" />
@@ -134,14 +138,15 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 10,
     marginBottom: 6,
   },
-  title: { fontSize: 18, fontWeight: '700', color: '#111827' },
-  closeBtn: { padding: 6 },
+  headerIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  title: { flex: 1, fontSize: 18, fontWeight: '700', color: '#111827' },
+  closeBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   subtitle: { color: '#6B7280', marginBottom: 12 },
   starsRow: { flexDirection: 'row', gap: 8, marginBottom: 12, justifyContent: 'center', alignItems: 'center' },
-  starBtn: { padding: 4 },
+  starBtn: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   input: {
     borderWidth: 1,
     borderColor: '#E5E7EB',

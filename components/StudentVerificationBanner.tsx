@@ -13,8 +13,6 @@ export function StudentVerificationBanner() {
     dismissBanner,
   } = useVerificationStore();
 
-  console.log('[StudentVerificationBanner] State:', { isVerified, verificationStatus, bannerDismissed });
-
   // Don't show banner if user is verified or has dismissed it
   if (isVerified || bannerDismissed) {
     return null;

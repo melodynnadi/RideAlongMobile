@@ -4,8 +4,7 @@ import {
   updateDoc, 
   setDoc,
   serverTimestamp,
-  arrayUnion,
-  arrayRemove
+  arrayUnion
 } from 'firebase/firestore';
 import { firestore, firebaseAuth } from '@/constants/services';
 import { logActivity } from '@/src/services/activity';
@@ -45,6 +44,11 @@ export async function debugFirebaseConnection(): Promise<{ user: any; canAccessF
 /**
  * Get emergency contacts for the current driver
  */
+// Emergency contacts are stored on users/{uid} so they're shared across rider and driver roles.
+function getUserRef(uid: string) {
+  return doc(firestore, 'users', uid);
+}
+
 export async function getEmergencyContacts(): Promise<EmergencyContact[]> {
   const user = firebaseAuth.currentUser;
   if (!user) {
@@ -52,15 +56,17 @@ export async function getEmergencyContacts(): Promise<EmergencyContact[]> {
   }
 
   try {
-    const driverRef = doc(firestore, 'drivers', user.uid);
-    const driverSnap = await getDoc(driverRef);
-    
-    if (!driverSnap.exists()) {
-      return [];
-    }
-    
-    const driverData = driverSnap.data();
-    return driverData.emergencyContacts || [];
+    const snap = await getDoc(getUserRef(user.uid));
+    if (!snap.exists()) return [];
+    const data = snap.data();
+    const contacts = Array.isArray(data.emergencyContacts) ? data.emergencyContacts : [];
+    return contacts.map((contact: Partial<EmergencyContact>, index: number) => ({
+      id: contact.id || `legacy-${index}`,
+      name: String(contact.name || ''),
+      phone: String(contact.phone || ''),
+      relationship: String(contact.relationship || ''),
+      addedAt: contact.addedAt,
+    }));
   } catch (error) {
     console.error('Error fetching emergency contacts:', error);
     throw new Error('Failed to fetch emergency contacts');
@@ -83,34 +89,9 @@ export async function addEmergencyContact(contact: Omit<EmergencyContact, 'id' |
       addedAt: new Date(), // Use regular Date instead of serverTimestamp() for arrayUnion
     };
 
-    const driverRef = doc(firestore, 'drivers', user.uid);
-    
-    // Check if driver exists
-    const driverSnap = await getDoc(driverRef);
-    if (!driverSnap.exists()) {
-      console.error('Driver document not found for user:', user.uid);
-      console.log('Attempting to create driver document...');
-      
-      // Try to create a basic driver document if it doesn't exist
-      try {
-        await setDoc(driverRef, {
-          userUid: user.uid,
-          email: user.email || '',
-          emergencyContacts: [],
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
-        console.log('Created basic driver document');
-      } catch (createError) {
-        console.error('Failed to create driver document:', createError);
-        throw new Error('Driver profile not found and could not be created');
-      }
-    }
-
-    console.log('Adding emergency contact:', newContact);
-    
-    // Add the new contact to the array
-    await updateDoc(driverRef, {
+    const userRef = getUserRef(user.uid);
+    await setDoc(userRef, { updatedAt: serverTimestamp() }, { merge: true });
+    await updateDoc(userRef, {
       emergencyContacts: arrayUnion(newContact),
       updatedAt: serverTimestamp(),
     });
@@ -155,39 +136,29 @@ export async function updateEmergencyContact(contactId: string, updates: Partial
   }
 
   try {
-    const driverRef = doc(firestore, 'drivers', user.uid);
-    const driverSnap = await getDoc(driverRef);
-    
-    if (!driverSnap.exists()) {
-      throw new Error('Driver profile not found');
-    }
+    const userRef = getUserRef(user.uid);
+    const snap = await getDoc(userRef);
+    const emergencyContacts = (snap.exists() ? snap.data()?.emergencyContacts : null) || [];
 
-    const driverData = driverSnap.data();
-    const emergencyContacts = driverData.emergencyContacts || [];
-    
-    // Find and update the contact
-    const updatedContacts = emergencyContacts.map((contact: EmergencyContact) => 
-      contact.id === contactId 
-        ? { ...contact, ...updates }
-        : contact
+    const updatedContacts = emergencyContacts.map((contact: EmergencyContact, index: number) =>
+      (contact.id || `legacy-${index}`) === contactId ? { ...contact, ...updates } : contact
     );
 
-    await updateDoc(driverRef, {
+    await updateDoc(userRef, {
       emergencyContacts: updatedContacts,
       updatedAt: serverTimestamp(),
     });
 
-    // Log the activity
-    await logActivity({
-      type: 'profile_updated',
-      entityType: 'driver_profile',
-      entityId: user.uid,
-      metadata: { 
-        action: 'emergency_contact_updated',
-        contactId,
-        updates
-      },
-    });
+    try {
+      await logActivity({
+        type: 'profile_updated',
+        entityType: 'driver_profile',
+        entityId: user.uid,
+        metadata: { action: 'emergency_contact_updated', contactId, updates },
+      });
+    } catch (activityError) {
+      console.warn('Failed to log emergency contact update:', activityError);
+    }
   } catch (error) {
     console.error('Error updating emergency contact:', error);
     throw new Error('Failed to update emergency contact');
@@ -204,41 +175,30 @@ export async function removeEmergencyContact(contactId: string): Promise<void> {
   }
 
   try {
-    const driverRef = doc(firestore, 'drivers', user.uid);
-    const driverSnap = await getDoc(driverRef);
-    
-    if (!driverSnap.exists()) {
-      throw new Error('Driver profile not found');
-    }
+    const userRef = getUserRef(user.uid);
+    const snap = await getDoc(userRef);
+    const emergencyContacts = (snap.exists() ? snap.data()?.emergencyContacts : null) || [];
 
-    const driverData = driverSnap.data();
-    const emergencyContacts = driverData.emergencyContacts || [];
-    
-    // Find the contact to remove
-    const contactToRemove = emergencyContacts.find((contact: EmergencyContact) => contact.id === contactId);
-    if (!contactToRemove) {
-      throw new Error('Contact not found');
-    }
+    const contactToRemove = emergencyContacts.find((c: EmergencyContact, i: number) => (c.id || `legacy-${i}`) === contactId);
+    if (!contactToRemove) throw new Error('Contact not found');
 
-    // Remove the contact from the array
-    const updatedContacts = emergencyContacts.filter((contact: EmergencyContact) => contact.id !== contactId);
+    const updatedContacts = emergencyContacts.filter((c: EmergencyContact, i: number) => (c.id || `legacy-${i}`) !== contactId);
 
-    await updateDoc(driverRef, {
+    await updateDoc(userRef, {
       emergencyContacts: updatedContacts,
       updatedAt: serverTimestamp(),
     });
 
-    // Log the activity
-    await logActivity({
-      type: 'profile_updated',
-      entityType: 'driver_profile',
-      entityId: user.uid,
-      metadata: { 
-        action: 'emergency_contact_removed',
-        contactName: contactToRemove.name,
-        contactId
-      },
-    });
+    try {
+      await logActivity({
+        type: 'profile_updated',
+        entityType: 'driver_profile',
+        entityId: user.uid,
+        metadata: { action: 'emergency_contact_removed', contactName: contactToRemove.name, contactId },
+      });
+    } catch (activityError) {
+      console.warn('Failed to log emergency contact removal:', activityError);
+    }
   } catch (error) {
     console.error('Error removing emergency contact:', error);
     throw new Error('Failed to remove emergency contact');

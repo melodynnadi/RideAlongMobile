@@ -13,6 +13,7 @@ import {
   Keyboard,
 } from 'react-native';
 import { Star, X } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 type Props = {
   visible: boolean;
@@ -55,6 +56,9 @@ export function RatingModal({ visible, onClose, onSubmit, title, subtitle, submi
             <TouchableWithoutFeedback onPress={() => {}} accessible={false}>
               <View style={styles.card}>
                 <View style={styles.header}>
+                  <View style={styles.headerIcon}>
+                    <Ionicons name="star" size={16} color="#DE5D20" />
+                  </View>
                   <Text style={styles.title}>{title || 'Rate your ride'}</Text>
                   <TouchableOpacity onPress={onClose} style={styles.closeBtn} disabled={!!submitting}>
                     <X size={22} color="#64748B" />
@@ -128,11 +132,12 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 10,
     marginBottom: 6,
   },
-  closeBtn: { padding: 4 },
-  title: { fontSize: 18, fontWeight: '700', color: '#0F172A' },
+  headerIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  closeBtn: { padding: 4, marginLeft: 'auto' },
+  title: { flex: 1, fontSize: 18, fontWeight: '700', color: '#0F172A' },
   subtitle: { color: '#475569', marginBottom: 12 },
   starsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginVertical: 12 },
   input: {

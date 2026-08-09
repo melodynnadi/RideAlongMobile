@@ -13,21 +13,23 @@ import {
   Modal,
   Platform,
   KeyboardAvoidingView,
-  TouchableWithoutFeedback,
   Share,
+  Switch,
   ActivityIndicator,
+  StatusBar,
 } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useTheme } from '@/hooks/useTheme';
-import { router } from 'expo-router';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import { router, useLocalSearchParams } from 'expo-router';
 import { firestore, firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import { addDoc, collection, serverTimestamp, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
 import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import * as Location from 'expo-location';
-import { computeMaxPrice } from '@/src/utils/pricing';
+import { computeMaxPrice, computeDriverMaxPrice, computeRiderSuggestedPrice, formatContributionRange } from '@/src/utils/pricing';
 import EmailTriggerService from '@/services/EmailTriggerService';
-import { MapPin, Navigation, Calendar, Clock, DollarSign, ArrowUpDown, LocateFixed, FileText, Send, Route, Timer, Ruler, Users, Car } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { DriverBottomNav } from '@/components/DriverBottomNav';
+import { DatePickerModal, TimePickerModal, formatDateLabel } from '@/components/DateTimePickerModals';
 
 type Coords = { lat: number; lng: number };
 type Suggestion = { description: string; place_id: string; mainText: string; secondaryText: string };
@@ -35,6 +37,40 @@ type Suggestion = { description: string; place_id: string; mainText: string; sec
 function newToken() {
   return 'tok_' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 }
+
+const modalStyles = StyleSheet.create({
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(5,12,30,0.55)', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  calendarCard: { width: '100%', maxWidth: 360, borderRadius: 22, backgroundColor: '#FFFFFF', padding: 18 },
+  calendarHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  navBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  navBtnText: { fontSize: 18, fontWeight: '800' },
+  monthTitle: { fontSize: 18, fontWeight: '800', textAlign: 'center' },
+  weekdaysRow: { flexDirection: 'row', marginBottom: 6 },
+  weekday: { flex: 1, textAlign: 'center', color: '#8B94A6', fontSize: 11, fontWeight: '700' },
+  daysRow: { flexDirection: 'row' },
+  dayCell: { flex: 1, aspectRatio: 1, borderRadius: 14, alignItems: 'center', justifyContent: 'center', margin: 2 },
+  dayText: { color: '#15233A', fontSize: 13, fontWeight: '700' },
+  closeBtn: { minHeight: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
+  closeBtnText: { fontSize: 14, fontWeight: '800' },
+  timeCard: { width: '100%', maxWidth: 360, borderRadius: 22, backgroundColor: '#FFFFFF', padding: 18 },
+  clockRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginVertical: 8 },
+  stepperCol: { gap: 8 },
+  stepBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  stepBtnText: { fontSize: 18, fontWeight: '800' },
+  clockDisplay: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  clockText: { fontSize: 34, lineHeight: 40, fontWeight: '800' },
+  ampmPill: { minWidth: 52, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginLeft: 6 },
+  ampmText: { fontSize: 12, fontWeight: '800' },
+  timeWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  timeChip: { height: 38, minWidth: 72, borderRadius: 19, borderWidth: 1, borderColor: '#E5E0D8', alignItems: 'center', justifyContent: 'center' },
+  timeChipActive: { borderColor: 'transparent' },
+  timeChipText: { color: '#6B7280', fontSize: 13, fontWeight: '700' },
+  timeFooter: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  confirmBtn: { flex: 1, minHeight: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  confirmBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+  suggestionItem: { minHeight: 48, borderBottomWidth: 1, justifyContent: 'center' },
+  suggestionText: { fontSize: 15, fontWeight: '700' },
+});
 
 function AddressAutocomplete({
   label,
@@ -57,6 +93,42 @@ function AddressAutocomplete({
   zIndex?: number;
   onlyCities?: boolean;
 }) {
+  const { colors: acColors } = useAppTheme();
+  const acStyles = useMemo(() => StyleSheet.create({
+    autoWrap: { position: 'relative', marginBottom: 10 },
+    label: { color: acColors.textSecondary, fontSize: 12, fontWeight: '700', marginBottom: 6 },
+    input: {
+      minHeight: 48,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: acColors.border,
+      backgroundColor: acColors.bgCard,
+      color: acColors.textPrimary,
+      paddingHorizontal: 14,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    autoPanel: {
+      position: 'absolute',
+      top: 76,
+      left: 0,
+      right: 0,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: acColors.border,
+      backgroundColor: acColors.bgCard,
+      overflow: 'hidden',
+      zIndex: 100,
+      elevation: 12,
+    },
+    autoStateRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12 },
+    autoIconWrap: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: acColors.primaryDim },
+    placesEmptyText: { color: acColors.textSecondary, fontSize: 13, fontWeight: '600' },
+    autoItem: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: acColors.border },
+    autoItemRow: { flex: 1, minWidth: 0 },
+    autoMainText: { color: acColors.textPrimary, fontSize: 14, fontWeight: '700' },
+    autoSecondaryText: { color: acColors.textSecondary, fontSize: 12, marginTop: 2 },
+  }), [acColors]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<Suggestion[]>([]);
@@ -105,12 +177,12 @@ function AddressAutocomplete({
   };
 
   return (
-    <View style={[styles.autoWrap, { zIndex }]}>
-      <Text style={styles.label}>{label}</Text>
+    <View style={[acStyles.autoWrap, { zIndex }]}>
+      {!!label && <Text style={acStyles.label}>{label}</Text>}
       <TextInput
-        style={styles.input}
+        style={acStyles.input}
         placeholder={placeholder}
-        placeholderTextColor="#9CA3AF"
+        placeholderTextColor={acColors.textSecondary}
         value={value}
         onFocus={() => setOpen(true)}
         onChangeText={(t) => {
@@ -123,14 +195,17 @@ function AddressAutocomplete({
         }}
       />
       {open && (items.length > 0 || loading) && (
-        <View style={styles.autoPanel}>
+        <View style={acStyles.autoPanel}>
           {loading ? (
-            <View style={styles.autoEmpty}><Text style={styles.placesEmptyText}>Searchingâ€¦</Text></View>
+            <View style={acStyles.autoStateRow}>
+              <View style={acStyles.autoIconWrap}><Ionicons name="search-outline" size={15} color={acColors.primary} /></View>
+              <Text style={acStyles.placesEmptyText}>Searching locations...</Text>
+            </View>
           ) : (
             items.slice(0, 10).map((s, idx) => (
               <TouchableOpacity
                 key={`${s.place_id}-${idx}`}
-                style={styles.autoItem}
+                style={acStyles.autoItem}
                 onPress={async () => {
                   setOpen(false);
                   setItems([]);
@@ -139,9 +214,12 @@ function AddressAutocomplete({
                   setTimeout(() => Keyboard.dismiss(), 50);
                 }}
               >
-                <View style={styles.autoItemRow}>
-                  <Text style={styles.autoMainText} numberOfLines={1}>{s.mainText}</Text>
-                  {s.secondaryText ? <Text style={styles.autoSecondaryText} numberOfLines={1}>{s.secondaryText}</Text> : null}
+                <View style={acStyles.autoIconWrap}>
+                  <Ionicons name={idx === 0 ? 'location' : 'location-outline'} size={15} color={acColors.primary} />
+                </View>
+                <View style={acStyles.autoItemRow}>
+                  <Text style={acStyles.autoMainText} numberOfLines={1}>{s.mainText}</Text>
+                  {s.secondaryText ? <Text style={acStyles.autoSecondaryText} numberOfLines={1}>{s.secondaryText}</Text> : null}
                 </View>
               </TouchableOpacity>
             ))
@@ -190,6 +268,43 @@ function getMonthMatrix(d: Date) {
   return weeks;
 }
 
+async function geocodeAddress(address: string): Promise<Coords | null> {
+  const q = address.trim();
+  if (!q || !GOOGLE_MAPS_API_KEY) return null;
+  try {
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(q)}&components=country:US&key=${GOOGLE_MAPS_API_KEY}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    const loc = json?.results?.[0]?.geometry?.location;
+    if (typeof loc?.lat === 'number' && typeof loc?.lng === 'number') {
+      return { lat: loc.lat, lng: loc.lng };
+    }
+  } catch {}
+  return null;
+}
+
+async function fetchRouteMetricsForCoords(origin: Coords, destination: Coords) {
+  if (!GOOGLE_MAPS_API_KEY) return null;
+  try {
+    const origins = `${origin.lat},${origin.lng}`;
+    const destinations = `${destination.lat},${destination.lng}`;
+    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?units=imperial&origins=${encodeURIComponent(origins)}&destinations=${encodeURIComponent(destinations)}&key=${GOOGLE_MAPS_API_KEY}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    const element = json?.rows?.[0]?.elements?.[0];
+    const distanceMeters = element?.distance?.value;
+    const durationSeconds = element?.duration?.value;
+    if (typeof distanceMeters !== 'number' || typeof durationSeconds !== 'number') return null;
+    return {
+      distanceText: element?.distance?.text || null,
+      durationText: element?.duration?.text || null,
+      distanceMiles: distanceMeters / 1609.34,
+      durationMinutes: durationSeconds / 60,
+    };
+  } catch {}
+  return null;
+}
+
 function CalendarModal({ visible, month, selectedDate, primaryColor, secondaryColor, onClose, onSelect }: {
   visible: boolean;
   month: Date;
@@ -207,20 +322,20 @@ function CalendarModal({ visible, month, selectedDate, primaryColor, secondaryCo
   const todayStr = toYMD(new Date());
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.calendarCard}>
-          <View style={styles.calendarHeader}>
-            <TouchableOpacity onPress={() => setM(addMonths(m, -1))} style={[styles.navBtn, { borderColor: primaryColor }]}><Text style={[styles.navBtnText, { color: primaryColor }]}>{'<'}</Text></TouchableOpacity>
-            <Text style={[styles.monthTitle, { color: secondaryColor }]}>{monthLabel}</Text>
-            <TouchableOpacity onPress={() => setM(addMonths(m, 1))} style={[styles.navBtn, { borderColor: primaryColor }]}><Text style={[styles.navBtnText, { color: primaryColor }]}>{'>'}</Text></TouchableOpacity>
+      <View style={modalStyles.modalBackdrop}>
+        <View style={modalStyles.calendarCard}>
+          <View style={modalStyles.calendarHeader}>
+            <TouchableOpacity onPress={() => setM(addMonths(m, -1))} style={[modalStyles.navBtn, { borderColor: primaryColor }]}><Text style={[modalStyles.navBtnText, { color: primaryColor }]}>{'<'}</Text></TouchableOpacity>
+            <Text style={[modalStyles.monthTitle, { color: secondaryColor }]}>{monthLabel}</Text>
+            <TouchableOpacity onPress={() => setM(addMonths(m, 1))} style={[modalStyles.navBtn, { borderColor: primaryColor }]}><Text style={[modalStyles.navBtnText, { color: primaryColor }]}>{'>'}</Text></TouchableOpacity>
           </View>
-          <View style={styles.weekdaysRow}>
+          <View style={modalStyles.weekdaysRow}>
             {weekdays.map((w) => (
-              <Text key={w} style={styles.weekday}>{w}</Text>
+              <Text key={w} style={modalStyles.weekday}>{w}</Text>
             ))}
           </View>
           {weeks.map((row, ridx) => (
-            <View key={ridx} style={styles.daysRow}>
+            <View key={ridx} style={modalStyles.daysRow}>
               {row.map((d, cidx) => {
                 const isEmpty = !d;
                 const label = d ? String(d.getDate()) : '';
@@ -232,7 +347,7 @@ function CalendarModal({ visible, month, selectedDate, primaryColor, secondaryCo
                     key={`${ridx}-${cidx}`}
                     disabled={isEmpty}
                     style={[
-                      styles.dayCell,
+                      modalStyles.dayCell,
                       isEmpty && { opacity: 0.25 },
                       isSelected && { backgroundColor: primaryColor },
                       !isSelected && isToday && { borderWidth: 1.5, borderColor: primaryColor, backgroundColor: '#FFF7ED' },
@@ -240,7 +355,7 @@ function CalendarModal({ visible, month, selectedDate, primaryColor, secondaryCo
                     onPress={() => { if (d) { onSelect(toYMD(d)); onClose(); } }}
                   >
                     <Text style={[
-                      styles.dayText,
+                      modalStyles.dayText,
                       isSelected && { color: '#FFFFFF', fontWeight: '800' },
                       !isSelected && isToday && { color: '#1F2937', fontWeight: '800' },
                     ]}>{label}</Text>
@@ -249,7 +364,7 @@ function CalendarModal({ visible, month, selectedDate, primaryColor, secondaryCo
               })}
             </View>
           ))}
-          <TouchableOpacity onPress={onClose} style={styles.closeBtn}><Text style={[styles.closeBtnText, { color: primaryColor }]}>Close</Text></TouchableOpacity>
+          <TouchableOpacity onPress={onClose} style={modalStyles.closeBtn}><Text style={[modalStyles.closeBtnText, { color: primaryColor }]}>Close</Text></TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -338,38 +453,38 @@ function TimeModal({ visible, initialTime, primaryColor, secondaryColor, onClose
   });
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.timeCard}>
-          <Text style={[styles.monthTitle, { color: secondaryColor, marginBottom: 8 }]}>Select Time</Text>
-          <View style={styles.clockRow}>
-            <View style={styles.stepperCol}>
-              <TouchableOpacity onPress={incHour} style={[styles.stepBtn, { borderColor: primaryColor }]}><Text style={[styles.stepBtnText, { color: primaryColor }]}>+</Text></TouchableOpacity>
-              <TouchableOpacity onPress={decHour} style={[styles.stepBtn, { borderColor: primaryColor }]}><Text style={[styles.stepBtnText, { color: primaryColor }]}>-</Text></TouchableOpacity>
+      <View style={modalStyles.modalBackdrop}>
+        <View style={modalStyles.timeCard}>
+          <Text style={[modalStyles.monthTitle, { color: secondaryColor, marginBottom: 8 }]}>Select Time</Text>
+          <View style={modalStyles.clockRow}>
+            <View style={modalStyles.stepperCol}>
+              <TouchableOpacity onPress={incHour} style={[modalStyles.stepBtn, { borderColor: primaryColor }]}><Text style={[modalStyles.stepBtnText, { color: primaryColor }]}>+</Text></TouchableOpacity>
+              <TouchableOpacity onPress={decHour} style={[modalStyles.stepBtn, { borderColor: primaryColor }]}><Text style={[modalStyles.stepBtnText, { color: primaryColor }]}>-</Text></TouchableOpacity>
             </View>
-            <View style={styles.clockDisplay}>
-              <Text style={[styles.clockText, { color: secondaryColor }]}>{hour}</Text>
-              <Text style={[styles.clockText, { color: secondaryColor }]}>:</Text>
-              <Text style={[styles.clockText, { color: secondaryColor }]}>{pad2(minute)}</Text>
-              <TouchableOpacity onPress={() => setAmPm(ampm === 'AM' ? 'PM' : 'AM')} style={[styles.ampmPill, { borderColor: primaryColor, backgroundColor: '#FFF7ED' }]}>
-                <Text style={[styles.ampmText, { color: primaryColor }]}>{ampm}</Text>
+            <View style={modalStyles.clockDisplay}>
+              <Text style={[modalStyles.clockText, { color: secondaryColor }]}>{hour}</Text>
+              <Text style={[modalStyles.clockText, { color: secondaryColor }]}>:</Text>
+              <Text style={[modalStyles.clockText, { color: secondaryColor }]}>{pad2(minute)}</Text>
+              <TouchableOpacity onPress={() => setAmPm(ampm === 'AM' ? 'PM' : 'AM')} style={[modalStyles.ampmPill, { borderColor: primaryColor, backgroundColor: '#FFF7ED' }]}>
+                <Text style={[modalStyles.ampmText, { color: primaryColor }]}>{ampm}</Text>
               </TouchableOpacity>
             </View>
-            <View style={styles.stepperCol}>
-              <TouchableOpacity onPress={incMinute} style={[styles.stepBtn, { borderColor: primaryColor }]}><Text style={[styles.stepBtnText, { color: primaryColor }]}>+</Text></TouchableOpacity>
-              <TouchableOpacity onPress={decMinute} style={[styles.stepBtn, { borderColor: primaryColor }]}><Text style={[styles.stepBtnText, { color: primaryColor }]}>-</Text></TouchableOpacity>
+            <View style={modalStyles.stepperCol}>
+              <TouchableOpacity onPress={incMinute} style={[modalStyles.stepBtn, { borderColor: primaryColor }]}><Text style={[modalStyles.stepBtnText, { color: primaryColor }]}>+</Text></TouchableOpacity>
+              <TouchableOpacity onPress={decMinute} style={[modalStyles.stepBtn, { borderColor: primaryColor }]}><Text style={[modalStyles.stepBtnText, { color: primaryColor }]}>-</Text></TouchableOpacity>
             </View>
           </View>
-          <View style={[styles.timeWrap, { justifyContent: 'center' }]}> 
+          <View style={[modalStyles.timeWrap, { justifyContent: 'center' }]}> 
             {(['AM','PM'] as const).map(x => (
-              <TouchableOpacity key={x} style={[styles.timeChip, ampm===x && [styles.timeChipActive, { backgroundColor: primaryColor }]]} onPress={() => setAmPm(x)}>
-                <Text style={[styles.timeChipText, ampm===x && { color: '#FFFFFF', fontWeight: '800' }]}>{x}</Text>
+              <TouchableOpacity key={x} style={[modalStyles.timeChip, ampm===x && [modalStyles.timeChipActive, { backgroundColor: primaryColor }]]} onPress={() => setAmPm(x)}>
+                <Text style={[modalStyles.timeChipText, ampm===x && { color: '#FFFFFF', fontWeight: '800' }]}>{x}</Text>
               </TouchableOpacity>
             ))}
           </View>
-          <View style={styles.timeFooter}>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}><Text style={[styles.closeBtnText, { color: secondaryColor }]}>Cancel</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => { onSelect(`${hour}:${pad2(minute)} ${ampm}`); onClose(); }} style={[styles.confirmBtn, { backgroundColor: primaryColor }]}>
-              <Text style={styles.confirmBtnText}>Set</Text>
+          <View style={modalStyles.timeFooter}>
+            <TouchableOpacity onPress={onClose} style={modalStyles.closeBtn}><Text style={[modalStyles.closeBtnText, { color: secondaryColor }]}>Cancel</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => { onSelect(`${hour}:${pad2(minute)} ${ampm}`); onClose(); }} style={[modalStyles.confirmBtn, { backgroundColor: primaryColor }]}>
+              <Text style={modalStyles.confirmBtnText}>Set</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -387,15 +502,15 @@ function SeatsModal({ visible, selected, primaryColor, onClose, onSelect }: {
 }) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.calendarCard}>
-          <Text style={[styles.monthTitle, { marginBottom: 8 }]}>Select seats</Text>
+      <View style={modalStyles.modalBackdrop}>
+        <View style={modalStyles.calendarCard}>
+          <Text style={[modalStyles.monthTitle, { marginBottom: 8 }]}>Select seats</Text>
           {[1, 2].map((s) => (
-            <TouchableOpacity key={s} onPress={() => { onSelect(s as 1 | 2); onClose(); }} style={[styles.suggestionItem, { borderBottomColor: '#F3F4F6' }]}> 
-              <Text style={[styles.suggestionText, { color: selected === s ? primaryColor : '#1F2937' }]}>{s} seat{s === 1 ? '' : 's'}</Text>
+            <TouchableOpacity key={s} onPress={() => { onSelect(s as 1 | 2); onClose(); }} style={[modalStyles.suggestionItem, { borderBottomColor: '#F3F4F6' }]}> 
+              <Text style={[modalStyles.suggestionText, { color: selected === s ? primaryColor : '#1F2937' }]}>{s} seat{s === 1 ? '' : 's'}</Text>
             </TouchableOpacity>
           ))}
-          <TouchableOpacity onPress={onClose} style={styles.closeBtn}><Text style={[styles.closeBtnText, { color: primaryColor }]}>Close</Text></TouchableOpacity>
+          <TouchableOpacity onPress={onClose} style={modalStyles.closeBtn}><Text style={[modalStyles.closeBtnText, { color: primaryColor }]}>Close</Text></TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -403,9 +518,250 @@ function SeatsModal({ visible, selected, primaryColor, onClose, onSelect }: {
 }
 
 export default function BookScreen() {
-  const theme = useTheme();
-  const [date, setDate] = useState('');
-  const [time, setTime] = useState('');
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => StyleSheet.create({
+  // ── From createStyles (previously themed) ────────────────────────────────
+  root: { flex: 1, backgroundColor: colors.bg },
+  formCard: { marginHorizontal: 20, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 14 },
+  ceoInputBtn: { flex: 1, minHeight: 48, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, justifyContent: 'center', paddingHorizontal: 14 },
+  ceoInputText: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
+  ceoInputPlaceholder: { color: colors.textSecondary },
+  seatPill: { height: 40, minWidth: 64, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' },
+  seatPillText: { color: colors.textSecondary, fontSize: 14, fontWeight: '700' },
+  priceBox: { marginHorizontal: 20, minHeight: 70, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
+  priceInputCeo: { flex: 1, color: colors.textPrimary, fontSize: 30, fontWeight: '400', paddingVertical: 0, textAlignVertical: 'center' },
+  suggestedText: { color: colors.textSecondary, fontSize: 11, lineHeight: 15, fontWeight: '600', textAlign: 'right' },
+  notesCeo: { marginHorizontal: 20, minHeight: 92, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 14, color: colors.textPrimary, fontSize: 14, lineHeight: 20, textAlignVertical: 'top' },
+  eventInputCeo: { marginHorizontal: 20, height: 52, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, paddingHorizontal: 14, color: colors.textPrimary, fontSize: 15 },
+  routeMiniRow: { flexDirection: 'row', gap: 12 },
+  routeDots: { width: 22, alignItems: 'center', paddingTop: 19 },
+  routeMiniDot: { width: 10, height: 10, borderRadius: 5 },
+  routeMiniLine: { width: 1, flex: 1, borderLeftWidth: 1, borderStyle: 'dashed', borderColor: colors.border, marginVertical: 6 },
+  stopPlus: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
+  routeFields: { flex: 1 },
+  addStopText: { color: colors.textSecondary, fontSize: 11, fontWeight: '700', marginTop: -2, marginBottom: 6, marginLeft: 12 },
+  fieldGroupLabel: { marginHorizontal: 20, marginTop: 16, marginBottom: 8, color: colors.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 1.3 },
+  whenRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 20 },
+  timeBtn: { flex: 0.7 },
+  seatPillRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 20 },
+  seatPillActive: { backgroundColor: colors.textPrimary, borderColor: colors.textPrimary },
+  seatPillTextActive: { color: colors.textInverse },
+  priceDollar: { color: colors.primary, fontSize: 28, fontWeight: '300', marginRight: 8 },
+  suggestedWrap: { alignItems: 'flex-end', maxWidth: 142 },
+  suggestedLabel: { color: colors.textSecondary, fontSize: 8, fontWeight: '800', letterSpacing: 0.8 },
+  capMiniBanner: { marginHorizontal: 20, marginTop: 8, borderRadius: 14, backgroundColor: colors.bgSecondary, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: colors.border },
+  capMiniText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
+  continueBtn: { marginHorizontal: 20, marginTop: 16, height: 54, borderRadius: 27, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  continueText: { color: colors.textInverse, fontSize: 16, fontWeight: '800' },
+  // ── Header ────────────────────────────────────────────────────────────────
+  hdr:            { flexDirection:'row', alignItems:'center', paddingHorizontal:16, paddingTop:8, paddingBottom:14 },
+  backBtn:        { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bgCard, alignItems:'center', justifyContent:'center', borderWidth: 1, borderColor: colors.border },
+  pageIntro:      { paddingHorizontal:20, paddingTop:10, paddingBottom:14 },
+  pageTitle:      { fontSize:24, lineHeight:30, fontWeight:'700', color:colors.textPrimary, letterSpacing:-0.25 },
+  hdrTitle:       { fontSize:22, fontWeight:'800', color:colors.textPrimary, letterSpacing:-0.5 },
+  hdrSub:         { fontSize:12, color:colors.textSecondary, marginTop:1 },
+  livePill:       { flexDirection:'row', alignItems:'center', gap:5, backgroundColor:'rgba(16,185,129,0.15)', paddingHorizontal:10, paddingVertical:4, borderRadius:16, borderWidth:1, borderColor:'rgba(16,185,129,0.25)' },
+  liveDot:        { width:6, height:6, borderRadius:3, backgroundColor:'#10B981' },
+  liveText:       { color:'#10B981', fontSize:10, fontWeight:'800', letterSpacing:1.2 },
+  // ── Map Hero ──────────────────────────────────────────────────────────────
+  mapHero:        { marginHorizontal:16, marginBottom:8, height:220, borderRadius:24, overflow:'hidden', borderWidth:1.5, borderColor:'rgba(59,130,246,0.18)' },
+  mapGridH:       { position:'absolute', left:0, right:0, height:1, backgroundColor:'rgba(59,130,246,0.06)' },
+  mapGridV:       { position:'absolute', top:0, bottom:0, width:1, backgroundColor:'rgba(59,130,246,0.06)' },
+  mapMarker:      { position:'absolute', width:18, height:18, alignItems:'center', justifyContent:'center' },
+  mapMarkerRing:  { position:'absolute', width:18, height:18, borderRadius:9, borderWidth:2 },
+  mapMarkerCore:  { width:10, height:10, borderRadius:5, shadowOpacity:1, shadowRadius:8, shadowOffset:{width:0,height:0} },
+  mapRouteLine:   { position:'absolute', height:2.5, backgroundColor:'rgba(244,98,31,0.5)', borderRadius:2 },
+  mapPromptWrap:  { position:'absolute', top:0, left:0, right:0, bottom:40, alignItems:'center', justifyContent:'center', gap:8 },
+  mapPromptText:  { color:'rgba(255,255,255,0.3)', fontSize:12, textAlign:'center' },
+  mapInfoBar:     { position:'absolute', bottom:0, left:0, right:0, flexDirection:'row', alignItems:'center', padding:14, borderTopWidth:1, borderTopColor:'rgba(0,0,0,0.1)' },
+  mapInfoTitle:   { color:'white', fontSize:15, fontWeight:'800' },
+  mapInfoSub:     { color:'rgba(255,255,255,0.5)', fontSize:12, marginTop:2 },
+  mapEarnBadge:   { alignItems:'center', backgroundColor:'rgba(244,98,31,0.15)', borderRadius:12, paddingHorizontal:10, paddingVertical:6, borderWidth:1, borderColor:'rgba(244,98,31,0.3)' },
+  mapEarnLabel:   { color:'rgba(255,255,255,0.5)', fontSize:10, fontWeight:'600' },
+  mapEarnValue:   { color:colors.primary, fontSize:16, fontWeight:'800' },
+  // ── Demand Strip ──────────────────────────────────────────────────────────
+  demandStrip:    { marginHorizontal:16, marginBottom:16, backgroundColor:colors.bgSecondary, borderRadius:14, borderWidth:1, borderColor:colors.border, paddingVertical:8, paddingHorizontal:12, gap:6 },
+  demandItem:     { flexDirection:'row', alignItems:'center', gap:6 },
+  demandText:     { color:colors.textSecondary, fontSize:12 },
+  // ── Glass Cards ───────────────────────────────────────────────────────────
+  glassCard:      { marginHorizontal:16, marginBottom:14, borderRadius:22, borderWidth:1.5, borderColor:colors.border, overflow:'hidden', backgroundColor:colors.bgCard, shadowColor:colors.textPrimary, shadowOffset:{width:0,height:3}, shadowOpacity:0.07, shadowRadius:12, elevation:3 },
+  glassCardInner: { padding:18 },
+  cardHdr:        { flexDirection:'row', alignItems:'center', gap:10, marginBottom:16 },
+  cardIconWrap:   { width:32, height:32, borderRadius:10, alignItems:'center', justifyContent:'center' },
+  cardTitle:      { fontSize:16, fontWeight:'800', color:colors.textPrimary, flex:1, letterSpacing:-0.3 },
+  // ── Route ─────────────────────────────────────────────────────────────────
+  connectorCol:   { width:18, alignItems:'center', paddingTop:30, paddingBottom:20 },
+  connectorDot:   { width:10, height:10, borderRadius:5 },
+  connectorLine:  { width:2, flex:1, marginVertical:4, backgroundColor:colors.border },
+  quickActionsRow:{ flexDirection:'row', gap:10, marginTop:12 },
+  quickBtn:       { flexDirection:'row', alignItems:'center', gap:6, paddingHorizontal:14, paddingVertical:9, borderRadius:12, borderWidth:1, borderColor:colors.primaryBorder, backgroundColor:colors.primaryDim },
+  quickBtnText:   { fontSize:13, fontWeight:'600', color:colors.primary },
+  infoStrip:      { flexDirection:'row', backgroundColor:colors.bgSecondary, borderRadius:14, padding:12, marginTop:14, alignItems:'center' },
+  infoStripItem:  { flex:1, alignItems:'center', gap:3 },
+  infoStripDiv:   { width:1, height:32, backgroundColor:colors.border },
+  infoStripLabel: { fontSize:9, fontWeight:'700', color:colors.textSecondary, letterSpacing:0.8, textTransform:'uppercase' },
+  infoStripVal:   { fontSize:15, fontWeight:'800', color:colors.textPrimary },
+  // ── Schedule ──────────────────────────────────────────────────────────────
+  scheduleBtn:    { flex:1, flexDirection:'row', alignItems:'center', gap:10, backgroundColor:colors.bgSecondary, borderRadius:14, padding:12, borderWidth:1, borderColor:colors.border },
+  scheduleBtnFilled: { borderColor:colors.primaryBorder, backgroundColor:colors.primaryDim },
+  scheduleIconWrap: { width:36, height:36, borderRadius:10, alignItems:'center', justifyContent:'center' },
+  scheduleLabel:  { fontSize:9, fontWeight:'700', color:colors.textSecondary, letterSpacing:0.8, textTransform:'uppercase', marginBottom:2 },
+  scheduleValue:  { fontSize:14, fontWeight:'700', color:colors.textPrimary },
+  schedulePlaceholder: { color:colors.textSecondary, fontWeight:'500' },
+  // ── Seats ─────────────────────────────────────────────────────────────────
+  popularTag:     { backgroundColor:colors.primaryDim, borderRadius:12, paddingHorizontal:8, paddingVertical:3 },
+  popularTagText: { color:colors.primary, fontSize:11, fontWeight:'700' },
+  seatRow:        { flexDirection:'row', gap:12 },
+  seatBtn:        { flex:1, borderRadius:16, borderWidth:1.5, borderColor:colors.border, backgroundColor:colors.bgSecondary, padding:14, alignItems:'center', gap:8 },
+  seatBtnActive:  { borderColor:colors.primaryBorder, backgroundColor:colors.primaryDim },
+  seatIconRow:    { flexDirection:'row', gap:6 },
+  seatIconWrap:   { width:38, height:38, borderRadius:12, backgroundColor:colors.border, alignItems:'center', justifyContent:'center' },
+  seatIconWrapActive: { backgroundColor:colors.primaryDim },
+  seatBtnLabel:   { fontSize:15, fontWeight:'600', color:colors.textSecondary },
+  seatBtnSub:     { fontSize:11, color:colors.textSecondary, textAlign:'center' },
+  // ── Pricing ───────────────────────────────────────────────────────────────
+  aiTag:          { backgroundColor:colors.amberDim, borderRadius:12, paddingHorizontal:8, paddingVertical:3 },
+  aiTagText:      { color:colors.amber, fontSize:11, fontWeight:'700' },
+  priceRangeWrap: { marginBottom:14 },
+  priceRangeBar:  { height:4, backgroundColor:colors.border, borderRadius:2, marginBottom:6, overflow:'hidden' },
+  priceRangeFill: { height:'100%' as any, backgroundColor:colors.primary, borderRadius:2 },
+  priceRangeLabel:{ fontSize:12, color:colors.textSecondary },
+  priceInputRow:  { flexDirection:'row', alignItems:'center', borderRadius:14, borderWidth:1.5, borderColor:colors.border, backgroundColor:colors.bgCard, overflow:'hidden', marginBottom:12 },
+  priceDollarBox: { paddingHorizontal:16, paddingVertical:16, backgroundColor:colors.primaryDim, alignItems:'center', justifyContent:'center' },
+  priceInput:     { flex:1, fontSize:22, fontWeight:'700', color:colors.textPrimary, paddingHorizontal:12, paddingVertical:14 },
+  pricePerSeat:   { paddingRight:16, fontSize:14, color:colors.textSecondary, fontWeight:'500' },
+  earningsRow:    { flexDirection:'row', gap:12, marginBottom:10 },
+  earningsItem:   { flex:1, backgroundColor:colors.bgSecondary, borderRadius:12, padding:12, alignItems:'center' },
+  earningsLabel:  { fontSize:11, color:colors.textSecondary, fontWeight:'500', marginBottom:4 },
+  earningsValue:  { fontSize:18, fontWeight:'800', color:colors.textPrimary },
+  priceHintText:  { fontSize:12, color:colors.textSecondary },
+  capBanner:      { marginTop:8, paddingVertical:8, paddingHorizontal:12, borderRadius:10, backgroundColor:colors.greenDim, borderWidth:1, borderColor:colors.greenBorder },
+  capBannerText:  { color:colors.green, fontSize:12, fontWeight:'600' },
+  // ── Ride Vibe ─────────────────────────────────────────────────────────────
+  optionalTag:    { fontSize:11, color:colors.textSecondary, backgroundColor:colors.bgSecondary, paddingHorizontal:8, paddingVertical:3, borderRadius:8 },
+  vibeSubLabel:   { fontSize:13, color:colors.textSecondary, marginBottom:12 },
+  vibeChipsRow:   { flexDirection:'row', flexWrap:'wrap', gap:8, marginBottom:14 },
+  vibeChip:       { paddingHorizontal:12, paddingVertical:8, borderRadius:20, backgroundColor:colors.bgSecondary, borderWidth:1, borderColor:colors.border },
+  vibeChipActive: { backgroundColor:colors.purpleDim, borderColor:colors.purpleBorder },
+  vibeChipText:   { fontSize:13, color:colors.textSecondary, fontWeight:'500' },
+  vibeChipTextActive: { color:colors.purple, fontWeight:'700' },
+  notesInput:     { backgroundColor:colors.bgCard, borderRadius:12, borderWidth:1, borderColor:colors.border, padding:12, fontSize:14, color:colors.textPrimary, minHeight:64, textAlignVertical:'top' },
+  // ── Campus Activity ───────────────────────────────────────────────────────
+  campusActivityTitle: { fontSize:15, fontWeight:'800', color:colors.textPrimary, marginBottom:12 },
+  campusActivityRow:   { flexDirection:'row', alignItems:'center', paddingVertical:10, gap:10 },
+  campusActivityDot:   { width:6, height:6, borderRadius:3, backgroundColor:colors.primary, flexShrink:0 },
+  campusActivityText:  { flex:1, fontSize:13, color:colors.textSecondary },
+  // ── GO LIVE Button ────────────────────────────────────────────────────────
+  goLiveBtn:      { height:60, borderRadius:22, flexDirection:'row', alignItems:'center', justifyContent:'center', overflow:'hidden', marginBottom:10 },
+  goLiveGlow:     { borderRadius:22, backgroundColor:colors.primary, shadowColor:colors.primary, shadowOpacity:0.8, shadowRadius:30, shadowOffset:{width:0,height:0} },
+  goLiveBtnText:  { color:'white', fontSize:20, fontWeight:'900', letterSpacing:1 },
+  goLiveArrow:    { position:'absolute', right:20, width:34, height:34, borderRadius:17, backgroundColor:'rgba(255,255,255,0.2)', alignItems:'center', justifyContent:'center' },
+  goLiveSubText:  { textAlign:'center', fontSize:12, color:colors.textSecondary, marginBottom:4 },
+  // ── Autocomplete (dark themed) ────────────────────────────────────────────
+  label: { fontSize:12, fontWeight:'600', color:colors.textSecondary, marginBottom:5, textTransform:'uppercase', letterSpacing:0.5 },
+  input: { backgroundColor:colors.bgCard, borderWidth:1, borderColor:colors.border, borderRadius:14, paddingHorizontal:14, paddingVertical:12, fontSize:15, color:colors.textPrimary },
+  autoWrap: { position:'relative', marginBottom:10 },
+  autoPanel: { position:'absolute', top:54, left:0, right:0, backgroundColor:colors.bgCard, borderRadius:16, borderWidth:1, borderColor:colors.border, maxHeight:268, overflow:'hidden', elevation:24, shadowColor:colors.textPrimary, shadowOffset:{width:0,height:10}, shadowOpacity:0.12, shadowRadius:18, zIndex:999 },
+  autoItem:       { minHeight:56, paddingHorizontal:12, paddingVertical:10, borderBottomWidth:1, borderBottomColor:colors.border, flexDirection:'row', alignItems:'center', gap:10 },
+  autoIconWrap:   { width:28, height:28, borderRadius:14, backgroundColor:colors.primaryDim, alignItems:'center', justifyContent:'center', flexShrink:0 },
+  autoItemRow:    { flex:1, minWidth:0 },
+  autoMainText: { color:colors.textPrimary, fontSize:14, lineHeight:18, fontWeight:'700' },
+  autoSecondaryText: { color:colors.textSecondary, fontSize:12, lineHeight:16, marginTop:2, fontWeight:'500' },
+  autoText: { color:colors.textPrimary, fontSize:14 },
+  autoStateRow:   { minHeight:54, paddingHorizontal:12, paddingVertical:12, flexDirection:'row', alignItems:'center', gap:10 },
+  autoEmpty:      { padding:14 },
+  placesEmptyText:{ flex:1, color:colors.textSecondary, fontSize:13, lineHeight:18, fontWeight:'600' },
+  // ── Calendar Modal (keep existing light theme for modals) ─────────────────
+  modalBackdrop:  { flex:1, backgroundColor:'rgba(0,0,0,0.65)', justifyContent:'center', alignItems:'center', padding:20 },
+  calendarCard:   { width:'100%', maxWidth:380, backgroundColor:'#FFFFFF', borderRadius:22, padding:20, shadowColor:'#000', shadowOffset:{width:0,height:12}, shadowOpacity:0.25, shadowRadius:30, elevation:16 },
+  calendarHeader: { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:12 },
+  monthTitle:     { fontSize:17, fontWeight:'700', color:'#1E293B' },
+  navBtn:         { paddingHorizontal:12, paddingVertical:8, borderRadius:10, borderWidth:1, backgroundColor:'#F8FAFC' },
+  navBtnText:     { fontSize:16, fontWeight:'700' },
+  weekdaysRow:    { flexDirection:'row', justifyContent:'space-between', marginTop:8, marginBottom:6 },
+  weekday:        { width:`${100/7}%`, textAlign:'center', fontSize:12, fontWeight:'700', color:'#94A3B8' },
+  daysRow:        { flexDirection:'row', justifyContent:'space-between', marginBottom:4 },
+  dayCell:        { width:`${100/7}%`, height:44, alignItems:'center', justifyContent:'center', borderRadius:12, backgroundColor:'#FAFBFC' },
+  dayText:        { fontSize:14, color:'#1E293B', fontWeight:'600' },
+  closeBtn:       { marginTop:12, alignSelf:'flex-end', paddingHorizontal:12, paddingVertical:8 },
+  closeBtnText:   { fontWeight:'600', fontSize:14 },
+  // ── Time Modal ────────────────────────────────────────────────────────────
+  timeCard:       { width:'100%', maxWidth:380, backgroundColor:'#FFFFFF', borderRadius:22, padding:20, shadowColor:'#000', shadowOffset:{width:0,height:12}, shadowOpacity:0.25, shadowRadius:30, elevation:16 },
+  clockRow:       { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginVertical:12 },
+  clockDisplay:   { flexDirection:'row', alignItems:'center', justifyContent:'center', gap:4, flex:1 },
+  clockText:      { fontSize:44, fontWeight:'800', color:'#1E293B' },
+  stepperCol:     { width:56, alignItems:'center', justifyContent:'center', gap:10 },
+  stepBtn:        { width:44, height:44, borderRadius:12, alignItems:'center', justifyContent:'center', borderWidth:1, backgroundColor:'#F8FAFC' },
+  stepBtnText:    { fontSize:22, fontWeight:'800' },
+  ampmPill:       { marginLeft:8, paddingHorizontal:12, paddingVertical:6, borderRadius:9999, borderWidth:1.5 },
+  ampmText:       { fontWeight:'800', fontSize:14 },
+  timeColumns:    { flexDirection:'row', gap:12 },
+  timeCol:        { flex:1 },
+  timeWrap:       { flexDirection:'row', flexWrap:'wrap', gap:8, marginTop:10, marginBottom:10 },
+  timeChip:       { backgroundColor:'#F1F5F9', borderRadius:9999, paddingVertical:8, paddingHorizontal:14, minWidth:48, alignItems:'center' },
+  timeChipActive: { backgroundColor:'#E05E1A' },
+  timeChipText:   { fontWeight:'700', fontSize:14, color:'#475569' },
+  timeFooter:     { flexDirection:'row', justifyContent:'flex-end', alignItems:'center', gap:12, marginTop:8 },
+  confirmBtn:     { paddingHorizontal:24, paddingVertical:10, borderRadius:12 },
+  confirmBtnText: { color:'#FFFFFF', fontWeight:'700', fontSize:15 },
+  // ── Suggestion / Seat Modal (legacy) ──────────────────────────────────────
+  suggestionsPanel:   { backgroundColor:colors.bgCard, borderWidth:1, borderColor:colors.border, borderRadius:12, marginTop:8, overflow:'hidden', position:'absolute', top:48, left:0, right:0, zIndex:10 },
+  suggestionItem:     { paddingHorizontal:14, paddingVertical:10, borderBottomWidth:1, borderBottomColor:colors.border, backgroundColor:colors.bgCard },
+  suggestionText:     { fontSize:14, color:colors.textPrimary, fontWeight:'600' },
+  suggestionSub:      { fontSize:12, color:colors.textSecondary },
+  inputWrapper:       { position:'relative' },
+  textArea:           { height:100, textAlignVertical:'top' },
+  section:            { marginBottom:16 },
+  pickerWrap:         { borderWidth:1, borderColor:colors.border, borderRadius:12, overflow:'hidden' },
+  chipsRow:           { flexDirection:'row', flexWrap:'wrap', gap:8, marginBottom:8 },
+  chip:               { backgroundColor:colors.bgSecondary, borderRadius:16, paddingHorizontal:10, paddingVertical:6 },
+  chipText:           { fontSize:12, color:colors.textPrimary, fontWeight:'600' },
+  // ── Legacy compat (unused but kept for safety) ────────────────────────────
+  keyboardAvoid:  { flex:1 },
+  safeArea:       { flex:1 },
+  flex:           { flex:1 },
+  header:         { padding:16, paddingBottom:0 },
+  headerTitle:    { fontSize:28, fontWeight:'bold', marginBottom:4, color:colors.textPrimary },
+  headerSubtitle: { fontSize:16, color:colors.textSecondary },
+  scrollArea:     { flex:1 },
+  scrollContent:  { padding:16, paddingBottom:40 },
+  card:           { backgroundColor:colors.bgCard, borderRadius:18, padding:18, marginBottom:14, borderWidth:1, borderColor:colors.border },
+  cardHeader:     { flexDirection:'row', alignItems:'center', gap:10, marginBottom:16 },
+  routeContainer: { flexDirection:'row', gap:14 },
+  routeLineCol:   { width:20, alignItems:'center', paddingTop:28, paddingBottom:28 },
+  routeDot:       { width:12, height:12, borderRadius:6 },
+  routeLine:      { width:2, flex:1, marginVertical:4 },
+  routeInputCol:  { flex:1 },
+  routeInputWrap: { marginBottom:2 },
+  quickActions:   { flexDirection:'row', gap:10, marginTop:8 },
+  infoStripDivider:{ width:1, height:36, marginHorizontal:8 },
+  infoStripValue: { fontSize:17, fontWeight:'800', color:colors.textPrimary },
+  scheduleRow:    { flexDirection:'row', gap:12 },
+  scheduleInput:  { flex:1, flexDirection:'row', alignItems:'center', backgroundColor:colors.bgSecondary, borderRadius:12, padding:14, gap:12, borderWidth:1, borderColor:colors.border },
+  scheduleTextWrap:{ flex:1 },
+  seatsRow:       { flexDirection:'row', gap:12, marginBottom:4 },
+  seatOption:     { flex:1, flexDirection:'row', alignItems:'center', gap:10, paddingVertical:14, paddingHorizontal:16, borderRadius:12, borderWidth:1.5, borderColor:colors.border, backgroundColor:colors.bgSecondary },
+  seatOptionActive:{ borderWidth:2 },
+  seatOptionText: { fontSize:15, fontWeight:'600', color:colors.textSecondary },
+  fieldLabel:     { fontSize:14, fontWeight:'600', color:colors.textSecondary, marginBottom:10 },
+  priceHint:      { marginTop:8, fontSize:12, fontWeight:'500', color:colors.textSecondary },
+  optionalBadge:  { fontSize:11, fontWeight:'600', color:colors.textSecondary, backgroundColor:colors.bgSecondary, paddingHorizontal:8, paddingVertical:3, borderRadius:6, overflow:'hidden' },
+  submitBtn:      { flexDirection:'row', alignItems:'center', justifyContent:'center', borderRadius:16, paddingVertical:18, marginTop:4 },
+  submitBtnDisabled:{ opacity:0.5 },
+  submitBtnText:  { color:colors.textInverse, fontSize:18, fontWeight:'700', letterSpacing:0.3 },
+  bannerInfo:     { marginTop:8, paddingVertical:8, paddingHorizontal:12, borderRadius:10, backgroundColor:colors.greenDim, borderWidth:1, borderColor:colors.greenBorder },
+  bannerInfoText: { color:colors.green, fontSize:12, fontWeight:'600' },
+  pricePrefix:    { paddingHorizontal:16, paddingVertical:14, justifyContent:'center', alignItems:'center' },
+  pricePrefixText:{ fontSize:20, fontWeight:'800' },
+  mapLoadingOverlay: { ...StyleSheet.absoluteFillObject, alignItems:'center', justifyContent:'center', backgroundColor:`${colors.bg}99` },
+  mapPinWrap: { width:30, height:30, borderRadius:15, alignItems:'center', justifyContent:'center', backgroundColor:colors.bgCard, borderWidth:2, borderColor:colors.bgCard, shadowColor:'#000', shadowOpacity:0.18, shadowRadius:8, shadowOffset:{width:0,height:4}, elevation:5 },
+  mapPin: { width:14, height:14, borderRadius:7 },
+  }), [colors]);
+  const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ pickup?: string; dropoff?: string; date?: string; time?: string }>();
+  const paramText = (value?: string | string[]) => Array.isArray(value) ? value[0] || '' : value || '';
+  const [date, setDate] = useState(() => paramText(params.date));
+  const [time, setTime] = useState(() => paramText(params.time));
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
     if (!date) return new Date();
@@ -418,15 +774,22 @@ export default function BookScreen() {
     return new Date();
   });
   const [timeOpen, setTimeOpen] = useState(false);
-  const [pickupLocation, setPickupLocation] = useState('');
-  const [dropoffLocation, setDropoffLocation] = useState('');
+  const [pickupLocation, setPickupLocation] = useState(() => paramText(params.pickup));
+  const [dropoffLocation, setDropoffLocation] = useState(() => paramText(params.dropoff));
   const [contribution, setContribution] = useState('');
+  const [priceEdited, setPriceEdited] = useState(false);
   // seats limited to 1 or 2
   const [seats, setSeats] = useState<1 | 2>(1);
   const [maxPrice, setMaxPrice] = useState<number>(0);
   const [showCapBanner, setShowCapBanner] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
+  const [eventName, setEventName] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const listRef = useRef<FlatList>(null);
+  // Recurring ride state
+  const [isRecurring, setIsRecurring] = useState(false);
+  const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+  const [recurringDays, setRecurringDays] = useState<number[]>([]);
   const [showDateSug, setShowDateSug] = useState(false);
   const [showTimeSug, setShowTimeSug] = useState(false);
   const [locLoading, setLocLoading] = useState(false);
@@ -437,7 +800,29 @@ export default function BookScreen() {
   const [calcLoading, setCalcLoading] = useState<boolean>(false);
   const [distanceMiles, setDistanceMiles] = useState<number | null>(null);
   const [durationMinutes, setDurationMinutes] = useState<number | null>(null);
-  const [seatsOpen, setSeatsOpen] = useState(false);
+
+  const incomingPickup = paramText(params.pickup);
+  const incomingDropoff = paramText(params.dropoff);
+  const incomingDate = paramText(params.date);
+  const incomingTime = paramText(params.time);
+
+  useEffect(() => {
+    if (incomingPickup || incomingDropoff) {
+      setPickupCoords(null);
+      setDropoffCoords(null);
+      setDistanceText('--');
+      setDurationText('--');
+      setDistanceMiles(null);
+      setDurationMinutes(null);
+      setContribution('');
+      setPriceEdited(false);
+    }
+
+    setPickupLocation(incomingPickup);
+    setDropoffLocation(incomingDropoff);
+    setDate(incomingDate);
+    setTime(incomingTime);
+  }, [incomingPickup, incomingDropoff, incomingDate, incomingTime]);
 
   const to24h = (t: string): string => {
     // Convert 'h:mm AM/PM' or 'h:mmAM' to 'HH:mm'
@@ -450,7 +835,6 @@ export default function BookScreen() {
       if (ampm === 'pm' && h < 12) h += 12;
       if (ampm === 'am' && h === 12) h = 0;
       const result = `${pad2(h)}:${pad2(mm)}`;
-      console.log(`[to24h] Converted "${t}" to "${result}"`);
       return result;
     }
     // If already 24h 'HH:mm'
@@ -460,7 +844,6 @@ export default function BookScreen() {
       const mm = Math.max(0, Math.min(59, parseInt(m2[2], 10)));
       return `${pad2(h)}:${pad2(mm)}`;
     }
-    console.log(`[to24h] No match for "${t}", returning as-is`);
     return t; // fallback
   };
 
@@ -469,14 +852,9 @@ export default function BookScreen() {
       if (!d && !t) return null;
       if (d && t) {
         const t24 = /am|pm/i.test(t) ? to24h(t) : t;
-        console.log(`[toRequestedDate] date="${d}", time="${t}", t24="${t24}"`);
-        // Parse date components to avoid timezone issues
         const [year, month, day] = d.split('-').map(n => parseInt(n, 10));
         const [hours, minutes] = t24.split(':').map(n => parseInt(n, 10));
-        console.log(`[toRequestedDate] Parsed: year=${year}, month=${month}, day=${day}, hours=${hours}, minutes=${minutes}`);
-        // Use local timezone explicitly to avoid UTC conversion
         const dt = new Date(year, month - 1, day, hours, minutes || 0);
-        console.log(`[toRequestedDate] Created Date: ${dt.toString()}`);
         return isNaN(dt.getTime()) ? null : dt;
       }
       if (d) {
@@ -503,20 +881,27 @@ export default function BookScreen() {
         return;
       }
 
-      // Check student verification status before allowing post
-      // Only block if BOTH not verified AND past deadline (matching server logic)
+      // Check student verification status before allowing post.
+      // Check both drivers and riders docs — a driver upgraded from a rider-only
+      // account may only have verification on the riders side, and vice versa.
       try {
-        const userDoc = await getDoc(doc(firestore, 'drivers', user.uid));
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          const isVerified = data?.isVerified === true;
-          const verificationDeadline = data?.verificationDeadline;
-          const isPastDeadline = verificationDeadline 
-            ? new Date() > (typeof verificationDeadline?.toDate === 'function' ? verificationDeadline.toDate() : new Date(verificationDeadline))
-            : false;
-          
-          // Only block if not verified AND past deadline
-          if (!isVerified && isPastDeadline) {
+        const [driverDoc, riderDoc] = await Promise.all([
+          getDoc(doc(firestore, 'drivers', user.uid)),
+          getDoc(doc(firestore, 'riders', user.uid)),
+        ]);
+        const driverData = driverDoc.exists() ? driverDoc.data() : null;
+        const riderData  = riderDoc.exists()  ? riderDoc.data()  : null;
+        const isVerified =
+          driverData?.isVerified === true ||
+          riderData?.isVerified  === true ||
+          ['approved','auto-approved'].includes(String(driverData?.verificationStatus||'').toLowerCase()) ||
+          ['approved','auto-approved'].includes(String(riderData?.verificationStatus||'').toLowerCase());
+        const verificationDeadline = driverData?.verificationDeadline ?? riderData?.verificationDeadline;
+        const isPastDeadline = verificationDeadline
+          ? new Date() > (typeof verificationDeadline?.toDate === 'function' ? verificationDeadline.toDate() : new Date(verificationDeadline))
+          : false;
+
+        if (!isVerified && isPastDeadline) {
             Alert.alert(
               'Verification Deadline Passed',
               'Your verification deadline has passed. Please verify your student status immediately to post rides.',
@@ -542,7 +927,6 @@ export default function BookScreen() {
             );
             return;
           }
-        }
       } catch (e) {
         console.warn('verification check error', e);
       }
@@ -552,8 +936,55 @@ export default function BookScreen() {
         Alert.alert('Missing info', 'Please enter both pickup and dropoff locations.');
         return;
       }
+      if (isRecurring && recurringDays.length === 0) {
+        Alert.alert('Select days', 'Please select at least one day of the week for the recurring schedule.');
+        return;
+      }
+      if (!isRecurring && !date.trim()) {
+        Alert.alert('Missing date', 'Please select a date for this ride.');
+        return;
+      }
 
       setSubmitting(true);
+
+      let submitPickupCoords = pickupCoords;
+      let submitDropoffCoords = dropoffCoords;
+
+      if (!submitPickupCoords) {
+        submitPickupCoords = await geocodeAddress(pickupLocation);
+        if (submitPickupCoords) setPickupCoords(submitPickupCoords);
+      }
+
+      if (!submitDropoffCoords) {
+        submitDropoffCoords = await geocodeAddress(dropoffLocation);
+        if (submitDropoffCoords) setDropoffCoords(submitDropoffCoords);
+      }
+
+      if (!submitPickupCoords || !submitDropoffCoords) {
+        Alert.alert(
+          'Select locations',
+          'Please choose pickup and dropoff from the suggestions so we can place your ride on the map.'
+        );
+        return;
+      }
+
+      let submitDistanceMiles = distanceMiles;
+      let submitDurationMinutes = durationMinutes;
+      let submitDistanceText = distanceText;
+      let submitDurationText = durationText;
+      if (submitDistanceMiles == null || submitDurationMinutes == null) {
+        const metrics = await fetchRouteMetricsForCoords(submitPickupCoords, submitDropoffCoords);
+        if (metrics) {
+          submitDistanceMiles = metrics.distanceMiles;
+          submitDurationMinutes = metrics.durationMinutes;
+          submitDistanceText = metrics.distanceText || '--';
+          submitDurationText = metrics.durationText || '--';
+          setDistanceMiles(metrics.distanceMiles);
+          setDurationMinutes(metrics.durationMinutes);
+          setDistanceText(metrics.distanceText || '--');
+          setDurationText(metrics.durationText || '--');
+        }
+      }
 
       // Parse contribution (price per seat)
       const priceNum = (() => {
@@ -561,10 +992,13 @@ export default function BookScreen() {
         return isNaN(n) ? null : n;
       })();
 
-  // Seats already constrained to 1 or 2
-  const seatsNum: 1 | 2 = seats >= 2 ? 2 : 1;
+      // Seats already constrained to 1 or 2
+      const seatsNum: 1 | 2 = seats >= 2 ? 2 : 1;
 
-      if (priceNum == null || priceNum <= 0) {
+      const dist = typeof submitDistanceMiles === 'number' ? submitDistanceMiles : 0;
+      const fallbackDriverPrice = computeDriverMaxPrice(dist, seatsNum);
+      const resolvedPriceNum = priceNum && priceNum > 0 ? priceNum : fallbackDriverPrice;
+      if (!resolvedPriceNum || resolvedPriceNum <= 0) {
         Alert.alert('Invalid price', 'Please enter a valid price per seat.');
         return;
       }
@@ -574,15 +1008,18 @@ export default function BookScreen() {
         return;
       }
 
-      // Enforce max price cap based on distance & seats
-      const dist = typeof distanceMiles === 'number' ? distanceMiles : 0;
-      const cap = computeMaxPrice(dist, seatsNum);
-      if (priceNum > cap) {
-        Alert.alert('Price exceeds maximum', `The maximum for ${seatsNum} seat(s) is $${cap.toFixed(2)} based on ${dist ? dist.toFixed(1) : '--'} mi.`);
+      // Enforce min/max price bounds based on distance & seats
+      const floor = computeRiderSuggestedPrice(dist, seatsNum);
+      if (floor > 0 && resolvedPriceNum < floor) {
+        Alert.alert('Price below minimum', `The minimum for ${seatsNum} seat(s) is $${floor.toFixed(2)} based on ${dist ? dist.toFixed(1) : '--'} mi.`);
         return;
       }
 
-  // No maximum cap enforcement; only suggest minimum.
+      const cap = computeMaxPrice(dist, seatsNum);
+      if (cap > 0 && resolvedPriceNum > cap) {
+        Alert.alert('Price exceeds maximum', `The maximum for ${seatsNum} seat(s) is $${cap.toFixed(2)} based on ${dist ? dist.toFixed(1) : '--'} mi.`);
+        return;
+      }
 
       const requestedTime = toRequestedDate(date || undefined, time || undefined);
 
@@ -597,28 +1034,56 @@ export default function BookScreen() {
         dropoff: dropoffLocation || null,
         pickupAddress: pickupLocation || null,
         dropoffAddress: dropoffLocation || null,
-        pickupCoords: pickupCoords || null,
-        dropoffCoords: dropoffCoords || null,
+
+        pickupGeo: submitPickupCoords
+          ? {
+              address: pickupLocation || null,
+              latitude: submitPickupCoords.lat,
+              longitude: submitPickupCoords.lng,
+              lat: submitPickupCoords.lat,
+              lng: submitPickupCoords.lng,
+            }
+          : null,
+
+        dropoffGeo: submitDropoffCoords
+          ? {
+              address: dropoffLocation || null,
+              latitude: submitDropoffCoords.lat,
+              longitude: submitDropoffCoords.lng,
+              lat: submitDropoffCoords.lat,
+              lng: submitDropoffCoords.lng,
+            }
+          : null,
+
+        pickupCoords: submitPickupCoords || null,
+        dropoffCoords: submitDropoffCoords || null,
+        pickupLat: submitPickupCoords?.lat ?? null,
+        pickupLng: submitPickupCoords?.lng ?? null,
+        dropoffLat: submitDropoffCoords?.lat ?? null,
+        dropoffLng: submitDropoffCoords?.lng ?? null,
         date: date || null,
         time: time || null,
         departureTime: requestedTime || null,
-  availableSeats: seatsNum,
-        pricePerSeat: priceNum,
+        availableSeats: seatsNum,
+        pricePerSeat: resolvedPriceNum,
         postType: 'ride_offer',
         // Legacy fallbacks some lists use
-        contributionAmount: priceNum,
-  estimatedFare: null,
+        contributionAmount: resolvedPriceNum,
+        estimatedFare: null,
         notes: notes || null,
+        eventName: eventName.trim() || null,
+        rideVibe: selectedVibes,
+        preferences: selectedVibes,
         // Include distance/duration details if available
-        distance: (distanceText || distanceMiles != null) ? {
-          text: distanceText || null,
-          miles: distanceMiles != null ? Number(distanceMiles.toFixed(3)) : null,
-          meters: distanceMiles != null ? Math.round(distanceMiles * 1609.34) : null,
+        distance: (submitDistanceText || submitDistanceMiles != null) ? {
+          text: submitDistanceText || null,
+          miles: submitDistanceMiles != null ? Number(submitDistanceMiles.toFixed(3)) : null,
+          meters: submitDistanceMiles != null ? Math.round(submitDistanceMiles * 1609.34) : null,
         } : null,
-        duration: (durationText || durationMinutes != null) ? {
-          text: durationText || null,
-          minutes: durationMinutes != null ? Number(durationMinutes.toFixed(3)) : null,
-          seconds: durationMinutes != null ? Math.round((durationMinutes || 0) * 60) : null,
+        duration: (submitDurationText || submitDurationMinutes != null) ? {
+          text: submitDurationText || null,
+          minutes: submitDurationMinutes != null ? Number(submitDurationMinutes.toFixed(3)) : null,
+          seconds: submitDurationMinutes != null ? Math.round((submitDurationMinutes || 0) * 60) : null,
         } : null,
         status: 'active',
         createdAt: serverTimestamp(),
@@ -631,11 +1096,37 @@ export default function BookScreen() {
         if (payload[k] === undefined) payload[k] = null;
       });
 
-      // Call backend API to create ride posting and trigger preferred route notifications
+      // Call backend API
       const apiUrl = getApiBaseUrl();
-      console.log('Creating ride posting via API:', `${apiUrl}/api/ride-postings`);
-      
       try {
+        // Recurring schedule path
+        if (isRecurring) {
+          const token = await firebaseAuth.currentUser?.getIdToken();
+          const schedulePayload = {
+            from: pickupLocation,
+            to: dropoffLocation,
+            fromCoords: submitPickupCoords,
+            toCoords: submitDropoffCoords,
+            departureTime: time ? to24h(time) : '09:00',
+            daysOfWeek: recurringDays,
+            seats: seatsNum,
+            pricePerSeat: resolvedPriceNum,
+            notes: notes.trim() || null,
+            eventName: eventName.trim() || null,
+            vehicleInfo: payload.vehicleInfo || null,
+          };
+          const scheduleRes = await fetch(`${apiUrl}/api/ride-schedules`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+            body: JSON.stringify(schedulePayload),
+          });
+          const scheduleResult = await scheduleRes.json();
+          if (!scheduleRes.ok) throw new Error(scheduleResult.error || 'Failed to create recurring schedule');
+          Alert.alert('Recurring ride scheduled!', `Your ride will repeat on selected days. ${scheduleResult.instancesCreated} upcoming rides have been posted.`, [{ text: 'OK', onPress: () => router.replace('/(driver)' as any) }]);
+          return;
+        }
+
+        // One-time posting path
         const response = await fetch(`${apiUrl}/api/ride-postings`, {
           method: 'POST',
           headers: {
@@ -650,7 +1141,6 @@ export default function BookScreen() {
           throw new Error(result.message || result.error || 'Failed to create ride posting');
         }
 
-        console.log('âœ… Ride posting created with preferred route notifications:', result);
 
         // Send ride posted email
         try {
@@ -664,7 +1154,7 @@ export default function BookScreen() {
                 dropoff: dropoffLocation,
                 date: date,
                 time: time,
-                price: contribution,
+                price: String(resolvedPriceNum),
               }
             );
           }
@@ -678,78 +1168,16 @@ export default function BookScreen() {
         setPickupLocation('');
         setDropoffLocation('');
         setContribution('');
+        setPriceEdited(false);
         setSeats(1);
         setNotes('');
+        setEventName('');
 
         Alert.alert('Ride Posted!', 'Your ride is now visible to riders.');
-        router.push('/driver');
+        router.replace('/(driver)' as any);
       } catch (apiError: any) {
         console.error('Ride posting API error:', apiError);
-        
-        // Fallback: Create directly in Firestore if API fails
-        console.log('Attempting fallback: Creating ride posting directly in Firestore');
-        const fallbackRef = await addDoc(collection(firestore, 'ridePostings'), payload);
-        const fallbackRideId = fallbackRef.id;
-
-        // Auto-save preferred route (fallback path)
-        try {
-          const pickup = (pickupLocation || '').trim().toLowerCase().replace(/\s+/g, ' ');
-          const dropoff = (dropoffLocation || '').trim().toLowerCase().replace(/\s+/g, ' ');
-          if (pickup && dropoff) {
-            const routeQuery = query(
-              collection(firestore, 'preferredRoutes'),
-              where('userId', '==', user.uid),
-              where('origin', '==', pickup),
-              where('destination', '==', dropoff)
-            );
-            const routeSnap = await getDocs(routeQuery);
-            if (routeSnap.empty) {
-              await addDoc(collection(firestore, 'preferredRoutes'), {
-                userId: user.uid,
-                userType: 'driver',
-                origin: pickup,
-                destination: dropoff,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-              });
-              console.log('Auto-saved preferred route for driver (fallback)');
-            }
-          }
-        } catch (routeErr) {
-          console.warn('Failed to auto-save preferred route:', routeErr);
-        }
-
-        // Send ride posted email (fallback path)
-        try {
-          const user = firebaseAuth.currentUser;
-          if (user && user.email) {
-            await EmailTriggerService.sendRidePostedEmail(
-              user.email,
-              user.displayName || 'Driver',
-              {
-                pickup: pickupLocation,
-                dropoff: dropoffLocation,
-                date: date,
-                time: time,
-                price: contribution,
-              }
-            );
-          }
-        } catch (emailErr) {
-          console.warn('[postRide] Email send error:', emailErr);
-        }
-
-        // Clear the form
-        setDate('');
-        setTime('');
-        setPickupLocation('');
-        setDropoffLocation('');
-        setContribution('');
-        setSeats(1);
-        setNotes('');
-
-        Alert.alert('Ride Posted!', 'Your ride is now visible to riders.');
-        router.push('/driver');
+        throw apiError;
       }
     } catch (e) {
   console.warn('ride posting submit error', e);
@@ -770,26 +1198,76 @@ export default function BookScreen() {
   setDropoffCoords(prevPickupCoords || null);
   };
 
-  const useCurrentLocation = async () => {
+  const applyCurrentLocation = async (opts?: { silent?: boolean }) => {
+    const silent = !!opts?.silent;
     try {
       setLocLoading(true);
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission required', 'Location permission is needed to use your current location.');
+        if (!silent) {
+          Alert.alert('Permission required', 'Location permission is needed to use your current location.');
+        }
         return;
       }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const pos =
+        (await Location.getLastKnownPositionAsync()) ||
+        (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+      if (!pos) return;
       const results = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
   const r = results?.[0];
   const address = r ? [r.name, r.street, r.city, r.region].filter(Boolean).join(', ') : 'Current location';
   setPickupLocation(address);
   setPickupCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
     } catch (e) {
-      Alert.alert('Location error', 'Could not get your location. Please try again.');
+      if (!silent) {
+        Alert.alert('Location error', 'Could not get your location. Please try again.');
+      }
     } finally {
       setLocLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (pickupLocation.trim()) return;
+    applyCurrentLocation({ silent: true });
+  }, [pickupLocation]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const pickupText = pickupLocation.trim();
+      const dropoffText = dropoffLocation.trim();
+      if (!pickupText || !dropoffText) {
+        setDistanceText('--');
+        setDurationText('--');
+        setDistanceMiles(null);
+        setDurationMinutes(null);
+        return;
+      }
+      if (pickupCoords && dropoffCoords) return;
+
+      setCalcLoading(true);
+      const [nextPickupCoords, nextDropoffCoords] = await Promise.all([
+        pickupCoords ? Promise.resolve(pickupCoords) : geocodeAddress(pickupText),
+        dropoffCoords ? Promise.resolve(dropoffCoords) : geocodeAddress(dropoffText),
+      ]);
+      if (cancelled) return;
+      if (nextPickupCoords) setPickupCoords(nextPickupCoords);
+      if (nextDropoffCoords) setDropoffCoords(nextDropoffCoords);
+      if (!nextPickupCoords || !nextDropoffCoords) {
+        setDistanceText('--');
+        setDurationText('--');
+        setDistanceMiles(null);
+        setDurationMinutes(null);
+        setCalcLoading(false);
+      }
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [pickupLocation, dropoffLocation, pickupCoords, dropoffCoords]);
 
   // Distance/Duration calculation using Google Distance Matrix API
   useEffect(() => {
@@ -826,6 +1304,8 @@ export default function BookScreen() {
       } catch {
         setDistanceText('--');
         setDurationText('--');
+        setDistanceMiles(null);
+        setDurationMinutes(null);
       } finally {
         setCalcLoading(false);
       }
@@ -843,12 +1323,15 @@ export default function BookScreen() {
     setMaxPrice(cap);
     // Clamp price if above cap
     const priceNum = Number(String(contribution).replace(/[^0-9.\-]/g, ''));
-    if (!isNaN(priceNum) && priceNum > cap) {
+    if (!isNaN(priceNum) && cap > 0 && priceNum > cap) {
       setContribution(cap.toFixed(2));
+      setPriceEdited(false);
       setShowCapBanner(`Price capped at $${cap.toFixed(2)} for ${s} seat(s).`);
       setTimeout(() => setShowCapBanner(null), 2500);
+    } else if (!priceEdited && cap > 0) {
+      setContribution(cap.toFixed(2));
     }
-  }, [seats, distanceMiles]);
+  }, [seats, distanceMiles, contribution, priceEdited]);
 
   // Clamp on contribution changes (prevent above max)
   useEffect(() => {
@@ -865,948 +1348,267 @@ export default function BookScreen() {
     Number(contribution) > 0 && seats > 0 &&
     !(maxPrice > 0 && Number(contribution) > maxPrice);
 
+  const [selectedVibes] = useState<string[]>([]);
+
+  // ── Smart pricing computed ────────────────────────────────────────────────
+  const priceNum = Number(String(contribution).replace(/[^0-9.]/g, '')) || 0;
+  const totalEarnings = priceNum > 0 ? (priceNum * seats).toFixed(2) : null;
+  const uberEstimate = distanceMiles && distanceMiles > 0
+    ? (distanceMiles * 2.1 + 2.5).toFixed(2) : null;
+  const riderSavings = uberEstimate && priceNum > 0
+    ? Math.max(0, Number(uberEstimate) - priceNum).toFixed(2) : null;
+  const routeIsReady = !!(pickupLocation && dropoffLocation && pickupCoords && dropoffCoords);
+  const suggestedText = distanceMiles && distanceMiles > 0
+    ? formatContributionRange(distanceMiles, seats)
+    : 'Select route to estimate';
+
+
   return (
     <KeyboardAvoidingView
-      style={styles.keyboardAvoid}
+      style={[styles.root, { backgroundColor: colors.bg }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
     >
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-        <SafeAreaView style={styles.safeArea} edges={['top']}>
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={[styles.headerTitle, { color: theme.colors.secondary }]}>
-              Offer a Ride
-            </Text>
-            <Text style={styles.headerSubtitle}>
-              Share your route, earn along the way
-            </Text>
-          </View>
+      <StatusBar barStyle={colors.statusBar} />
+
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
 
           <FlatList
-            style={styles.scrollArea}
-            contentContainerStyle={styles.scrollContent}
+            ref={listRef}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingBottom: 88 + insets.bottom }}
             data={[0]}
             ListHeaderComponent={(
               <View>
-
-        {/* â”€â”€ Route Card â”€â”€ */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Route size={18} color={theme.colors.primary} />
-            <Text style={[styles.cardTitle, { color: theme.colors.secondary }]}>Your Route</Text>
-          </View>
-
-          {/* Route visualization with connector line */}
-          <View style={styles.routeContainer}>
-            {/* Vertical connector */}
-            <View style={styles.routeLineCol}>
-              <View style={[styles.routeDot, { backgroundColor: theme.colors.primary }]} />
-              <View style={[styles.routeLine, { backgroundColor: theme.colors.primary + '30' }]} />
-              <View style={[styles.routeDot, { backgroundColor: '#94A3B8' }]} />
-            </View>
-
-            {/* Inputs */}
-            <View style={styles.routeInputCol}>
-              <View style={styles.routeInputWrap}>
-                <AddressAutocomplete
-                  label="Pickup"
-                  placeholder="Starting point"
-                  value={pickupLocation}
-                  apiKey={GOOGLE_MAPS_API_KEY}
-                  onChangeText={(t) => { setPickupLocation(t); setPickupCoords(null); }}
-                  onSelected={({ address, coords }) => { setPickupLocation(address); setPickupCoords(coords); }}
-                  zIndex={60}
-                />
-              </View>
-              <View style={styles.routeInputWrap}>
-                <AddressAutocomplete
-                  label="Dropoff"
-                  placeholder="Destination"
-                  value={dropoffLocation}
-                  apiKey={GOOGLE_MAPS_API_KEY}
-                  onChangeText={(t) => { setDropoffLocation(t); setDropoffCoords(null); }}
-                  onSelected={({ address, coords }) => { setDropoffLocation(address); setDropoffCoords(coords); }}
-                  zIndex={50}
-                />
-              </View>
-            </View>
-          </View>
-
-          {/* Quick actions row */}
-          <View style={styles.quickActions}>
-            <TouchableOpacity
-              style={[styles.quickBtn, { borderColor: theme.colors.primary + '30' }]}
-              onPress={useCurrentLocation}
-              disabled={locLoading}
-            >
-              {locLoading ? (
-                <ActivityIndicator size="small" color={theme.colors.primary} />
-              ) : (
-                <LocateFixed size={16} color={theme.colors.primary} />
-              )}
-              <Text style={[styles.quickBtnText, { color: theme.colors.primary }]}>
-                {locLoading ? 'Locatingâ€¦' : 'Current Location'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.quickBtn, { borderColor: '#94A3B830' }]}
-              onPress={swapLocations}
-            >
-              <ArrowUpDown size={16} color="#64748B" />
-              <Text style={[styles.quickBtnText, { color: '#64748B' }]}>Swap</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Distance / Duration info strip */}
-          {(pickupCoords && dropoffCoords) && (
-            <View style={styles.infoStrip}>
-              <View style={styles.infoStripItem}>
-                <Ruler size={15} color={theme.colors.primary} />
-                <Text style={styles.infoStripLabel}>Distance</Text>
-                <Text style={[styles.infoStripValue, { color: theme.colors.secondary }]}>
-                  {calcLoading ? 'â€¦' : distanceText}
-                </Text>
-              </View>
-              <View style={[styles.infoStripDivider, { backgroundColor: '#E2E8F0' }]} />
-              <View style={styles.infoStripItem}>
-                <Timer size={15} color={theme.colors.primary} />
-                <Text style={styles.infoStripLabel}>Duration</Text>
-                <Text style={[styles.infoStripValue, { color: theme.colors.secondary }]}>
-                  {calcLoading ? 'â€¦' : durationText}
-                </Text>
-              </View>
-            </View>
-          )}
-        </View>
-
-        {/* â”€â”€ Schedule Card â”€â”€ */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Calendar size={18} color={theme.colors.primary} />
-            <Text style={[styles.cardTitle, { color: theme.colors.secondary }]}>Schedule</Text>
-          </View>
-
-          <View style={styles.scheduleRow}>
-            <TouchableOpacity
-              style={styles.scheduleInput}
-              onPress={() => { Keyboard.dismiss(); setCalendarOpen(true); }}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.scheduleIconWrap, { backgroundColor: '#EEF2FF' }]}>
-                <Calendar size={18} color="#6366F1" />
-              </View>
-              <View style={styles.scheduleTextWrap}>
-                <Text style={styles.scheduleLabel}>Date</Text>
-                <Text style={[styles.scheduleValue, !date && styles.schedulePlaceholder]}>
-                  {date || 'Select date'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.scheduleInput}
-              onPress={() => { Keyboard.dismiss(); setTimeOpen(true); }}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.scheduleIconWrap, { backgroundColor: '#FFF7ED' }]}>
-                <Clock size={18} color={theme.colors.primary} />
-              </View>
-              <View style={styles.scheduleTextWrap}>
-                <Text style={styles.scheduleLabel}>Time</Text>
-                <Text style={[styles.scheduleValue, !time && styles.schedulePlaceholder]}>
-                  {time || 'Select time'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-
-          <CalendarModal
-            visible={calendarOpen}
-            month={calendarMonth}
-            selectedDate={date}
-            primaryColor={theme.colors.primary}
-            secondaryColor={theme.colors.secondary}
-            onClose={() => setCalendarOpen(false)}
-            onSelect={(ds) => { setDate(ds); setCalendarOpen(false); setCalendarMonth(new Date(ds)); }}
-          />
-          <TimeModal
-            visible={timeOpen}
-            initialTime={time}
-            primaryColor={theme.colors.primary}
-            secondaryColor={theme.colors.secondary}
-            onClose={() => setTimeOpen(false)}
-            onSelect={(ts) => { setTime(ts); setTimeOpen(false); }}
-          />
-        </View>
-
-        {/* â”€â”€ Seats & Price Card â”€â”€ */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <DollarSign size={18} color={theme.colors.primary} />
-            <Text style={[styles.cardTitle, { color: theme.colors.secondary }]}>Seats & Price</Text>
-          </View>
-
-          {/* Seats selector */}
-          <Text style={styles.fieldLabel}>Available seats</Text>
-          <View style={styles.seatsRow}>
-            {([1, 2] as const).map((s) => (
-              <TouchableOpacity
-                key={s}
-                style={[
-                  styles.seatOption,
-                  seats === s && [styles.seatOptionActive, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primary + '08' }],
-                ]}
-                onPress={() => setSeats(s)}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.seatIconWrap, seats === s ? { backgroundColor: theme.colors.primary + '15' } : { backgroundColor: '#F1F5F9' }]}>
-                  <Users size={18} color={seats === s ? theme.colors.primary : '#94A3B8'} />
+                <View style={styles.pageIntro}>
+                  <Text style={styles.pageTitle}>Post a ride</Text>
                 </View>
-                <Text style={[styles.seatOptionText, seats === s && { color: theme.colors.primary, fontWeight: '800' }]}>
-                  {s} Seat{s === 1 ? '' : 's'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
 
-          <SeatsModal
-            visible={seatsOpen}
-            selected={seats}
-            primaryColor={theme.colors.primary}
-            onClose={() => setSeatsOpen(false)}
-            onSelect={(s) => setSeats(s)}
-          />
+                <View style={styles.formCard}>
+                  <View style={styles.routeMiniRow}>
+                    <View style={styles.routeDots}>
+                      <View style={[styles.routeMiniDot, { backgroundColor: colors.textPrimary }]} />
+                      <View style={styles.routeMiniLine} />
+                      <Text style={styles.stopPlus}>+</Text>
+                      <View style={styles.routeMiniLine} />
+                      <View style={[styles.routeMiniDot, { backgroundColor: colors.primary }]} />
+                    </View>
 
-          {/* Price per seat */}
-          <Text style={[styles.fieldLabel, { marginTop: 18 }]}>Price per seat</Text>
-          <View style={styles.priceInputRow}>
-            <View style={[styles.pricePrefix, { backgroundColor: theme.colors.primary + '10' }]}>
-              <Text style={[styles.pricePrefixText, { color: theme.colors.primary }]}>$</Text>
-            </View>
-            <TextInput
-              style={styles.priceInput}
-              placeholderTextColor="#9CA3AF"
-              placeholder="0.00"
-              value={contribution}
-              onChangeText={(t) => {
-                const cleaned = t.replace(/[^0-9.]/g, '');
-                const parts = cleaned.split('.');
-                let normalized = parts.shift() || '';
-                if (parts.length > 0) normalized += '.' + parts.join('');
-                setContribution(normalized);
-              }}
-              keyboardType="numeric"
-              onBlur={() => {
-                const priceNum = Number(String(contribution).replace(/[^0-9.\-]/g, ''));
-                const cap = maxPrice || 0;
-                if (!isNaN(priceNum) && cap > 0 && priceNum > cap) {
-                  setContribution(cap.toFixed(2));
-                  setShowCapBanner(`Price capped at $${cap.toFixed(2)}.`);
-                  setTimeout(() => setShowCapBanner(null), 2200);
-                }
-              }}
-            />
-          </View>
-          <Text style={styles.priceHint}>
-            Max for {seats} seat(s): ${maxPrice.toFixed(2)} (based on {typeof distanceMiles === 'number' ? `${distanceMiles.toFixed(1)} mi` : '--'})
-          </Text>
-          {showCapBanner ? (
-            <View style={styles.bannerInfo}>
-              <Text style={styles.bannerInfoText}>{showCapBanner}</Text>
-            </View>
-          ) : null}
-        </View>
+                    <View style={styles.routeFields}>
+                      <AddressAutocomplete
+                        label=""
+                        placeholder="Austin, TX"
+                        value={pickupLocation}
+                        onChangeText={(t) => {
+                          setPickupLocation(t);
+                          setPickupCoords(null);
+                        }}
+                        onSelected={({ address, coords }) => {
+                          setPickupLocation(address);
+                          setPickupCoords(coords);
+                        }}
+                        apiKey={GOOGLE_MAPS_API_KEY}
+                        zIndex={60}
+                      />
 
-        {/* â”€â”€ Notes Card â”€â”€ */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <FileText size={18} color={theme.colors.primary} />
-            <Text style={[styles.cardTitle, { color: theme.colors.secondary }]}>Notes</Text>
-            <Text style={styles.optionalBadge}>Optional</Text>
-          </View>
-          <TextInput
-            style={styles.notesInput}
-            placeholder="Music preferences, pet-friendly, trunk spaceâ€¦"
-            placeholderTextColor="#9CA3AF"
-            value={notes}
-            onChangeText={setNotes}
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-          />
-        </View>
+                      <Text style={styles.addStopText}>+ stop</Text>
 
-        {/* â”€â”€ Submit Button â”€â”€ */}
-        <TouchableOpacity
-          style={[
-            styles.submitBtn,
-            { backgroundColor: theme.colors.primary },
-            (!isFormValid || submitting) && styles.submitBtnDisabled,
-          ]}
-          onPress={handleSubmit}
-          disabled={submitting || !isFormValid}
-          accessibilityRole="button"
-          accessibilityLabel="Post offered ride"
-          activeOpacity={0.85}
-        >
-          {submitting ? (
-            <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 8 }} />
-          ) : (
-            <Send size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-          )}
-          <Text style={styles.submitBtnText}>{submitting ? 'Postingâ€¦' : 'Offer Ride'}</Text>
-        </TouchableOpacity>
+                      <AddressAutocomplete
+                        label=""
+                        placeholder="Houston, TX"
+                        value={dropoffLocation}
+                        onChangeText={(t) => {
+                          setDropoffLocation(t);
+                          setDropoffCoords(null);
+                        }}
+                        onSelected={({ address, coords }) => {
+                          setDropoffLocation(address);
+                          setDropoffCoords(coords);
+                        }}
+                        apiKey={GOOGLE_MAPS_API_KEY}
+                        zIndex={50}
+                      />
+                    </View>
+                  </View>
+                </View>
 
-        <View style={{ height: 32 }} />
+                <Text style={styles.fieldGroupLabel}>WHEN</Text>
+                <View style={styles.whenRow}>
+                  <TouchableOpacity style={styles.ceoInputBtn} onPress={() => setCalendarOpen(true)}>
+                    <Text style={[styles.ceoInputText, !date && styles.ceoInputPlaceholder]}>{date ? formatDateLabel(date) : 'Fri, Nov 20'}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={[styles.ceoInputBtn, styles.timeBtn]} onPress={() => setTimeOpen(true)}>
+                    <Text style={[styles.ceoInputText, !time && styles.ceoInputPlaceholder]}>{time || '3:00 PM'}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <DatePickerModal
+                  visible={calendarOpen}
+                  selectedDate={date}
+                  onClose={() => setCalendarOpen(false)}
+                  onSelect={setDate}
+                />
+
+                <TimePickerModal
+                  visible={timeOpen}
+                  selectedTime={time}
+                  onClose={() => setTimeOpen(false)}
+                  onSelect={setTime}
+                />
+
+                <Text style={styles.fieldGroupLabel}>SEATS AVAILABLE</Text>
+                <View style={styles.seatPillRow}>
+                  {([1, 2] as const).map((n) => (
+                    <TouchableOpacity
+                      key={n}
+                      onPress={() => setSeats(n)}
+                      style={[styles.seatPill, seats === n && styles.seatPillActive]}
+                    >
+                      <Text style={[styles.seatPillText, seats === n && styles.seatPillTextActive]}>{n}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Text style={styles.fieldGroupLabel}>PRICE PER SEAT</Text>
+                <View style={styles.priceBox}>
+                  <Text style={styles.priceDollar}>$</Text>
+                  <TextInput
+                    value={contribution}
+                    onChangeText={(value) => {
+                      setPriceEdited(true);
+                      setContribution(value);
+                    }}
+                    placeholder="28"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="decimal-pad"
+                    style={styles.priceInputCeo}
+                  />
+
+                  <View style={styles.suggestedWrap}>
+                    <Text style={styles.suggestedLabel}>MIN / MAX</Text>
+                    <Text style={styles.suggestedText}>{suggestedText}</Text>
+                  </View>
+                </View>
+
+                {maxPrice > 0 ? (
+                  <View style={styles.capMiniBanner}>
+                    <Text style={styles.capMiniText}>
+                      Max allowed is ${maxPrice.toFixed(2)} per seat for this route.
+                    </Text>
+                  </View>
+                ) : null}
+
+                {/* ── Recurring ride ── */}
+                <Text style={styles.fieldGroupLabel}>REPEAT WEEKLY</Text>
+                <View style={{ marginHorizontal: 20, borderRadius: 18, borderWidth: 1, borderColor: isRecurring ? colors.primary : colors.border, backgroundColor: colors.bgCard, overflow: 'hidden', marginBottom: 4 }}>
+                  {/* Toggle row */}
+                  <TouchableOpacity
+                    activeOpacity={0.75}
+                    onPress={() => { setIsRecurring(v => !v); if (isRecurring) setRecurringDays([]); }}
+                    style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 }}
+                  >
+                    <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: isRecurring ? colors.primaryDim : colors.bgSecondary, alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="repeat-outline" size={18} color={isRecurring ? colors.primary : colors.textSecondary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: '700' }}>Post this ride every week</Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                        {isRecurring && recurringDays.length > 0
+                          ? `Every ${recurringDays.map(d => DAY_LABELS[d]).join(', ')} · 8 weeks ahead`
+                          : 'Automatically create instances 8 weeks out'}
+                      </Text>
+                    </View>
+                    <Switch
+                      value={isRecurring}
+                      onValueChange={v => { setIsRecurring(v); if (!v) setRecurringDays([]); }}
+                      trackColor={{ false: colors.border, true: colors.primaryDim }}
+                      thumbColor={isRecurring ? colors.primary : '#fff'}
+                    />
+                  </TouchableOpacity>
+
+                  {/* Day picker — only visible when toggled on */}
+                  {isRecurring && (
+                    <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: 16, paddingVertical: 14 }}>
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 1.3, marginBottom: 12 }}>REPEATS ON</Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        {(['Su','Mo','Tu','We','Th','Fr','Sa'] as const).map((abbr, idx) => {
+                          const selected = recurringDays.includes(idx);
+                          return (
+                            <TouchableOpacity
+                              key={idx}
+                              onPress={() => setRecurringDays(prev => selected ? prev.filter(d => d !== idx) : [...prev, idx].sort())}
+                              activeOpacity={0.7}
+                              style={{
+                                width: 38, height: 38, borderRadius: 19,
+                                alignItems: 'center', justifyContent: 'center',
+                                backgroundColor: selected ? colors.primary : colors.bgSecondary,
+                                borderWidth: selected ? 0 : 1,
+                                borderColor: colors.border,
+                              }}
+                            >
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: selected ? colors.textInverse : colors.textSecondary }}>{abbr}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                      {recurringDays.length === 0 && (
+                        <Text style={{ color: colors.red, fontSize: 12, marginTop: 10, fontWeight: '600' }}>Select at least one day</Text>
+                      )}
+                    </View>
+                  )}
+                </View>
+
+                <Text style={styles.fieldGroupLabel}>EVENT (OPTIONAL)</Text>
+                <TextInput
+                  value={eventName}
+                  onChangeText={setEventName}
+                  placeholder="Concert, game day, move-in weekend..."
+                  placeholderTextColor={colors.textSecondary}
+                  style={styles.eventInputCeo}
+                />
+
+                <Text style={styles.fieldGroupLabel}>NOTE FOR RIDERS (OPTIONAL)</Text>
+                <TextInput
+                  value={notes}
+                  onChangeText={setNotes}
+                  placeholder="Heading home for the weekend. Aux is open"
+                  placeholderTextColor={colors.textSecondary}
+                  multiline
+                  style={styles.notesCeo}
+                  onFocus={() => setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 120)}
+                />
+
+                <TouchableOpacity
+                  onPress={handleSubmit}
+                  disabled={submitting || !isFormValid}
+                  style={[styles.continueBtn, (submitting || !isFormValid) && styles.submitBtnDisabled]}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.continueText}>{isRecurring ? `Schedule recurring ride →` : `Post ride →`}</Text>
+                  )}
+                </TouchableOpacity>
+
+                <View style={{ height: 4 }} />
               </View>
             )}
             renderItem={() => null}
             keyExtractor={() => 'content'}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator={false}
           />
         </SafeAreaView>
-      </TouchableWithoutFeedback>
+      <DriverBottomNav activeTab="offer" />
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  keyboardAvoid: {
-    flex: 1,
-    backgroundColor: '#F1F5F9',
-  },
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F1F5F9',
-  },
-  flex: {
-    flex: 1,
-  },
-  /* â”€â”€ Header â”€â”€ */
-  header: {
-    padding: 16,
-    paddingBottom: 0,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 16,
-    color: '#64748B',
-  },
-  /* â”€â”€ Scroll â”€â”€ */
-  scrollArea: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 40,
-  },
-  /* â”€â”€ Card â”€â”€ */
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 16,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 3,
-    borderWidth: 1,
-    borderColor: '#F1F5F9',
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 16,
-  },
-  cardTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    flex: 1,
-    letterSpacing: -0.2,
-  },
-  /* â”€â”€ Route visualization â”€â”€ */
-  routeContainer: {
-    flexDirection: 'row',
-    gap: 14,
-  },
-  routeLineCol: {
-    width: 20,
-    alignItems: 'center',
-    paddingTop: 28,
-    paddingBottom: 28,
-  },
-  routeDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  routeLine: {
-    width: 2,
-    flex: 1,
-    marginVertical: 4,
-  },
-  routeInputCol: {
-    flex: 1,
-  },
-  routeInputWrap: {
-    marginBottom: 2,
-  },
-  /* â”€â”€ Quick actions â”€â”€ */
-  quickActions: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 8,
-  },
-  quickBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    backgroundColor: '#FAFBFC',
-  },
-  quickBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  /* â”€â”€ Info strip â”€â”€ */
-  infoStrip: {
-    flexDirection: 'row',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 16,
-    alignItems: 'center',
-  },
-  infoStripItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-  },
-  infoStripDivider: {
-    width: 1,
-    height: 36,
-    marginHorizontal: 8,
-  },
-  infoStripLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#94A3B8',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  infoStripValue: {
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  /* â”€â”€ Schedule â”€â”€ */
-  scheduleRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  scheduleInput: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    padding: 14,
-    gap: 12,
-    borderWidth: 1,
-    borderColor: '#F1F5F9',
-  },
-  scheduleIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scheduleTextWrap: {
-    flex: 1,
-  },
-  scheduleLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#94A3B8',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  scheduleValue: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#1E293B',
-  },
-  schedulePlaceholder: {
-    color: '#94A3B8',
-    fontWeight: '500',
-  },
-  /* â”€â”€ Seats â”€â”€ */
-  seatsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 4,
-  },
-  seatOption: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: '#E2E8F0',
-    backgroundColor: '#FAFBFC',
-  },
-  seatOptionActive: {
-    borderWidth: 2,
-  },
-  seatIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  seatOptionText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#475569',
-  },
-  /* â”€â”€ Payment â”€â”€ */
-  fieldLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#475569',
-    marginBottom: 10,
-  },
-  priceInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    backgroundColor: '#F8FAFC',
-    overflow: 'hidden',
-  },
-  pricePrefix: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pricePrefixText: {
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  priceInput: {
-    flex: 1,
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1E293B',
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-  },
-  priceHint: {
-    marginTop: 8,
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#64748B',
-  },
-  /* â”€â”€ Notes â”€â”€ */
-  optionalBadge: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#94A3B8',
-    backgroundColor: '#F1F5F9',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    overflow: 'hidden',
-  },
-  notesInput: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#F1F5F9',
-    padding: 14,
-    fontSize: 15,
-    color: '#1E293B',
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  /* â”€â”€ Submit â”€â”€ */
-  submitBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 16,
-    paddingVertical: 18,
-    marginTop: 4,
-    shadowColor: '#E05E1A',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  submitBtnDisabled: {
-    opacity: 0.5,
-  },
-  submitBtnText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  /* â”€â”€ Banner â”€â”€ */
-  bannerInfo: {
-    marginTop: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: '#ECFDF5',
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-  },
-  bannerInfoText: {
-    color: '#065F46',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  /* â”€â”€ Autocomplete (shared) â”€â”€ */
-  label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#64748B',
-    marginBottom: 6,
-  },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: '#1E293B',
-  },
-  autoWrap: {
-    position: 'relative',
-    marginBottom: 10,
-  },
-  autoPanel: {
-    position: 'absolute',
-    top: 68,
-    left: 0,
-    right: 0,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    maxHeight: 240,
-    overflow: 'hidden',
-    elevation: 10,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    zIndex: 999,
-  },
-  autoItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  autoItemRow: {
-    flexDirection: 'column',
-  },
-  autoMainText: {
-    color: '#1E293B',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  autoSecondaryText: {
-    color: '#94A3B8',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  autoText: {
-    color: '#1E293B',
-    fontSize: 14,
-  },
-  autoEmpty: {
-    padding: 14,
-  },
-  placesEmptyText: {
-    color: '#94A3B8',
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  /* â”€â”€ Calendar Modal â”€â”€ */
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  calendarCard: {
-    width: '100%',
-    maxWidth: 380,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
-    elevation: 12,
-  },
-  calendarHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  monthTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#1E293B',
-  },
-  navBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    backgroundColor: '#F8FAFC',
-  },
-  navBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  weekdaysRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
-    marginBottom: 6,
-  },
-  weekday: {
-    width: `${100 / 7}%`,
-    textAlign: 'center',
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#94A3B8',
-  },
-  daysRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  dayCell: {
-    width: `${100 / 7}%`,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    backgroundColor: '#FAFBFC',
-  },
-  dayText: {
-    fontSize: 14,
-    color: '#1E293B',
-    fontWeight: '600',
-  },
-  closeBtn: {
-    marginTop: 12,
-    alignSelf: 'flex-end',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  closeBtnText: {
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  /* â”€â”€ Time Modal â”€â”€ */
-  timeCard: {
-    width: '100%',
-    maxWidth: 380,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
-    elevation: 12,
-  },
-  clockRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginVertical: 12,
-  },
-  clockDisplay: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    flex: 1,
-  },
-  clockText: {
-    fontSize: 44,
-    fontWeight: '800',
-  },
-  stepperCol: {
-    width: 56,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  stepBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    backgroundColor: '#F8FAFC',
-  },
-  stepBtnText: {
-    fontSize: 22,
-    fontWeight: '800',
-  },
-  ampmPill: {
-    marginLeft: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 9999,
-    borderWidth: 1.5,
-  },
-  ampmText: {
-    fontWeight: '800',
-    fontSize: 14,
-  },
-  timeColumns: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  timeCol: {
-    flex: 1,
-  },
-  timeWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 10,
-    marginBottom: 10,
-  },
-  timeChip: {
-    backgroundColor: '#F1F5F9',
-    borderRadius: 9999,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    minWidth: 48,
-    alignItems: 'center',
-  },
-  timeChipActive: {
-    backgroundColor: '#E05E1A',
-  },
-  timeChipText: {
-    fontWeight: '700',
-    fontSize: 14,
-    color: '#475569',
-  },
-  timeFooter: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: 12,
-    marginTop: 8,
-  },
-  confirmBtn: {
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  confirmBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 15,
-  },
-  /* â”€â”€ Suggestion legacy â”€â”€ */
-  suggestionsPanel: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
-    marginTop: 8,
-    overflow: 'hidden',
-    position: 'absolute',
-    top: 48,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-  },
-  suggestionItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    backgroundColor: '#FFFFFF',
-  },
-  suggestionText: {
-    fontSize: 14,
-    color: '#1E293B',
-    fontWeight: '600',
-  },
-  suggestionSub: {
-    fontSize: 12,
-    color: '#64748B',
-  },
-  /* â”€â”€ Legacy compat â”€â”€ */
-  inputWrapper: {
-    position: 'relative',
-  },
-  textArea: {
-    height: 100,
-    textAlignVertical: 'top',
-  },
-  section: {
-    marginBottom: 16,
-  },
-  pickerWrap: {
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  chipsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 8,
-  },
-  chip: {
-    backgroundColor: '#F1F5F9',
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  chipText: {
-    fontSize: 12,
-    color: '#1E293B',
-    fontWeight: '600',
-  },
-});
+
+
+// (module-level styles moved into BookScreen useMemo)
+const _REMOVED_STYLES_PLACEHOLDER = null;
+
+

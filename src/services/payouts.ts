@@ -168,7 +168,8 @@ export async function getDriverEarnings(userId: string): Promise<EarningsData> {
   // 2. ridesCompleted count from confirmedRides (optional for future UI)
   // 3. availableBalance from Stripe instant_available via driver-stats endpoint
 
-  // Firestore: get user profile totalEarnings
+  // Firestore: get driver profile totalEarnings — the backend increments this
+  // on drivers/{driverId} after each payment capture, not on users/{uid}.
   let totalEarnings = 0;
   try {
     const userRef = doc(firestore as any, 'drivers', userId);
@@ -222,15 +223,25 @@ export async function getDriverEarnings(userId: string): Promise<EarningsData> {
   };
 }
 
+// Instant deposit involves 5+ sequential Stripe API calls; 30s isn't enough on cold start.
+const PAYOUT_TIMEOUT_MS = 90_000;
+
 async function authorizedFetch(input: string, init: RequestInit = {}) {
   const user = firebaseAuth.currentUser;
-  if (!user) {
-    throw new Error('User is not authenticated');
-  }
+  if (!user) throw new Error('User is not authenticated');
   const token = await user.getIdToken();
   const headers = new Headers(init.headers || {});
   headers.set('Authorization', `Bearer ${token}`);
-  return fetch(input, { ...init, headers });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PAYOUT_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, headers, signal: controller.signal });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') throw new Error('Network request timed out. Please check your connection and try again.');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export type Payout = {
@@ -238,43 +249,25 @@ export type Payout = {
   type: string;
   method?: string;
   amount: number;
-  date: string;
+  date: number | string;        // Unix timestamp (seconds) or ISO string
+  arrivalDate?: number | null;
+  created?: number;
   status: string;
-  arrivalDate?: string | null;
-  currency?: string;
-  description?: string;
-  failure_code?: string;
-  failure_message?: string;
-  destination?: string;
+  bankLast4?: string | null;
+  description?: string | null;
+  destination?: string | null;
 };
 
 export async function fetchPayouts(limit: number = 10): Promise<{ payouts: Payout[] }> {
   const base = getApiBaseUrl();
   const user = firebaseAuth.currentUser;
-  if (!user) {
-    throw new Error('User is not authenticated');
-  }
-  // Migrated to driver backend payout-history route
+  if (!user) throw new Error('User is not authenticated');
   const url = `${base}/api/connect/payout-history?userId=${encodeURIComponent(user.uid)}&limit=${limit}`;
-  console.log('[fetchPayouts] Fetching from:', url);
-  console.log('[fetchPayouts] User ID:', user.uid);
-  
-  try {
-    const res = await authorizedFetch(url);
-    console.log('[fetchPayouts] Response status:', res.status);
-    
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error('[fetchPayouts] Error response:', errorText);
-      throw new Error(`Failed to fetch payouts: ${res.status} ${errorText}`);
-    }
-    
-    const result = await res.json();
-    console.log('[fetchPayouts] Success:', result);
-    return result;
-  } catch (error) {
-    console.error('[fetchPayouts] Request failed:', error);
-    throw error;
+  const res = await authorizedFetch(url);
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => res.status.toString());
+    throw new Error(`Failed to fetch payouts: ${res.status} ${errorText}`);
   }
+  return res.json();
 }
 

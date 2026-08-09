@@ -1,8 +1,9 @@
 import React from 'react';
-import { TouchableOpacity, Text, ActivityIndicator, TouchableOpacityProps, ViewStyle, TextStyle } from 'react-native';
+import { Pressable, Text, ActivityIndicator, PressableProps, ViewStyle } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
+import { hitSlop, layout } from '@/theme/designSystem';
 
-interface ButtonProps extends TouchableOpacityProps {
+interface ButtonProps extends PressableProps {
   variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'success' | 'warning' | 'error';
   size?: 'sm' | 'md' | 'lg';
   loading?: boolean;
@@ -29,24 +30,24 @@ export function Button({
       alignItems: 'center',
       flexDirection: 'row',
       width: fullWidth ? '100%' : undefined,
-      ...theme.shadows.sm,
+      minHeight: layout.minimumTouchTarget,
     };
 
     const sizeStyles = {
       sm: {
         paddingVertical: theme.spacing.sm,
         paddingHorizontal: theme.spacing.md,
-        minHeight: 36,
+        minHeight: 44,
       },
       md: {
         paddingVertical: theme.spacing.md,
         paddingHorizontal: theme.spacing.lg,
-        minHeight: 48,
+        minHeight: 52,
       },
       lg: {
         paddingVertical: theme.spacing.lg,
         paddingHorizontal: theme.spacing.xl,
-        minHeight: 56,
+        minHeight: 58,
       },
     };
 
@@ -101,12 +102,12 @@ export function Button({
       case 'primary':
       case 'success':
       case 'error':
-        return theme.colors.text;
+        return theme.colors.textOnPrimary;
       case 'secondary':
-        return theme.colors.text;
+        return theme.colors.textPrimary;
       case 'outline':
       case 'ghost':
-        return theme.colors.secondary;
+        return theme.colors.primary;
       case 'warning':
         return theme.colors.bg;
       default:
@@ -130,10 +131,12 @@ export function Button({
   const isTextChild = typeof children === 'string' || typeof children === 'number';
 
   return (
-    <TouchableOpacity
-      style={[getButtonStyles(), style]}
+    <Pressable
+      style={({ pressed }) => [getButtonStyles(), pressed && !(disabled || loading) && { opacity: 0.86, transform: [{ scale: 0.99 }] }, style as any]}
       disabled={disabled || loading}
-      activeOpacity={0.8}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled || loading), busy: loading }}
+      hitSlop={hitSlop}
       {...props}
     >
       {loading ? (
@@ -152,6 +155,6 @@ export function Button({
       ) : (
         children
       )}
-    </TouchableOpacity>
+    </Pressable>
   );
 }

@@ -1,397 +1,358 @@
-
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, Alert, Linking } from 'react-native';
+import React, { useEffect, useState, useMemo } from 'react';
+import * as WebBrowser from 'expo-web-browser';
+import {
+  Alert,
+  Linking,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, ChevronRight, Bell, Shield, CreditCard, Users, HelpCircle, LogOut, Moon, Volume2, History, Car, LucideIcon } from 'lucide-react-native';
-import { Card } from '@/components/ui/Card';
-import { useTheme } from '@/hooks/useTheme';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { signOut, deleteUser } from 'firebase/auth';
+import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+
 import { firebaseAuth, firestore } from '@/constants/services';
-import { doc, deleteDoc } from 'firebase/firestore';
-import { removeProfilePhoto } from '@/src/services/profilePhoto';
 import { settingsService } from '@/src/services/settingsService';
 import { notificationService } from '@/src/services/notificationService';
-
-interface SettingItemBase {
-  label: string;
-  icon: LucideIcon;
-}
-
-interface NavigationSettingItem extends SettingItemBase {
-  route: string;
-  toggle?: false;
-}
-
-interface ToggleSettingItem extends SettingItemBase {
-  toggle: true;
-  value: boolean;
-  onToggle: (value: boolean) => void;
-}
-
-type SettingItem = NavigationSettingItem | ToggleSettingItem;
-
-interface SettingSection {
-  title: string;
-  items: SettingItem[];
-}
+import { useVerificationStore } from '@/stores/verificationStore';
+import { useAuthStore } from '@/stores/authStore';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import { AppColors } from '@/constants/theme';
 
 export default function SettingsScreen() {
-  const theme = useTheme();
-  const [notifications, setNotifications] = useState(true);
-  const [darkMode, setDarkMode] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [signingOut, setSigningOut] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  // navigate, not replace: this screen is its own independent hidden tab
+  // (see (driver)/_layout.tsx), while /(driver)/profile is a different tab.
+  // navigate() is what Expo Router maps to the tab-navigator JUMP_TO action.
+  const handleBack = () => router.navigate('/(driver)/profile' as any);
+  const { isVerified, verificationStatus } = useVerificationStore();
+  const { isDark, setDark, colors } = useAppTheme();
+  const [pushEnabled, setPushEnabled] = useState(true);
 
-  // Load settings on mount
+  const s = useMemo(() => makeStyles(colors), [colors]);
+
   useEffect(() => {
-    const loadSettings = async () => {
+    settingsService.getSettings().then((settings) => {
+      setPushEnabled(settings.pushNotificationsEnabled);
+    }).catch(() => {});
+
+    const loadDriverSettings = async () => {
+      const currentUser = firebaseAuth.currentUser;
+      if (!currentUser) return;
+
       try {
-        const settings = await settingsService.getSettings();
-        setNotifications(settings.pushNotificationsEnabled);
-        setSoundEnabled(settings.soundEffectsEnabled);
-        setDarkMode(settings.darkModeEnabled);
-      } catch (error) {
-        console.error('Error loading settings:', error);
-      }
+        const snap = await getDoc(doc(firestore, 'drivers', currentUser.uid));
+        const data = snap.data() as any;
+
+        const savedPush = data?.settings?.pushNotificationsEnabled ?? data?.pushNotificationsEnabled;
+
+        if (typeof savedPush === 'boolean') setPushEnabled(savedPush);
+      } catch {}
     };
-    loadSettings();
+
+    loadDriverSettings();
   }, []);
 
-  // Handle push notifications toggle
-  const handleNotificationsToggle = async (value: boolean) => {
-    setNotifications(value);
+  const togglePush = async (value: boolean) => {
+    const previous = pushEnabled;
+    setPushEnabled(value);
+
     try {
       await settingsService.updateSettings({ pushNotificationsEnabled: value });
+      const currentUser = firebaseAuth.currentUser;
+      if (currentUser) {
+        await setDoc(doc(firestore, 'drivers', currentUser.uid), {
+          pushNotificationsEnabled: value,
+          settings: { pushNotificationsEnabled: value },
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      }
       await notificationService.updateNotificationHandler();
-      console.log('Push notifications', value ? 'enabled' : 'disabled');
-    } catch (error) {
-      console.error('Error updating push notifications setting:', error);
+    } catch {
+      setPushEnabled(previous);
+      Alert.alert('Settings not saved', 'We could not update your notification setting. Please try again.');
     }
   };
 
-  // Handle sound effects toggle
-  const handleSoundToggle = async (value: boolean) => {
-    setSoundEnabled(value);
+  const toggleDarkMode = async (value: boolean) => {
+    const previous = isDark;
+    setDark(value);
     try {
-      await settingsService.updateSettings({ soundEffectsEnabled: value });
-      console.log('Sound effects', value ? 'enabled' : 'disabled');
-    } catch (error) {
-      console.error('Error updating sound effects setting:', error);
+      const currentUser = firebaseAuth.currentUser;
+      if (currentUser) {
+        await setDoc(doc(firestore, 'drivers', currentUser.uid), {
+          darkModeEnabled: value,
+          settings: { darkModeEnabled: value },
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      }
+    } catch {
+      setDark(previous);
+      Alert.alert('Settings not saved', 'We could not update your dark mode setting. Please try again.');
     }
   };
 
-  // Handle dark mode toggle
-  const handleDarkModeToggle = async (value: boolean) => {
-    // Temporarily disabled - coming soon
-    Alert.alert(
-      'Coming Soon',
-      'Dark mode is currently under development and will be available in a future update.',
-      [{ text: 'OK' }]
-    );
-    // setDarkMode(value);
-    // try {
-    //   await settingsService.updateSettings({ darkModeEnabled: value });
-    //   console.log('Dark mode', value ? 'enabled' : 'disabled');
-    // } catch (error) {
-    //   console.error('Error updating dark mode setting:', error);
-    // }
-  };
+  const { driverProfile, signOut } = useAuthStore();
+  const university = driverProfile?.university || driverProfile?.personalInfo?.university || null;
+  const isVerifiedFinal = isVerified || verificationStatus === 'approved' || verificationStatus === 'auto-approved';
+  const isPending = verificationStatus === 'pending' || verificationStatus === 'manual-review';
+  const verStatusLabel = isVerifiedFinal ? 'Approved' : isPending ? 'Pending review' : 'Not verified';
+  const verLabel = university ? `${university} · ${verStatusLabel}` : verStatusLabel;
 
-  const settingSections: SettingSection[] = [
-    {
-      title: 'Account',
-      items: [
-        { label: 'Account Settings', icon: Users, route: '/settings/account-settings' },
-        { label: 'Vehicle Information', icon: Car, route: '/settings/vehicle-info' },
-        { label: 'Ride History', icon: History, route: '/settings/ride-history' },
-        { label: 'Earnings', icon: CreditCard, route: '/earnings' },
-        { label: 'Emergency Contacts', icon: Shield, route: '/settings/emergency-contacts' },
-        { label: 'Ride Preferences', icon: Users, route: '/settings/ride-preferences' },
-      ]
-    },
-    {
-      title: 'Notifications',
-      items: [
-        { 
-          label: 'Push Notifications', 
-          icon: Bell, 
-          toggle: true,
-          value: notifications,
-          onToggle: handleNotificationsToggle
-        },
-        { 
-          label: 'Sound Effects', 
-          icon: Volume2, 
-          toggle: true,
-          value: soundEnabled,
-          onToggle: handleSoundToggle
-        },
-      ]
-    },
-    {
-      title: 'Appearance',
-      items: [
-        { 
-          label: 'Dark Mode (Coming Soon)', 
-          icon: Moon, 
-          toggle: true,
-          value: false,
-          onToggle: handleDarkModeToggle
-        },
-      ]
-    },
-    {
-      title: 'Support',
-      items: [
-        { label: 'Help Center', icon: HelpCircle, route: 'https://ridealongapp.com/pages/help' },
-        { label: 'Contact Support', icon: Users, route: 'mailto:support@ridealongapp.com' },
-      ]
+  const openLink = async (url: string) => {
+    try {
+      if (await Linking.canOpenURL(url)) await Linking.openURL(url);
+    } catch {
+      Alert.alert('Error', 'Failed to open the link.');
     }
-  ];
+  };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: '#F8FAFC' }]}>
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => router.canGoBack() ? router.back() : router.push('/settings')}
-        >
-          <ArrowLeft size={24} color={theme.colors.secondary} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.colors.secondary }]}>
-          Settings
-        </Text>
-      </View>
-
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {settingSections.map((section, sectionIndex) => (
-          <View key={sectionIndex} style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.secondary }]}>
-              {section.title}
-            </Text>
-            
-            <Card style={styles.sectionCard}>
-              {section.items.map((item, itemIndex) => (
-                <TouchableOpacity
-                  key={itemIndex}
-                  style={[
-                    styles.settingItem,
-                    itemIndex < section.items.length - 1 && styles.settingItemBorder
-                  ]}
-                  onPress={async () => {
-                    if ('route' in item && item.route) {
-                      // Check if it's an external URL (http, https, or mailto)
-                      if (item.route.startsWith('http') || item.route.startsWith('mailto:')) {
-                        try {
-                          const supported = await Linking.canOpenURL(item.route);
-                          if (supported) {
-                            await Linking.openURL(item.route);
-                          } else {
-                            Alert.alert('Error', 'Unable to open this link');
-                          }
-                        } catch (error) {
-                          console.error('Error opening URL:', error);
-                          Alert.alert('Error', 'Failed to open the link');
-                        }
-                      } else {
-                        // Internal route - use router navigation
-                        router.push(item.route as any);
-                      }
-                    }
-                  }}
-                  disabled={item.toggle === true}
-                >
-                  <View style={styles.settingLeft}>
-                    <View style={[styles.settingIcon, { backgroundColor: theme.colors.primary + '20' }]}>
-                      <item.icon size={20} color={theme.colors.primary} />
-                    </View>
-                    <Text style={[styles.settingLabel, { color: theme.colors.secondary }]}>
-                      {item.label}
-                    </Text>
-                  </View>
-                  
-                  {item.toggle ? (
-                    <Switch
-                      value={(item as ToggleSettingItem).value}
-                      onValueChange={(item as ToggleSettingItem).onToggle}
-                      trackColor={{ false: '#E2E8F0', true: theme.colors.primary + '40' }}
-                      thumbColor={(item as ToggleSettingItem).value ? theme.colors.primary : '#F1F5F9'}
-                    />
-                  ) : (
-                    <ChevronRight size={20} color="#64748B" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </Card>
+    <View style={s.root}>
+      <StatusBar barStyle={colors.statusBar} />
+      <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scrollContent}>
+          <View style={s.pageHeader}>
+            <TouchableOpacity
+              style={s.backBtn}
+              onPress={handleBack}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
+            </TouchableOpacity>
+            <Text style={s.pageTitle}>Settings</Text>
           </View>
-        ))}
 
-        {/* Sign Out */}
-        <TouchableOpacity 
-          style={[styles.signOutButton, signingOut && { opacity: 0.6 }]}
-          disabled={signingOut}
-          onPress={async () => {
-            try {
-              setSigningOut(true);
-              await signOut(firebaseAuth);
-            } catch {
-              // ignore; still take user to welcome
-            } finally {
-              setSigningOut(false);
-              router.replace('/(auth)/sign-in');
-            }
-          }}
-        >
-          <LogOut size={20} color="#EF4444" />
-          <Text style={styles.signOutText}>{signingOut ? 'Signing Out…' : 'Sign Out'}</Text>
-        </TouchableOpacity>
+          <Text style={[s.groupLabel, s.firstGroupLabel]}>ACCOUNT</Text>
+          <View style={s.groupCard}>
+            <NavRow
+              colors={colors}
+              s={s}
+              icon="person-circle-outline"
+              label="Account"
+              sub="Email, phone, password"
+              onPress={() => router.push({ pathname: '/(driver)/settings/account-settings', params: { returnTo: '/(driver)/settings' } } as any)}
+            />
+            <NavRow
+              colors={colors}
+              s={s}
+              icon="school-outline"
+              label=".edu verification"
+              sub={verLabel}
+              onPress={() => router.push({ pathname: '/(driver)/settings/driver-student-verification', params: { returnTo: '/(driver)/settings' } } as any)}
+              isLast
+            />
+          </View>
 
-        {/* Delete Account */}
-        <TouchableOpacity
-          style={[styles.deleteButton, deleting && { opacity: 0.65 }]}
-          disabled={deleting}
-          onPress={() => {
-            const user = firebaseAuth.currentUser;
-            if (!user) {
-              Alert.alert('Not signed in', 'Please sign in first.');
-              return;
-            }
-            Alert.alert(
-              'Delete account?',
-              'This will permanently delete your account and profile data. This action cannot be undone.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      setDeleting(true);
-                      // Best-effort cleanup: remove photo and user doc
-                      try { await removeProfilePhoto(); } catch {}
-                      try { await deleteDoc(doc(firestore, 'drivers', user.uid)); } catch {}
-                      await deleteUser(user);
-                      Alert.alert('Account deleted', 'Your account has been deleted.');
-                      router.replace('/(auth)/sign-in');
-                    } catch (e: any) {
-                      if (e?.code === 'auth/requires-recent-login') {
-                        Alert.alert('Re-authentication required', 'Please sign out and sign back in, then try deleting your account again.');
-                      } else {
-                        Alert.alert('Delete failed', e?.message || 'Could not delete your account.');
-                      }
-                    } finally {
-                      setDeleting(false);
-                    }
-                  },
-                },
-              ]
-            );
-          }}
-        >
-          <Text style={styles.deleteText}>{deleting ? 'Deleting…' : 'Delete Account'}</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </SafeAreaView>
+          <Text style={s.groupLabel}>PREFERENCES</Text>
+          <View style={s.groupCard}>
+            <NavRow
+              colors={colors}
+              s={s}
+              icon="options-outline"
+              label="Ride preferences"
+              sub="Music, conversation & comfort"
+              onPress={() => router.push({ pathname: '/(driver)/settings/driver-ride-preferences', params: { returnTo: '/(driver)/settings' } } as any)}
+              isLast
+            />
+          </View>
+
+          <Text style={s.groupLabel}>SAFETY</Text>
+          <View style={s.groupCard}>
+            <NavRow
+              colors={colors}
+              s={s}
+              icon="shield-outline"
+              label="Emergency contacts"
+              sub="Trusted people who can be alerted"
+              onPress={() => router.push({ pathname: '/(driver)/settings/emergency-contacts', params: { returnTo: '/(driver)/settings' } } as any)}
+              isLast
+            />
+          </View>
+
+          <Text style={s.groupLabel}>APP PREFERENCES</Text>
+          <View style={s.groupCard}>
+            <ToggleRow
+              colors={colors}
+              s={s}
+              icon="notifications-outline"
+              label="Push notifications"
+              sub="Ride offers & account alerts"
+              value={pushEnabled}
+              onToggle={togglePush}
+            />
+            <ToggleRow
+              colors={colors}
+              s={s}
+              icon="moon-outline"
+              label="Dark mode"
+              sub={isDark ? 'On' : 'Off'}
+              value={isDark}
+              onToggle={toggleDarkMode}
+              isLast
+            />
+          </View>
+
+          <Text style={s.groupLabel}>HELP & LEGAL</Text>
+          <View style={s.groupCard}>
+            <NavRow
+              colors={colors}
+              s={s}
+              icon="help-buoy-outline"
+              label="Help Center"
+              sub="FAQs & how-to guides"
+              onPress={() => WebBrowser.openBrowserAsync('https://ridealongapp.com/pages/help')}
+            />
+            <NavRow
+              colors={colors}
+              s={s}
+              icon="chatbubble-ellipses-outline"
+              label="Report a Bug / Feedback"
+              sub="Help us improve RideAlong"
+              onPress={() => WebBrowser.openBrowserAsync('https://ridealongapp.com/pages/feedback')}
+            />
+            <NavRow
+              colors={colors}
+              s={s}
+              icon="mail-outline"
+              label="Contact Support"
+              sub="Response within 24h"
+              onPress={() => openLink('mailto:support@ridealongapp.com')}
+            />
+            <NavRow
+              colors={colors}
+              s={s}
+              icon="shield-checkmark-outline"
+              label="Privacy Policy"
+              sub="How we protect your data"
+              onPress={() => WebBrowser.openBrowserAsync('https://ridealongapp.com/pages/privacy')}
+            />
+            <NavRow
+              colors={colors}
+              s={s}
+              icon="document-text-outline"
+              label="Terms of Service"
+              sub="User agreement"
+              onPress={() => WebBrowser.openBrowserAsync('https://ridealongapp.com/pages/terms')}
+              isLast
+            />
+          </View>
+
+          <TouchableOpacity style={s.logoutBtn} onPress={signOut} activeOpacity={0.85}>
+            <Text style={s.logoutText}>Log out</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    paddingBottom: 8,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'white',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  section: {
-    marginBottom: 32,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  sectionCard: {
-    backgroundColor: 'white',
-    padding: 0,
-    overflow: 'hidden',
-  },
-  settingItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-  },
-  settingItemBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#E2E8F0',
-  },
-  settingLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  settingIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  settingLabel: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  signOutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 12,
-    marginTop: 20,
-    marginBottom: 32,
-    gap: 8,
-  },
-  signOutText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#EF4444',
-  },
-  deleteButton: {
-    backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 32,
-    borderWidth: 1,
-    borderColor: '#FEE2E2',
-  },
-  deleteText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#B91C1C',
-  },
-});
+function NavRow({
+  colors, s, icon, label, sub, onPress, isLast = false,
+}: {
+  colors: AppColors; s: ReturnType<typeof makeStyles>; icon: string; label: string; sub?: string; onPress: () => void; isLast?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      style={[s.row, !isLast && s.rowBorder]}
+      onPress={onPress}
+      activeOpacity={0.75}
+    >
+      <View style={s.rowIconWrap}>
+        <Ionicons name={icon as any} size={19} color={colors.primary} />
+      </View>
+      <View style={s.rowMid}>
+        <Text style={s.rowLabel}>{label}</Text>
+        {sub ? <Text style={s.rowSub}>{sub}</Text> : null}
+      </View>
+      <Ionicons name="chevron-forward" size={15} color={colors.textSecondary} />
+    </TouchableOpacity>
+  );
+}
+
+function ToggleRow({
+  colors, s, icon, label, sub, value, onToggle, isLast = false,
+}: {
+  colors: AppColors; s: ReturnType<typeof makeStyles>; icon: string; label: string; sub?: string; value: boolean; onToggle: (v: boolean) => void; isLast?: boolean;
+}) {
+  return (
+    <View style={[s.row, !isLast && s.rowBorder]}>
+      <View style={s.rowIconWrap}>
+        <Ionicons name={icon as any} size={19} color={colors.primary} />
+      </View>
+      <View style={s.rowMid}>
+        <Text style={s.rowLabel}>{label}</Text>
+        {sub ? <Text style={s.rowSub}>{sub}</Text> : null}
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onToggle}
+        trackColor={{ false: colors.switchTrackOff, true: colors.switchTrackOn }}
+        thumbColor={value ? colors.switchThumbOn : colors.switchThumbOff}
+        ios_backgroundColor={colors.switchIosBg}
+        style={{ transform: [{ scaleX: 0.88 }, { scaleY: 0.88 }] }}
+      />
+    </View>
+  );
+}
+
+function makeStyles(colors: AppColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.bg },
+    safe: { flex: 1 },
+    scrollContent: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 60 },
+    pageHeader: { position: 'relative', minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
+    backBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    pageTitle: { color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.25, flex: 1, marginLeft: 12 },
+
+    groupLabel: {
+      marginTop: 18,
+      marginBottom: 8,
+      paddingHorizontal: 2,
+      color: colors.textSecondary,
+      fontSize: 10,
+      lineHeight: 15,
+      fontWeight: '800',
+      letterSpacing: 1.5,
+    },
+    firstGroupLabel: { marginTop: 2 },
+    groupCard: {
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      overflow: 'hidden',
+      marginBottom: 2,
+    },
+
+    row: {
+      minHeight: 68,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      paddingHorizontal: 18,
+      paddingVertical: 13,
+    },
+    rowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+    rowIconWrap: { width: 36, height: 36, borderRadius: 11, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+    rowMid: { flex: 1, minWidth: 0 },
+    rowLabel: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+    rowSub: { color: colors.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 3 },
+
+    logoutBtn: { height: 52, borderRadius: 26, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginTop: 18, marginBottom: 8 },
+    logoutText: { color: colors.textInverse, fontSize: 15, fontWeight: '700' },
+  });
+}

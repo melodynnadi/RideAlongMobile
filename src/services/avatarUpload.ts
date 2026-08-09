@@ -52,7 +52,7 @@ export async function pickAndUploadAvatar(): Promise<AvatarUploadResult> {
 
   await setDoc(
     userRef,
-    { avatarUrl: json.photoURL, photoPath: json.photoPath, updatedAt: serverTimestamp() },
+    { avatarUrl: json.photoURL, avatarUrl1: json.photoURL, photoPath: json.photoPath, updatedAt: serverTimestamp() },
     { merge: true }
   );
 

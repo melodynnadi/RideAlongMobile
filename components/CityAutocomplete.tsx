@@ -1,13 +1,11 @@
-import React, { useState, useMemo } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Keyboard } from 'react-native';
-import { getApiBaseUrl } from '@/constants/services';
-import { firebaseAuth } from '@/constants/services';
+import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Keyboard, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
+import { getApiBaseUrl, firebaseAuth } from '@/constants/services';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import type { AppColors } from '@/constants/theme';
 
 type Suggestion = { description: string; place_id: string; displayText: string };
-
-function newToken() {
-  return 'tok_' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
-}
 
 interface CityAutocompleteProps {
   placeholder: string;
@@ -15,6 +13,10 @@ interface CityAutocompleteProps {
   onChangeText: (text: string) => void;
   onSelected: (location: string) => void;
   apiKey?: string;
+  containerStyle?: StyleProp<ViewStyle>;
+  inputStyle?: StyleProp<TextStyle>;
+  dropdownStyle?: StyleProp<ViewStyle>;
+  zIndex?: number;
 }
 
 export function CityAutocomplete({
@@ -23,14 +25,23 @@ export function CityAutocomplete({
   onChangeText,
   onSelected,
   apiKey,
+  containerStyle,
+  inputStyle,
+  dropdownStyle,
+  zIndex = 20,
 }: CityAutocompleteProps) {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<Suggestion[]>([]);
   const [timer, setTimer] = useState<any>(null);
   const [hasError, setHasError] = useState(false);
-  const token = useMemo(() => newToken(), []);
 
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidHide', () => setOpen(false));
+    return () => sub.remove();
+  }, []);
   const fetchLocations = async (q: string) => {
     if (!q || q.trim().length < 2) {
       setItems([]);
@@ -100,13 +111,14 @@ export function CityAutocomplete({
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { zIndex }, containerStyle]}>
       <TextInput
-        style={styles.input}
+        style={[styles.input, inputStyle]}
         placeholder={placeholder}
-        placeholderTextColor="#94A3B8"
+        placeholderTextColor={colors.textSecondary}
         value={value}
         onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
         onChangeText={(t) => {
           onChangeText(t);
           setOpen(true);
@@ -118,14 +130,16 @@ export function CityAutocomplete({
         autoCapitalize="words"
       />
       {open && (items.length > 0 || loading || hasError) && (
-        <View style={styles.dropdown}>
+        <View style={[styles.dropdown, dropdownStyle]}>
           {loading ? (
-            <View style={styles.item}>
-              <Text style={styles.itemText}>Searching...</Text>
+            <View style={styles.stateRow}>
+              <View style={styles.iconWrap}><Ionicons name="search-outline" size={15} color={colors.primary} /></View>
+              <Text style={styles.stateText}>Searching locations...</Text>
             </View>
           ) : hasError ? (
-            <View style={styles.item}>
-              <Text style={[styles.itemText, { color: '#64748B' }]}>
+            <View style={styles.stateRow}>
+              <View style={styles.iconWrap}><Ionicons name="alert-circle-outline" size={15} color={colors.textSecondary} /></View>
+              <Text style={styles.stateText}>
                 Could not load suggestions. You can still type manually.
               </Text>
             </View>
@@ -141,7 +155,13 @@ export function CityAutocomplete({
                   setTimeout(() => Keyboard.dismiss(), 50);
                 }}
               >
-                <Text style={styles.itemText}>{s.description}</Text>
+                <View style={styles.iconWrap}>
+                  <Ionicons name={idx === 0 ? 'location' : 'location-outline'} size={15} color={colors.primary} />
+                </View>
+                <View style={styles.itemCopy}>
+                  <Text style={styles.itemText} numberOfLines={1}>{s.displayText.split(',')[0]}</Text>
+                  <Text style={styles.itemSubText} numberOfLines={1}>{s.description}</Text>
+                </View>
               </TouchableOpacity>
             ))
           )}
@@ -151,44 +171,90 @@ export function CityAutocomplete({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: AppColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     position: 'relative',
   },
   input: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.bgCard,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     fontSize: 14,
+    color: colors.textPrimary,
   },
   dropdown: {
     position: 'absolute',
-    top: 48,
+    top: 52,
     left: 0,
     right: 0,
-    backgroundColor: 'white',
-    borderRadius: 8,
+    backgroundColor: colors.bgCard,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    maxHeight: 250,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    borderColor: colors.border,
+    maxHeight: 268,
+    shadowColor: colors.textPrimary,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    elevation: 12,
     zIndex: 1000,
+    overflow: 'hidden',
   },
   item: {
-    padding: 12,
+    minHeight: 56,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    borderBottomColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  iconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.primaryDim,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  itemCopy: {
+    flex: 1,
+    minWidth: 0,
   },
   itemText: {
     fontSize: 14,
-    color: '#0F172A',
+    lineHeight: 18,
+    color: colors.textPrimary,
+    fontWeight: '700',
   },
-});
+  itemSubText: {
+    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 16,
+    color: colors.textSecondary,
+    fontWeight: '500',
+  },
+  stateRow: {
+    minHeight: 54,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  stateText: {
+    flex: 1,
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+  });
+}

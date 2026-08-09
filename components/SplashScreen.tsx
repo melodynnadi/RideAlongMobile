@@ -1,63 +1,78 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Image } from 'react-native';
+import { Animated, Easing, Image, StyleSheet, View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { useAppTheme } from '@/hooks/ThemeContext';
 
-interface SplashScreenProps {
-  onLoadingComplete?: () => void;
-}
+const LOGO_LIGHT = require('../assets/logo+text - Edited.png');
+const LOGO_DARK  = require('../assets/RideAlongSplashDarkMode - Edited.png');
 
-export default function SplashScreen({ onLoadingComplete }: SplashScreenProps) {
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.8)).current;
+type SplashScreenProps = {
+  animated?: boolean;
+};
+
+export default function SplashScreen({ animated = true }: SplashScreenProps) {
+  const { isDark: dark } = useAppTheme();
+
+  const opacity = useRef(new Animated.Value(animated ? 0 : 1)).current;
+  const scale   = useRef(new Animated.Value(animated ? 0.1 : 1)).current;
 
   useEffect(() => {
-    // Simple entrance animation
-    const animation = Animated.parallel([
-      Animated.timing(fadeAnim, {
+    if (!animated) return;
+
+    const entrance = Animated.parallel([
+      Animated.timing(opacity, {
         toValue: 1,
-        duration: 800,
+        duration: 220,
+        easing: Easing.out(Easing.ease),
         useNativeDriver: true,
       }),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        tension: 50,
-        friction: 7,
-        useNativeDriver: true,
-      }),
+      Animated.sequence([
+        Animated.timing(scale, {
+          toValue: 1.22,
+          duration: 380,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scale, {
+          toValue: 0.91,
+          duration: 130,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scale, {
+          toValue: 1.07,
+          duration: 100,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scale, {
+          toValue: 1.0,
+          duration: 80,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
     ]);
 
-    animation.start();
-
-    // Auto-complete after 3 seconds
-    const timer = setTimeout(() => {
-      onLoadingComplete?.();
-    }, 3000);
-
-    return () => {
-      animation.stop();
-      clearTimeout(timer);
-    };
-  }, [fadeAnim, scaleAnim, onLoadingComplete]);
+    entrance.start();
+    return () => entrance.stop();
+  }, [animated, opacity, scale]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, dark ? styles.containerDark : styles.containerLight]}>
+      <StatusBar style={dark ? 'light' : 'dark'} />
       <Animated.View
-        style={[
-          styles.content,
-          {
-            opacity: fadeAnim,
-            transform: [{ scale: scaleAnim }],
-          },
-        ]}
+        style={{
+          opacity,
+          transform: [{ scale }],
+          alignItems: 'center',
+        }}
       >
-        {/* Logo and Text Layout matching web app */}
-        <View style={styles.logoContainer}>
-          <Image 
-            source={require('../assets/images/RideAlongWebLogo.png')}
-            style={styles.logoImage}
-            resizeMode="contain"
-          />
-          <Text style={styles.logoText}>RideAlong</Text>
-        </View>
+        <Image
+          source={dark ? LOGO_DARK : LOGO_LIGHT}
+          style={styles.logo}
+          resizeMode="contain"
+        />
       </Animated.View>
     </View>
   );
@@ -66,25 +81,17 @@ export default function SplashScreen({ onLoadingComplete }: SplashScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  content: {
-    alignItems: 'center',
+  containerLight: {
+    backgroundColor: '#FBFAF7',
   },
-  logoContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+  containerDark: {
+    backgroundColor: '#0B1635',
   },
-  logoImage: {
-    width: 40,
-    height: 40,
-  },
-  logoText: {
-    fontSize: 42,
-    fontWeight: '800',
-    color: '#E05E1A',
+  logo: {
+    width: 260,
+    height: 260,
   },
 });

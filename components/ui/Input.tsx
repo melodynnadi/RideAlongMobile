@@ -1,5 +1,5 @@
-import React from 'react';
-import { TextInput, TextInputProps, View, Text, ViewStyle } from 'react-native';
+import React, { useState } from 'react';
+import { TextInput, TextInputProps, View, Text } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
 
 interface InputProps extends TextInputProps {
@@ -18,6 +18,7 @@ export function Input({
   ...props 
 }: InputProps) {
   const theme = useTheme();
+  const [focused, setFocused] = useState(false);
 
   const getSizeStyles = () => {
     const sizes = {
@@ -25,30 +26,30 @@ export function Input({
         fontSize: 14,
         paddingVertical: theme.spacing.sm,
         paddingHorizontal: theme.spacing.md,
-        minHeight: 36,
+        minHeight: 44,
       },
       md: {
         fontSize: 16,
         paddingVertical: theme.spacing.md,
         paddingHorizontal: theme.spacing.lg,
-        minHeight: 48,
+        minHeight: 52,
       },
       lg: {
         fontSize: 18,
         paddingVertical: theme.spacing.lg,
         paddingHorizontal: theme.spacing.xl,
-        minHeight: 56,
+        minHeight: 58,
       },
     };
     return sizes[size];
   };
 
   const inputStyles = {
-  backgroundColor: '#FFFFFF',
+    backgroundColor: theme.colors.surface,
     borderWidth: 1,
-    borderColor: error ? theme.colors.error : theme.colors.muted + '30',
+    borderColor: error ? theme.colors.error : focused ? theme.colors.focus : theme.colors.muted + '45',
     borderRadius: theme.borderRadius.xl,
-  color: theme.colors.secondary,
+    color: theme.colors.textPrimary,
     ...getSizeStyles(),
   };
 
@@ -56,8 +57,8 @@ export function Input({
   <View style={{ marginBottom: theme.spacing.sm }}>
       {label && (
         <Text style={{
-          color: "#e0e0e0d3",
-          fontSize: 15,
+          color: theme.colors.textPrimary,
+          fontSize: 14,
           fontWeight: '600',
           marginBottom: theme.spacing.xs,
         }}>
@@ -77,19 +78,24 @@ export function Input({
           </View>
         )}
         <TextInput
+          {...props}
           style={[
             inputStyles,
             ...(icon ? [{ paddingLeft: theme.spacing.xl + theme.spacing.md }] : []),
             style,
           ]}
           placeholderTextColor={theme.colors.muted}
-          {...props}
+          accessibilityLabel={props.accessibilityLabel || label || props.placeholder}
+          accessibilityHint={error || props.accessibilityHint}
+          accessibilityState={{ disabled: !props.editable }}
+          onFocus={(event) => { setFocused(true); props.onFocus?.(event); }}
+          onBlur={(event) => { setFocused(false); props.onBlur?.(event); }}
         />
       </View>
       {error && (
         <Text style={{
           color: theme.colors.error,
-          fontSize: 12,
+          fontSize: 13,
           marginTop: theme.spacing.xs,
         }}>
           {error}

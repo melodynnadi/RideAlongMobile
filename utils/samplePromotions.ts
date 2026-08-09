@@ -312,8 +312,8 @@ export async function debugPromotions(): Promise<void> {
         target: promo.target,
         platforms: promo.platforms,
         status: promo.status,
-        startDate: promo.startDate.toISOString(),
-        endDate: promo.endDate.toISOString()
+        startDate: new Date(promo.startDate).toISOString(),
+        endDate: new Date(promo.endDate).toISOString()
       });
     });
   } catch (error) {

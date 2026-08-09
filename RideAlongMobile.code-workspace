@@ -1,0 +1,19 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../../../Desktop/RideAlongWebApp"
+		},
+		{
+			"path": "../RideAlongEmployeeApp"
+		},
+		{
+			"path": "../../../Desktop/RideAlongAdminApp"
+		}
+	],
+	"settings": {
+		"liveServer.settings.multiRootWorkspaceName": "RideAlongAdminApp"
+	}
+}

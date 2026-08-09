@@ -19,6 +19,7 @@ export interface SetupIntentResponse {
 export interface PaymentIntentResponse {
   clientSecret: string;
   id: string;
+  status?: string;
 }
 
 export interface CreateRidePaymentRequest {

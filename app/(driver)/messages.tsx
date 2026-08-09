@@ -1,21 +1,22 @@
-// RideAlongDriverMobile - Messages Screen (Chat List)
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
+import { Image } from 'expo-image';
 import {
   View,
   Text,
   FlatList,
+  ScrollView,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
-  Image,
   Alert,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { DriverBottomNav } from '@/components/DriverBottomNav';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
-import { firestore, firebaseAuth } from '@/constants/services';
 import {
   collection,
   query,
@@ -24,7 +25,12 @@ import {
   onSnapshot,
   doc,
   getDoc,
+  QuerySnapshot,
+  QueryDocumentSnapshot,
+  DocumentData,
 } from 'firebase/firestore';
+
+import { firestore, firebaseAuth } from '@/constants/services';
 import {
   addHiddenDeletedThreadIdForCurrentUser,
   deleteMessageThread,
@@ -33,6 +39,9 @@ import {
   getHiddenDeletedThreadIdsForCurrentUser,
 } from '@/services/messageThreadsService';
 import { showErrorToast, showSuccessToast } from '@/src/utils/showToast';
+import { chatBelongsToRole, legacyUnreadField, roleKey, roleUnreadField } from '@/src/utils/roleIdentity';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import { resolveChatAvailability, type ChatAvailability } from '@/src/services/chatAvailability';
 
 interface Chat {
   id: string;
@@ -43,28 +52,195 @@ interface Chat {
   lastMessage: string;
   lastMessageTimestamp: any;
   recipientName: string;
-  recipientAvatar?: string;
-  rideInfo: string;
+  recipientPhotoURL?: string | null;
   unreadCount?: number;
+  chatAvailable?: boolean;
+  unavailableMessage?: string;
 }
 
-// Simple in-memory caches (persist for app session)
 const userCache = new Map<string, any>();
 const rideCache = new Map<string, any>();
-// Track which IDs have already produced a warning to avoid noisy duplicates
 const warnedUserIds = new Set<string>();
 const warnedRideIds = new Set<string>();
 
 export default function MessagesScreen() {
+  const { colors } = useAppTheme();
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [hydratedHiddenIds, setHydratedHiddenIds] = useState(false);
   const [hiddenThreadIds, setHiddenThreadIds] = useState<string[]>([]);
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
+
   const chatsUnsubscribeRef = useRef<(() => void) | null>(null);
   const hiddenThreadIdsRef = useRef<Set<string>>(new Set());
   const currentUser = firebaseAuth.currentUser;
+
+  const s = useMemo(() => StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.bg,
+    },
+    safe: {
+      flex: 1,
+    },
+    scroll: {
+      flex: 1,
+    },
+    scrollContent: {
+      paddingHorizontal: 20,
+      paddingTop: 24,
+      paddingBottom: 102,
+      flexGrow: 1,
+    },
+    pageHeader: {
+      marginBottom: 4,
+    },
+    pageTitle: {
+      color: colors.textPrimary,
+      fontSize: 24,
+      lineHeight: 30,
+      fontWeight: '700',
+      letterSpacing: -0.25,
+    },
+    loadingWrap: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 14,
+      minHeight: 320,
+    },
+    loadingText: {
+      color: colors.textSecondary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      paddingVertical: 18,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      backgroundColor: colors.bg,
+    },
+    avatar: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: colors.primaryDim,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    avatarText: {
+      color: colors.primary,
+      fontSize: 18,
+      fontWeight: '600',
+    },
+    rowContent: {
+      flex: 1,
+      minWidth: 0,
+    },
+    rowTop: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: 3,
+    },
+    name: {
+      flex: 1,
+      color: colors.textPrimary,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    newBadge: {
+      color: colors.primary,
+      backgroundColor: colors.primaryDim,
+      overflow: 'hidden',
+      borderRadius: 10,
+      paddingHorizontal: 7,
+      paddingVertical: 3,
+      fontSize: 9,
+      fontWeight: '700',
+    },
+    closedBadge: {
+      color: colors.textSecondary,
+      backgroundColor: colors.bgSecondary,
+      overflow: 'hidden',
+      borderRadius: 10,
+      paddingHorizontal: 7,
+      paddingVertical: 3,
+      fontSize: 9,
+      fontWeight: '700',
+    },
+    preview: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '600',
+    },
+    rowMeta: {
+      alignItems: 'flex-end',
+      gap: 4,
+      flexShrink: 0,
+    },
+    time: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    swipeDelete: {
+      width: 80,
+      alignSelf: 'stretch',
+      backgroundColor: colors.red,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 5,
+    },
+    swipeDeleteText: {
+      color: colors.textInverse,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    emptyCard: {
+      marginTop: 40,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderStyle: 'dashed',
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+      padding: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 180,
+    },
+    emptyIcon: {
+      width: 54,
+      height: 54,
+      borderRadius: 27,
+      backgroundColor: colors.primaryDim,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 16,
+    },
+    emptyTitle: {
+      color: colors.textPrimary,
+      fontSize: 19,
+      lineHeight: 25,
+      fontWeight: '700',
+      textAlign: 'center',
+      letterSpacing: -0.2,
+    },
+    emptyText: {
+      maxWidth: 280,
+      color: colors.textSecondary,
+      fontSize: 13,
+      lineHeight: 19,
+      textAlign: 'center',
+      marginTop: 6,
+    },
+  }), [colors]);
 
   useEffect(() => {
     if (!currentUser?.uid) {
@@ -92,6 +268,7 @@ export default function MessagesScreen() {
       setHydratedHiddenIds(false);
       setHiddenThreadIds([]);
       hiddenThreadIdsRef.current = new Set();
+
       if (chatsUnsubscribeRef.current) {
         chatsUnsubscribeRef.current();
         chatsUnsubscribeRef.current = null;
@@ -100,10 +277,7 @@ export default function MessagesScreen() {
   }, [currentUser?.uid]);
 
   useEffect(() => {
-    if (!currentUser?.uid || !hydratedHiddenIds) {
-      return;
-    }
-
+    if (!currentUser?.uid || !hydratedHiddenIds) return;
     const unsubscribe = loadChats();
     return () => {
       if (unsubscribe) unsubscribe();
@@ -124,19 +298,6 @@ export default function MessagesScreen() {
 
     setLoading(true);
 
-    // Primary ordered query (needs composite index participants+lastMessageTimestamp)
-    const orderedQuery = query(
-      collection(firestore, 'chats'),
-      where('participants', 'array-contains', currentUser.uid),
-      orderBy('lastMessageTimestamp', 'desc')
-    );
-    // Fallback query (no orderBy) used if index missing or permission denied
-    const plainQuery = query(
-      collection(firestore, 'chats'),
-      where('participants', 'array-contains', currentUser.uid)
-    );
-
-    // Secondary fallback: filter by driverId (sidestep malformed chat docs)
     const driverOrderedQuery = query(
       collection(firestore, 'chats'),
       where('driverId', '==', currentUser.uid),
@@ -146,171 +307,159 @@ export default function MessagesScreen() {
       collection(firestore, 'chats'),
       where('driverId', '==', currentUser.uid)
     );
+    const orderedQuery = driverOrderedQuery;
+    const plainQuery = driverPlainQuery;
 
     let activeUnsub: (() => void) | null = null;
 
-    const attachListener = (q: any, isFallback: boolean = false, useDriverQuery: boolean = false) => {
+    const attachListener = (q: any, isFallback = false, useDriverQuery = false) => {
       activeUnsub = onSnapshot(
         q,
-        async (snapshot) => {
-        try {
-          // Collect all unique user IDs and ride IDs we need to fetch
-          const userIdsToFetch = new Set<string>();
-          const rideIdsToFetch = new Set<string>();
-          const chatDocs = snapshot.docs
-            .map(doc => ({ id: doc.id, data: doc.data() }))
-            .filter(({ id }) => !hiddenThreadIdsRef.current.has(id));
+        async (snapshot: QuerySnapshot<DocumentData>) => {
+          try {
+            const userIdsToFetch = new Set<string>();
 
-          chatDocs.forEach(({ data }) => {
-            const otherParticipants = data.participants.filter((id: string) => id !== currentUser.uid);
-            otherParticipants.forEach((id: string) => userIdsToFetch.add(id));
-            if (data.rideId) rideIdsToFetch.add(data.rideId);
-          });
+            const chatDocs = snapshot.docs
+              .map((d: QueryDocumentSnapshot<DocumentData>) => ({
+                id: d.id,
+                data: d.data() as Record<string, any>,
+              }))
+              .filter(({ id, data }) => !hiddenThreadIdsRef.current.has(id) && chatBelongsToRole(data, currentUser.uid, 'driver'));
 
-          // Filter out IDs already cached
-          const userIdsToFetchArr = Array.from(userIdsToFetch).filter(id => !userCache.has(id));
-          const rideIdsToFetchArr = Array.from(rideIdsToFetch).filter(id => !rideCache.has(id));
+            chatDocs.forEach(({ data }) => {
+              const riderId = data.riderId || data.riderUID || data.riderUid || data.userId;
+              if (riderId) userIdsToFetch.add(String(riderId));
+            });
 
-          // Batch fetch only uncached entities
-          if (userIdsToFetchArr.length || rideIdsToFetchArr.length) {
-            const [fetchedUsers, fetchedRides] = await Promise.all([
-              Promise.all(
-                userIdsToFetchArr.map(async (userId) => {
+            const userIdsArr = Array.from(userIdsToFetch).filter((id) => !userCache.has(id));
+
+            if (userIdsArr.length) {
+              await Promise.all(
+                userIdsArr.map(async (userId) => {
                   try {
                     let userDoc = await getDoc(doc(firestore, 'riders', userId));
-                    if (!userDoc.exists()) {
-                      try {
-                        userDoc = await getDoc(doc(firestore, 'drivers', userId));
-                      } catch (_) {
-                        // ignore
-                      }
-                    }
-                    const data = userDoc.exists() ? userDoc.data() : null;
-                    userCache.set(userId, data);
-                  } catch (e) {
+                    if (!userDoc.exists()) userDoc = await getDoc(doc(firestore, 'drivers', userId));
+                    if (!userDoc.exists()) userDoc = await getDoc(doc(firestore, 'users', userId));
+                    userCache.set(userId, userDoc.exists() ? userDoc.data() : null);
+                  } catch (error) {
                     if (!warnedUserIds.has(userId)) {
-                      console.warn(`Failed to fetch user ${userId}:`, e);
+                      console.warn(`Failed to fetch user ${userId}:`, error);
                       warnedUserIds.add(userId);
                     }
                     userCache.set(userId, null);
                   }
                 })
-              ),
-              Promise.all(
-                rideIdsToFetchArr.map(async (rideId) => {
-                  try {
-                    const rideDoc = await getDoc(doc(firestore, 'confirmedRides', rideId));
-                    const data = rideDoc.exists() ? rideDoc.data() : null;
-                    rideCache.set(rideId, data);
-                  } catch (e) {
-                    if (!warnedRideIds.has(rideId)) {
-                      console.warn(`Failed to fetch ride ${rideId}:`, e);
-                      warnedRideIds.add(rideId);
-                    }
-                    rideCache.set(rideId, null);
-                  }
-                })
-              )
-            ]);
-            // fetchedUsers / fetchedRides are arrays but we rely on side-effects only
-          }
-
-        // Build chats list using cached data (no additional Firestore reads here)
-        const usersMap = userCache; // reuse cache directly
-        const ridesMap = rideCache; // reuse cache directly
-
-        // Build chats list using cached data
-        const chatsList: Chat[] = chatDocs.map(({ id: docId, data: chatData }) => {
-          const { riderId, driverId, rideId, lastMessage, lastMessageTimestamp, participants } = chatData;
-
-          const otherParticipants = participants.filter((id: string) => id !== currentUser.uid);
-          const isGroupChat = otherParticipants.length > 1;
-
-          let recipientName = 'Unknown User';
-          let recipientAvatar: string | undefined = undefined;
-
-          if (isGroupChat) {
-            const names = otherParticipants
-              .map((participantId: string) => {
-                const userData = usersMap.get(participantId);
-                return userData?.fullName || userData?.name || userData?.email?.split('@')[0] || 'User';
-              })
-              .filter(Boolean);
-            recipientName = names.length > 0 ? names.join(', ') : 'Group Chat';
-          } else {
-            const recipientId = otherParticipants[0];
-            const recipientData = usersMap.get(recipientId);
-            if (recipientData) {
-              recipientName = recipientData.fullName || recipientData.name || recipientData.email || 'Unknown User';
-              recipientAvatar = recipientData.avatarUrl || recipientData.profilePicture || recipientData.photoURL || recipientData.photoUrl;
+              );
             }
+
+            const chatsList: Chat[] = await Promise.all(chatDocs.map(async ({ id: docId, data: chatData }) => {
+              const availability = await resolveChatAvailability(chatData).catch((): ChatAvailability => ({ status: null, available: true }));
+              const { riderId, driverId, rideId, lastMessage, lastMessageTimestamp } = chatData;
+
+              const participants = Array.isArray(chatData.participants) ? chatData.participants : [];
+              const otherParticipants = [riderId || chatData.riderUID || chatData.riderUid || chatData.userId || participants.find((id: string) => id !== currentUser.uid)].filter(Boolean);
+              const isGroupChat = otherParticipants.length > 1;
+
+              let recipientName = 'Unknown User';
+              let recipientPhotoURL: string | null = null;
+
+              if (isGroupChat) {
+                const names = otherParticipants
+                  .map((pid: string) => {
+                    const userData = userCache.get(pid);
+                    return userData?.fullName
+                      || userData?.name
+                      || userData?.displayName
+                      || ((userData?.firstName || userData?.lastName)
+                          ? [userData?.firstName, userData?.lastName].filter(Boolean).join(' ').trim()
+                          : null)
+                      || userData?.email?.split('@')[0]
+                      || 'User';
+                  })
+                  .filter(Boolean);
+                recipientName = names.length > 0 ? names.join(', ') : 'Group Chat';
+              } else {
+                const riderData = userCache.get(otherParticipants[0]);
+                if (riderData) {
+                  recipientName = riderData.fullName
+                    || riderData.name
+                    || riderData.displayName
+                    || ((riderData.firstName || riderData.lastName)
+                        ? [riderData.firstName, riderData.lastName].filter(Boolean).join(' ').trim()
+                        : null)
+                    || riderData.personalInfo?.fullName
+                    || riderData.email?.split('@')[0]
+                    || 'Unknown User';
+                  recipientPhotoURL = riderData.photoURL || riderData.avatarUrl || riderData.photoUrl || null;
+                }
+              }
+
+              const unreadField = roleUnreadField('driver', currentUser.uid);
+              const legacyField = legacyUnreadField(currentUser.uid);
+              const unreadCounts = chatData.unreadCounts || {};
+              const unreadCount =
+                chatData[unreadField] && typeof chatData[unreadField] === 'number'
+                  ? chatData[unreadField]
+                  : typeof unreadCounts[roleKey('driver', currentUser.uid)] === 'number'
+                    ? unreadCounts[roleKey('driver', currentUser.uid)]
+                  : typeof chatData[legacyField] === 'number'
+                    ? chatData[legacyField]
+                  : 0;
+
+              return {
+                id: docId,
+                rideId,
+                riderId,
+                driverId,
+                participants,
+                lastMessage: availability.available === false ? (availability.unavailableMessage || 'Chat no longer available') : lastMessage || 'No messages yet',
+                lastMessageTimestamp,
+                recipientName,
+                recipientPhotoURL,
+                unreadCount,
+                chatAvailable: availability.available,
+                unavailableMessage: availability.unavailableMessage,
+              };
+            }));
+
+            // Always re-sort client-side by most-recent-first: the fallback
+            // query (used when the composite index is missing) has no orderBy.
+            chatsList.sort((a, b) => {
+              const at = a.lastMessageTimestamp?.toDate?.()?.getTime?.() ?? 0;
+              const bt = b.lastMessageTimestamp?.toDate?.()?.getTime?.() ?? 0;
+              return bt - at;
+            });
+            setChats(chatsList);
+            setLoading(false);
+            setRefreshing(false);
+          } catch (error: any) {
+            console.error('[Chats] Error processing snapshot:', error?.code, error?.message);
+            setLoading(false);
+            setRefreshing(false);
           }
-
-          let rideInfo = 'Ride details unavailable';
-          const rideData = ridesMap.get(rideId);
-          if (rideData) {
-            const pickup = truncateLocation(rideData.pickup || rideData.pickupAddress);
-            const dropoff = truncateLocation(rideData.dropoff || rideData.dropoffAddress);
-            rideInfo = `${pickup} → ${dropoff}`;
-          }
-
-          let unreadCount = 0;
-          const unreadField = `unreadCount_${currentUser.uid}`;
-          if (chatData[unreadField] && typeof chatData[unreadField] === 'number') {
-            unreadCount = chatData[unreadField];
-          }
-
-          return {
-            id: docId,
-            rideId,
-            riderId,
-            driverId,
-            participants,
-            lastMessage: lastMessage || 'No messages yet',
-            lastMessageTimestamp,
-            recipientName,
-            recipientAvatar,
-            rideInfo,
-            unreadCount,
-          };
-        });
-
-          setChats(chatsList);
-          setLoading(false);
-          setRefreshing(false);
-        } catch (error: any) {
-          console.error('[Chats] Error processing snapshot:', error?.code, error?.message);
-          setLoading(false);
-          setRefreshing(false);
-        }
         },
         (error: any) => {
-          console.error('[Chats] Snapshot error:', error?.code, error?.message || error);
-          // Handle common causes: missing index vs permission issues
-          if (!isFallback && (error?.code === 'failed-precondition' || error?.message?.includes('index'))){
-            console.warn('[Chats] Missing composite index for participants + lastMessageTimestamp. Falling back without orderBy.');
+          if (!isFallback && (error?.code === 'failed-precondition' || error?.message?.includes('index'))) {
             if (activeUnsub) activeUnsub();
             attachListener(plainQuery, true, false);
             return;
           }
           if (!isFallback && error?.code === 'permission-denied') {
-            console.warn('[Chats] Permission denied on participants query. Trying driverId query instead.');
             if (activeUnsub) activeUnsub();
             attachListener(driverOrderedQuery, false, true);
             return;
           }
           if (isFallback && !useDriverQuery && error?.code === 'permission-denied') {
-            console.warn('[Chats] Permission denied on plain participants query. Trying driverId query.');
             if (activeUnsub) activeUnsub();
             attachListener(driverOrderedQuery, false, true);
             return;
           }
           if (useDriverQuery && !isFallback && (error?.code === 'failed-precondition' || error?.message?.includes('index'))) {
-            console.warn('[Chats] Missing index for driverId query. Falling back to plain driverId query.');
             if (activeUnsub) activeUnsub();
             attachListener(driverPlainQuery, true, true);
             return;
           }
+
           setLoading(false);
           setRefreshing(false);
         }
@@ -318,10 +467,9 @@ export default function MessagesScreen() {
     };
 
     attachListener(orderedQuery);
+
     chatsUnsubscribeRef.current = () => {
-      if (activeUnsub) {
-        activeUnsub();
-      }
+      if (activeUnsub) activeUnsub();
     };
 
     return chatsUnsubscribeRef.current;
@@ -340,31 +488,26 @@ export default function MessagesScreen() {
   };
 
   const hideThreadLocally = async (threadId: string) => {
-    setChats((prev) => prev.filter((chat) => chat.id !== threadId));
-
-    const updatedHiddenIds = await addHiddenDeletedThreadIdForCurrentUser(threadId);
-    setHiddenThreadIds(updatedHiddenIds);
-    hiddenThreadIdsRef.current = new Set(updatedHiddenIds);
+    setChats((previous) => previous.filter((chat) => chat.id !== threadId));
+    const updatedIds = await addHiddenDeletedThreadIdForCurrentUser(threadId);
+    setHiddenThreadIds(updatedIds);
+    hiddenThreadIdsRef.current = new Set(updatedIds);
   };
 
   const executeDeleteThread = async (threadId: string) => {
     if (!threadId || deletingThreadId) return;
-
     setDeletingThreadId(threadId);
-
     try {
       await deleteMessageThread(threadId);
       await hideThreadLocally(threadId);
       showSuccessToast('Conversation deleted', 'This conversation was removed.');
     } catch (error) {
       const statusCode = (error as DeleteMessageThreadError | undefined)?.statusCode;
-
       if (statusCode === 404) {
         await hideThreadLocally(threadId);
         showSuccessToast('Conversation deleted', 'Conversation no longer exists.');
         return;
       }
-
       showErrorToast('Unable to delete conversation', getDeleteMessageThreadErrorMessage(error));
     } finally {
       setDeletingThreadId(null);
@@ -373,293 +516,138 @@ export default function MessagesScreen() {
 
   const confirmDeleteThread = (threadId: string) => {
     if (!threadId || deletingThreadId) return;
-
-    Alert.alert(
-      'Delete conversation',
-      'Delete this conversation? This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            executeDeleteThread(threadId);
-          },
-        },
-      ]
-    );
+    Alert.alert('Delete conversation', 'Delete this conversation? This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => executeDeleteThread(threadId) },
+    ]);
   };
 
   const formatTimestamp = (timestamp: any) => {
     if (!timestamp || !timestamp.toDate) return '';
-
     const date = timestamp.toDate();
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-
-  const truncateLocation = (location: string) => {
-    if (!location) return 'Unknown';
-    const maxLen = 25;
-    if (location.length <= maxLen) return location;
-    return location.substring(0, maxLen) + '...';
+    const sameDay = date.toDateString() === new Date().toDateString();
+    return sameDay
+      ? date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      : date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   };
 
   const renderChatItem = ({ item }: { item: Chat }) => {
     const isDeleting = deletingThreadId === item.id;
+    const hasUnread = (item.unreadCount ?? 0) > 0;
+    const initial = item.recipientName?.[0]?.toUpperCase() || '?';
 
     return (
       <Swipeable
+        overshootRight={false}
         renderRightActions={() => (
           <TouchableOpacity
-            style={styles.swipeDeleteAction}
+            style={s.swipeDelete}
             onPress={() => confirmDeleteThread(item.id)}
             disabled={isDeleting}
+            accessibilityRole="button"
+            accessibilityLabel={`Delete conversation with ${item.recipientName}`}
           >
             {isDeleting ? (
-              <ActivityIndicator size="small" color="white" />
+              <ActivityIndicator color={colors.textInverse} />
             ) : (
-              <Ionicons name="trash-outline" size={20} color="white" />
+              <Ionicons name="trash-outline" size={20} color={colors.textInverse} />
             )}
-            <Text style={styles.swipeDeleteActionText}>Delete</Text>
+            <Text style={s.swipeDeleteText}>Delete</Text>
           </TouchableOpacity>
         )}
       >
         <TouchableOpacity
-          style={styles.chatItem}
-          onPress={() => router.push(`/messages/${item.id}`)}
+          style={s.row}
+          onPress={() => router.push({ pathname: '/(driver)/messages/[chatId]', params: { chatId: item.id, returnTo: '/(driver)/messages' } } as any)}
           disabled={isDeleting}
-          activeOpacity={0.7}
+          accessibilityRole="button"
         >
-          {item.recipientAvatar ? (
-            <Image source={{ uri: item.recipientAvatar }} style={styles.avatar} />
-          ) : (
-            <View style={styles.avatarPlaceholder}>
-              <Ionicons name="person" size={24} color="#9ca3af" />
+          <View style={s.avatar}>
+            {item.recipientPhotoURL
+              ? <Image source={{ uri: item.recipientPhotoURL }} style={{ width: 48, height: 48, borderRadius: 24 }} contentFit="cover" />
+              : <Text style={s.avatarText}>{initial}</Text>}
+          </View>
+
+          <View style={s.rowContent}>
+            <View style={s.rowTop}>
+              <Text style={s.name} numberOfLines={1}>{item.recipientName}</Text>
             </View>
-          )}
-          <View style={styles.chatItemContent}>
-            <View style={styles.chatItemHeader}>
-              <Text style={styles.chatItemName}>{item.recipientName}</Text>
-              <View style={styles.chatItemHeaderRight}>
-                {(item.unreadCount ?? 0) > 0 && (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadBadgeText}>{item.unreadCount}</Text>
-                  </View>
-                )}
-                <Text style={styles.chatItemTime}>{formatTimestamp(item.lastMessageTimestamp)}</Text>
-              </View>
-            </View>
-            <Text style={styles.chatItemLastMessage} numberOfLines={1}>
-              {item.lastMessage}
-            </Text>
-            <View style={styles.chatItemRideInfo}>
-              <Ionicons name="car-outline" size={12} color="#9ca3af" />
-              <Text style={styles.chatItemRideInfoText}>{item.rideInfo}</Text>
-            </View>
+            <Text style={s.preview} numberOfLines={1}>{item.lastMessage}</Text>
+          </View>
+
+          <View style={s.rowMeta}>
+            <Text style={s.time}>{formatTimestamp(item.lastMessageTimestamp)}</Text>
+            {item.chatAvailable === false ? <Text style={s.closedBadge}>CLOSED</Text> : null}
+            {hasUnread ? <Text style={s.newBadge}>{item.unreadCount} NEW</Text> : null}
           </View>
         </TouchableOpacity>
       </Swipeable>
     );
   };
 
+  const Header = (
+    <View style={s.pageHeader}>
+      <Text style={s.pageTitle}>Messages</Text>
+    </View>
+  );
+
   if (loading || !hydratedHiddenIds) {
     return (
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <View style={styles.container}>
-          <View style={styles.headerContainer}>
-            <Text style={styles.headerTitle}>Messages</Text>
-          </View>
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#E05E1A" />
-            <Text style={styles.loadingText}>Loading conversations...</Text>
-          </View>
-        </View>
-      </SafeAreaView>
+      <View style={s.root}>
+        <StatusBar barStyle={colors.statusBar} />
+        <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
+          <ScrollView
+            style={s.scroll}
+            contentContainerStyle={s.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={s.pageHeader}>
+              <Text style={s.pageTitle}>Messages</Text>
+            </View>
+            <View style={s.loadingWrap}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={s.loadingText}>Loading conversations...</Text>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <View style={styles.container}>
-        <View style={styles.headerContainer}>
-          <Text style={styles.headerTitle}>Messages</Text>
-        </View>
-        {chats.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="chatbubbles-outline" size={80} color="#d1d5db" />
-            <Text style={styles.emptyTitle}>No conversations yet</Text>
-            <Text style={styles.emptyText}>
-              Chats will appear here when you have confirmed rides
-            </Text>
-          </View>
-        ) : (
-          <FlatList
-            data={chats}
-            renderItem={renderChatItem}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.listContainer}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#E05E1A']} />
-            }
-          />
-        )}
-      </View>
-    </SafeAreaView>
+    <View style={s.root}>
+      <StatusBar barStyle={colors.statusBar} />
+      <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
+        <FlatList
+          data={chats}
+          renderItem={renderChatItem}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={s.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+            />
+          }
+          ListHeaderComponent={Header}
+          ListEmptyComponent={
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 60 }}>
+              <View style={s.emptyIcon}>
+                <Ionicons name="chatbubbles-outline" size={25} color={colors.primary} />
+              </View>
+              <Text style={s.emptyTitle}>No conversations yet</Text>
+              <Text style={s.emptyText}>
+                Messages from riders will appear here once you accept a booking.
+              </Text>
+            </View>
+          }
+        />
+      </SafeAreaView>
+
+      <DriverBottomNav activeTab="inbox" />
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: 'white',
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#f9fafb',
-  },
-  headerContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 12,
-    backgroundColor: '#f9fafb',
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#1f2937',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f9fafb',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 14,
-    color: '#9ca3af',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1f2937',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#6b7280',
-    textAlign: 'center',
-  },
-  listContainer: {
-    paddingVertical: 8,
-  },
-  chatItem: {
-    flexDirection: 'row',
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    alignItems: 'center',
-    gap: 12,
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#e5e7eb',
-  },
-  avatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#e5e7eb',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chatItemContent: {
-    flex: 1,
-    marginRight: 12,
-  },
-  chatItemHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  chatItemHeaderRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  chatItemName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
-    flex: 1,
-  },
-  chatItemTime: {
-    fontSize: 12,
-    color: '#9ca3af',
-  },
-  unreadBadge: {
-    backgroundColor: '#EF4444',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
-  },
-  unreadBadgeText: {
-    color: 'white',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  chatItemLastMessage: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginBottom: 4,
-  },
-  chatItemRideInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  chatItemRideInfoText: {
-    fontSize: 12,
-    color: '#9ca3af',
-  },
-  swipeDeleteAction: {
-    backgroundColor: '#DC2626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  swipeDeleteActionText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: 4,
-  },
-});

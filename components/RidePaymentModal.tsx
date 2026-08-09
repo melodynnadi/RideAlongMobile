@@ -14,6 +14,7 @@ import {
   Alert,
 } from 'react-native';
 import { X, DollarSign, CreditCard } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { useRidePayments } from '@/hooks/useRidePayments';
 import { useAuthStore } from '@/stores/authStore';
@@ -43,7 +44,8 @@ export function RidePaymentModal({
   onError,
 }: RidePaymentModalProps) {
   const theme = useTheme();
-  const { user } = useAuthStore();
+  const { uid } = useAuthStore();
+  const user = uid ? { id: uid } : null;
   const {
     paymentMethods,
     selectedPaymentMethodId,
@@ -114,7 +116,10 @@ export function RidePaymentModal({
         <View style={[styles.modal, { backgroundColor: theme.colors.card }]}>
           {/* Header */}
           <View style={styles.header}>
-            <Text style={[styles.title, { color: theme.colors.text }]}>Authorize Payment</Text>
+            <View style={styles.headerIcon}>
+              <Ionicons name="wallet-outline" size={17} color="#DE5D20" />
+            </View>
+            <Text style={[styles.title, { color: theme.colors.text, flex: 1 }]}>Authorize Payment</Text>
             <TouchableOpacity onPress={onClose} disabled={isAuthorizingPayment}>
               <X size={24} color={theme.colors.text} />
             </TouchableOpacity>
@@ -207,10 +212,11 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 10,
     marginBottom: 24,
   },
+  headerIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#FFF2E9', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   title: {
     fontSize: 20,
     fontWeight: '600',

@@ -1,12 +1,30 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { MapPin, Navigation, Plus, Pencil, Trash2, ArrowRight, X } from 'lucide-react-native';
-import { useDriverPreferredRoutesStore } from '@/stores/preferredRoutesStore';
+import { useDriverPreferredRoutesStore, usePreferredRoutesStore } from '@/stores/preferredRoutesStore';
 import { CityAutocomplete } from './CityAutocomplete';
 import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import type { AppColors } from '@/constants/theme';
 
-export const DriverPreferredRoutesManager: React.FC = () => {
-  const { routes, load, add, update, remove, loading, saving, error, clearError } = useDriverPreferredRoutesStore();
+type PreferredRoutesManagerProps = {
+  role?: 'driver' | 'rider';
+};
+
+export const DriverPreferredRoutesManager: React.FC<PreferredRoutesManagerProps> = ({ role = 'driver' }) => {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const driverRoutes = useDriverPreferredRoutesStore();
+  const riderRoutes = usePreferredRoutesStore();
+  const routes = role === 'driver' ? driverRoutes.routes : riderRoutes.routes;
+  const load = role === 'driver' ? driverRoutes.load : riderRoutes.loadRoutes;
+  const add = role === 'driver' ? driverRoutes.add : riderRoutes.addRoute;
+  const update = role === 'driver' ? driverRoutes.update : riderRoutes.updateRoute;
+  const remove = role === 'driver' ? driverRoutes.remove : riderRoutes.deleteRoute;
+  const loading = role === 'driver' ? driverRoutes.loading : riderRoutes.loading;
+  const saving = role === 'driver' ? driverRoutes.saving : riderRoutes.isSaving;
+  const error = role === 'driver' ? driverRoutes.error : riderRoutes.error;
+  const clearError = role === 'driver' ? driverRoutes.clearError : riderRoutes.clearError;
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -36,12 +54,12 @@ export const DriverPreferredRoutesManager: React.FC = () => {
   return (
     <View style={styles.container}>
       <Text style={styles.heading}>Preferred Routes</Text>
-      <Text style={styles.subheading}>We notify you when riders request matching routes.</Text>
+      <Text style={styles.subheading}>{role === 'driver' ? 'Get notified for matching ride requests.' : 'Get notified for matching ride postings.'}</Text>
 
       {/* Origin input */}
       <View style={styles.inputGroup}>
         <View style={styles.inputLabel}>
-          <MapPin size={16} color="#E05E1A" />
+          <MapPin size={16} color={colors.primary} />
           <Text style={styles.inputLabelText}>Pickup</Text>
         </View>
         <View style={{ zIndex: 2 }}>
@@ -58,7 +76,7 @@ export const DriverPreferredRoutesManager: React.FC = () => {
       {/* Destination input */}
       <View style={[styles.inputGroup, { zIndex: 1 }]}>
         <View style={styles.inputLabel}>
-          <Navigation size={16} color="#E05E1A" />
+          <Navigation size={16} color={colors.primary} />
           <Text style={styles.inputLabelText}>Dropoff</Text>
         </View>
         <CityAutocomplete
@@ -74,7 +92,7 @@ export const DriverPreferredRoutesManager: React.FC = () => {
       <View style={styles.actions}>
         {editingId && (
           <TouchableOpacity style={styles.cancelBtn} onPress={resetForm}>
-            <X size={16} color="#64748B" />
+            <X size={16} color={colors.textSecondary} />
             <Text style={styles.cancelBtnText}>Cancel</Text>
           </TouchableOpacity>
         )}
@@ -84,9 +102,9 @@ export const DriverPreferredRoutesManager: React.FC = () => {
           disabled={saving}
         >
           {editingId ? (
-            <Pencil size={16} color="white" />
+            <Pencil size={16} color={colors.textInverse} />
           ) : (
-            <Plus size={16} color="white" />
+            <Plus size={16} color={colors.textInverse} />
           )}
           <Text style={styles.saveBtnText}>
             {editingId ? (saving ? 'Updating...' : 'Update Route') : (saving ? 'Adding...' : 'Add Route')}
@@ -96,7 +114,7 @@ export const DriverPreferredRoutesManager: React.FC = () => {
 
       {/* Saved routes */}
       {loading ? (
-        <ActivityIndicator style={{ marginTop: 20 }} color="#E05E1A" />
+        <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} />
       ) : routes.length === 0 ? (
         <Text style={styles.empty}>No preferred routes yet.</Text>
       ) : (
@@ -105,12 +123,12 @@ export const DriverPreferredRoutesManager: React.FC = () => {
             <View key={item.id} style={styles.routeCard}>
               <View style={styles.routeInfo}>
                 <Text style={styles.routeOrigin} numberOfLines={1}>{item.origin}</Text>
-                <ArrowRight size={14} color="#94A3B8" style={{ marginHorizontal: 6 }} />
+                <ArrowRight size={14} color={colors.textSecondary} style={{ marginHorizontal: 6 }} />
                 <Text style={styles.routeDest} numberOfLines={1}>{item.destination}</Text>
               </View>
               <View style={styles.routeActions}>
                 <TouchableOpacity style={styles.iconBtn} onPress={() => editRoute(item.id)} hitSlop={8}>
-                  <Pencil size={16} color="#64748B" />
+                  <Pencil size={16} color={colors.textSecondary} />
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.iconBtn} onPress={() => deleteRoute(item.id)} hitSlop={8}>
                   <Trash2 size={16} color="#DC2626" />
@@ -124,23 +142,24 @@ export const DriverPreferredRoutesManager: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
+function makeStyles(colors: AppColors) {
+  return StyleSheet.create({
   container: {
     padding: 16,
-    backgroundColor: 'white',
-    borderRadius: 12,
+    backgroundColor: colors.bgCard,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
   },
   heading: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#0F172A',
+    color: colors.textPrimary,
     marginBottom: 4,
   },
   subheading: {
     fontSize: 13,
-    color: '#64748B',
+    color: colors.textSecondary,
     marginBottom: 16,
   },
   inputGroup: {
@@ -155,7 +174,7 @@ const styles = StyleSheet.create({
   inputLabelText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#475569',
+    color: colors.textPrimary,
   },
   actions: {
     flexDirection: 'row',
@@ -169,11 +188,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#E05E1A',
+    borderRadius: 25,
+    backgroundColor: colors.primary,
   },
   saveBtnText: {
-    color: 'white',
+    color: colors.textInverse,
     fontWeight: '600',
     fontSize: 14,
   },
@@ -184,11 +203,11 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingVertical: 12,
     paddingHorizontal: 16,
-    borderRadius: 8,
-    backgroundColor: '#F1F5F9',
+    borderRadius: 25,
+    backgroundColor: colors.bgSecondary,
   },
   cancelBtnText: {
-    color: '#64748B',
+    color: colors.textSecondary,
     fontWeight: '600',
     fontSize: 14,
   },
@@ -200,10 +219,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
-    backgroundColor: '#F8FAFC',
-    borderRadius: 10,
+    backgroundColor: colors.bgSecondary,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
   },
   routeInfo: {
     flex: 1,
@@ -213,13 +232,13 @@ const styles = StyleSheet.create({
   routeOrigin: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#0F172A',
+    color: colors.textPrimary,
     flexShrink: 1,
   },
   routeDest: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#475569',
+    color: colors.textSecondary,
     flexShrink: 1,
   },
   routeActions: {
@@ -233,9 +252,10 @@ const styles = StyleSheet.create({
   empty: {
     textAlign: 'center',
     marginTop: 20,
-    color: '#94A3B8',
+    color: colors.textSecondary,
     fontSize: 14,
   },
-});
+  });
+}
 
 export default DriverPreferredRoutesManager;

@@ -3,9 +3,9 @@ import { firestore, getApiBaseUrl, firebaseAuth } from '@/constants/services';
 import { collection, doc, getDoc, getDocs, query, updateDoc, where, serverTimestamp } from 'firebase/firestore';
 import { updateRideStatus } from '@/src/services/functions';
 import { resolveConfirmedDocId } from '@/src/services/ridesData';
-import { submitDriverFlag, FlagPayload } from '@/src/services/flagService';
 import { logActivity } from '@/src/services/activity';
 import EmailTriggerService from '../../services/EmailTriggerService';
+import { captureRidePayment } from '@/services/payments';
 
 function showRideError(e: any) {
   try { console.warn('updateRideStatus error', e); } catch {}
@@ -31,11 +31,9 @@ export type RideCardRef = {
   riderId?: string;
 };
 
-export async function confirmPickup(card: RideCardRef): Promise<boolean> {
+export async function confirmPickup(card: RideCardRef & { verificationCode?: string }): Promise<boolean> {
   try {
-  try { console.log('[pickup] incoming card', card); } catch {}
     const rideId = await resolveConfirmedDocId(card);
-  try { console.log('[pickup] resolved rideId', rideId); } catch {}
     if (!rideId) {
       Alert.alert('Error', 'Ride not found');
       return false;
@@ -46,7 +44,6 @@ export async function confirmPickup(card: RideCardRef): Promise<boolean> {
       const data = snap.exists() ? (snap.data() as any) : undefined;
       const raw = String(data?.status || '').trim();
   const normalized = raw.replace(/[-\s]/g, '_').toUpperCase();
-  try { console.log('[pickup] current status', raw, '->', normalized); } catch {}
       if (normalized === 'PENDING') {
         Alert.alert('Waiting for passengers', 'Pickup will be available once all seats are filled.');
         return false;
@@ -67,8 +64,14 @@ export async function confirmPickup(card: RideCardRef): Promise<boolean> {
         driverPickupConfirmed: true,
         updatedAt: serverTimestamp(),
       }).catch(() => {});
-      const ok = await callUpdateRideStatus(rideId, 'driver_pickup');
-      if (!ok) throw new Error('pickup_failed');
+      const result = await callUpdateRideStatus(rideId, 'driver_pickup', card.verificationCode ? { verificationCode: card.verificationCode } : undefined);
+      if (!result.ok) {
+        if (result.code === 'code_invalid' || result.code === 'code_required') {
+          Alert.alert('Incorrect code', result.error || 'The code you entered does not match. Ask your rider for the code shown in their app.');
+          return false;
+        }
+        throw new Error('pickup_failed');
+      }
       await logActivity({
         type: 'ride_picked_up',
         entityType: 'ride',
@@ -86,8 +89,8 @@ export async function confirmPickup(card: RideCardRef): Promise<boolean> {
       if (code === 'failed-precondition') {
         try {
           await updateDoc(doc(firestore, 'confirmedRides', rideId), { status: 'CONFIRMED' });
-          const ok2 = await callUpdateRideStatus(rideId, 'driver_pickup');
-          if (!ok2) throw new Error('pickup_failed_retry');
+          const r2 = await callUpdateRideStatus(rideId, 'driver_pickup');
+          if (!r2.ok) throw new Error('pickup_failed_retry');
           return true;
         } catch (e2) {
           throw e2;
@@ -105,9 +108,7 @@ export async function confirmPickup(card: RideCardRef): Promise<boolean> {
 
 export async function completeRide(card: RideCardRef): Promise<boolean> {
   try {
-  try { console.log('[complete] incoming card', card); } catch {}
     const rideId = await resolveConfirmedDocId(card);
-  try { console.log('[complete] resolved rideId', rideId); } catch {}
     if (!rideId) {
       Alert.alert('Error', 'Ride not found');
       return false;
@@ -118,7 +119,7 @@ export async function completeRide(card: RideCardRef): Promise<boolean> {
       driverCompleteConfirmed: true,
       updatedAt: serverTimestamp(),
     }).catch(() => {});
-    const ok = await callUpdateRideStatus(rideId, 'driver_complete');
+    const { ok } = await callUpdateRideStatus(rideId, 'driver_complete');
     if (!ok) throw new Error('complete_failed');
     await logActivity({
       type: 'ride_completed',
@@ -137,113 +138,112 @@ export async function completeRide(card: RideCardRef): Promise<boolean> {
   }
 }
 
-export async function cancelRide(card: RideCardRef): Promise<boolean> {
-  const fallbackId = card.confirmedId || card.rideRequestId || card.ridePostingId || card.riderId || null;
+export async function riderCompleteRide(confirmedRideId: string): Promise<boolean> {
   try {
-    const rideId = await resolveConfirmedDocId(card).catch(() => fallbackId || null);
+    await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), {
+      riderCompleteConfirmed: true,
+      updatedAt: serverTimestamp(),
+    }).catch(() => {});
+    const { ok } = await callUpdateRideStatus(confirmedRideId, 'rider_complete');
+    if (!ok) throw new Error('rider_complete_failed');
     await logActivity({
-      type: 'ride_canceled',
+      type: 'ride_completed',
       entityType: 'ride',
-      entityId: rideId ?? fallbackId ?? null,
-      metadata: { card, outcome: 'unsupported' },
+      entityId: confirmedRideId,
+      metadata: { role: 'rider' },
     });
-  } catch {}
-  Alert.alert('Unsupported', 'Cancelling a confirmed ride is not supported.');
-  return false;
-}
 
-export async function flagRide(card: RideCardRef, payload: FlagPayload): Promise<boolean> {
-  try {
-    const rideId = await resolveConfirmedDocId(card);
-    if (!rideId) {
-      Alert.alert('Error', 'Ride not found');
-      return false;
+    // Capture the authorized payment — rider confirming is the final step.
+    // Guard: only capture if the ride actually progressed through pickup (driverPickupConfirmed)
+    // to prevent capturing payment for rides that were never actually driven.
+    try {
+      const rideSnap = await getDoc(doc(firestore, 'confirmedRides', confirmedRideId));
+      if (rideSnap.exists()) {
+        const rideData = rideSnap.data() as any;
+        const paymentIntentId: string | null =
+          rideData.paymentIntentId || rideData.stripePaymentIntentId || null;
+        const driverId: string | null = rideData.driverId || null;
+        const wasPickedUp = rideData.driverPickupConfirmed === true || rideData.riderPickupConfirmed === true;
+        const alreadyCaptured = rideData.paymentStatus === 'CAPTURED';
+        if (paymentIntentId && driverId && wasPickedUp && !alreadyCaptured) {
+          await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), {
+            paymentStatus: 'PENDING',
+          }).catch(() => {});
+          await captureRidePayment(paymentIntentId, confirmedRideId, driverId);
+          await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), {
+            paymentStatus: 'CAPTURED',
+          }).catch(() => {});
+        } else if (paymentIntentId && !wasPickedUp) {
+          console.warn('[riderComplete] skipping capture — driver never confirmed pickup');
+        }
+      }
+    } catch (captureErr) {
+      await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), {
+        paymentStatus: 'FAILED',
+      }).catch(() => {});
+      console.warn('[riderComplete] payment capture failed', captureErr);
     }
-    const result = await submitDriverFlag(rideId, payload);
-    await logActivity({
-      type: 'ride_flagged',
-      entityType: 'ride',
-      entityId: rideId,
-      metadata: { 
-        reason: payload.reason, 
-        payload,
-        flaggedRides: result.flaggedRides,
-        isGroupRide: result.isGroupRide 
-      },
-    });
-    
-    // Show appropriate success message
-    if (result.isGroupRide) {
-      Alert.alert(
-        'Group Ride Flagged',
-        `All ${result.flaggedRides} passengers in this group ride have been flagged. Admin will review this case. No further actions can be taken until resolved.`,
-        [{ text: 'OK' }]
-      );
-    } else {
-      Alert.alert(
-        'Ride Flagged',
-        'This ride has been flagged for admin review. No further actions can be taken until resolved.',
-        [{ text: 'OK' }]
-      );
-    }
-    
+
     return true;
-  } catch (e: any) {
-    try { console.warn('flagRide error', e); } catch {}
-    Alert.alert('Error', 'Could not submit flag. Please try again.');
+  } catch (e) {
+    showRideError(e);
     return false;
   }
 }
 
-// Flag all rides in a group posting (driver-initiated)
-export async function groupFlag(ridePostingId: string, payload: FlagPayload): Promise<boolean> {
+export async function cancelRide(card: RideCardRef): Promise<boolean> {
+  const fallbackId = card.confirmedId || card.rideRequestId || card.ridePostingId || card.riderId || null;
   try {
-    if (!ridePostingId) throw new Error('missing_posting_id');
-    
-    // Find any confirmed ride from this posting to use as the base
-    const qy = query(
-      collection(firestore, 'confirmedRides'),
-      where('ridePostingId', '==', ridePostingId)
-    );
-    const snap = await getDocs(qy);
-    
-    if (snap.empty) {
-      Alert.alert('Error', 'No confirmed rides found for this posting');
+    const rideId = await resolveConfirmedDocId(card).catch(() => fallbackId);
+    if (!rideId) {
+      Alert.alert('Error', 'Ride not found. Please refresh and try again.');
       return false;
     }
-    
-    // Use the first ride's ID to trigger the group flag
-    const firstRideId = snap.docs[0].id;
-    const result = await submitDriverFlag(firstRideId, payload);
-    
-    await logActivity({
-      type: 'group_ride_flagged',
-      entityType: 'posting',
-      entityId: ridePostingId,
-      metadata: { 
-        reason: payload.reason, 
-        payload,
-        flaggedRides: result.flaggedRides 
-      },
+
+    const rideSnap = await getDoc(doc(firestore, 'confirmedRides', rideId));
+    if (!rideSnap.exists()) {
+      Alert.alert('Error', 'Ride not found. It may have already been cancelled.');
+      return false;
+    }
+    const rideData = rideSnap.data() as any;
+    const currentStatus = String(rideData.status || '').replace(/[-\s]/g, '_').toUpperCase();
+
+    if (['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED', 'COMPLETED'].includes(currentStatus)) {
+      Alert.alert('Cannot cancel', 'This ride cannot be cancelled once it has started.');
+      return false;
+    }
+
+    // Cancel via the backend so the payment hold is voided, the cancellation is
+    // propagated to the originating request docs, and — for group rides — the
+    // seat is released back to the parent posting (reopening it if it was full).
+    const base = getApiBaseUrl();
+    const resp = await fetch(`${base}/api/rides/${encodeURIComponent(rideId)}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collection: 'confirmedRides', cancelledBy: 'driver' }),
     });
-    
-    Alert.alert(
-      'Group Ride Flagged',
-      `All ${result.flaggedRides} passengers in this group ride have been flagged. Admin will review this case.`,
-      [{ text: 'OK' }]
-    );
-    
+    if (!resp.ok) {
+      throw new Error(`Server error ${resp.status}`);
+    }
+
+    await logActivity({
+      type: 'ride_canceled',
+      entityType: 'ride',
+      entityId: rideId,
+      metadata: { card },
+    });
+
     return true;
   } catch (e: any) {
-    try { console.warn('groupFlag error', e); } catch {}
-    Alert.alert('Error', 'Could not submit flag. Please try again.');
+    try { console.warn('[cancelRide] error', e); } catch {}
+    Alert.alert('Error', 'Could not cancel the ride. Please try again.');
     return false;
   }
 }
 
 // --- Group ride actions (posting-level) ---
 // Pick up all child confirmed rides for a posting (Dual Passenger Group Ride)
-export async function groupPickup(ridePostingId: string): Promise<{ ok: boolean; updated: number; riderIds: string[] }> {
+export async function groupPickup(ridePostingId: string): Promise<{ ok: boolean; updated: number; total: number; failedCount: number; riderIds: string[]; confirmedRideIds: string[] }> {
   try {
     if (!ridePostingId) throw new Error('missing_posting_id');
     const qy = query(
@@ -263,6 +263,7 @@ export async function groupPickup(ridePostingId: string): Promise<{ ok: boolean;
       }
     });
     let updated = 0;
+    const confirmedRideIds: string[] = [];
     for (const id of targets) {
       try {
         // Local mark then backend callable (mirrors single-ride flow)
@@ -270,23 +271,31 @@ export async function groupPickup(ridePostingId: string): Promise<{ ok: boolean;
           driverPickupConfirmed: true,
           updatedAt: serverTimestamp(),
         }).catch(() => {});
-        const ok = await callUpdateRideStatus(id, 'driver_pickup');
-        if (!ok) throw new Error('pickup_failed');
+        const { ok: pickupOk } = await callUpdateRideStatus(id, 'driver_pickup');
+        if (!pickupOk) throw new Error('pickup_failed');
         updated++;
+        confirmedRideIds.push(id);
       } catch (e) {
-        // continue other children
+        // Don't silently drop this rider — surface it so the driver knows to retry.
+        console.warn('[groupPickup] failed for confirmedRide', id, e);
       }
     }
-    try { console.log('analytics', 'group_ride_pickup', { ridePostingId, riderIds }); } catch {}
-    return { ok: true, updated, riderIds };
+    const failedCount = targets.length - updated;
+    if (failedCount > 0) {
+      Alert.alert(
+        'Pickup incomplete',
+        `Picked up ${updated} of ${targets.length} passenger(s). Tap Pick Up again to retry the rest.`,
+      );
+    }
+    return { ok: failedCount === 0, updated, total: targets.length, failedCount, riderIds, confirmedRideIds };
   } catch (e) {
     showRideError(e);
-    return { ok: false, updated: 0, riderIds: [] };
+    return { ok: false, updated: 0, total: 0, failedCount: 0, riderIds: [], confirmedRideIds: [] };
   }
 }
 
 // Request completion for all IN_PROGRESS child rides of a posting
-export async function groupComplete(ridePostingId: string): Promise<{ ok: boolean; updated: number; riderIds: string[] }> {
+export async function groupComplete(ridePostingId: string): Promise<{ ok: boolean; updated: number; total: number; failedCount: number; riderIds: string[] }> {
   try {
     if (!ridePostingId) throw new Error('missing_posting_id');
     const qy = query(
@@ -313,45 +322,55 @@ export async function groupComplete(ridePostingId: string): Promise<{ ok: boolea
           driverCompleteConfirmed: true,
           updatedAt: serverTimestamp(),
         }).catch(() => {});
-        const ok = await callUpdateRideStatus(id, 'driver_complete');
-        if (!ok) throw new Error('complete_failed');
+        const { ok: completeOk } = await callUpdateRideStatus(id, 'driver_complete');
+        if (!completeOk) throw new Error('complete_failed');
         updated++;
       } catch (e) {
-        // continue
+        // Don't silently drop this rider — surface it so the driver knows to retry.
+        console.warn('[groupComplete] failed for confirmedRide', id, e);
       }
     }
-    try { console.log('analytics', 'group_ride_complete_request', { ridePostingId, riderIds }); } catch {}
-    return { ok: true, updated, riderIds };
+    const failedCount = targets.length - updated;
+    if (failedCount > 0) {
+      Alert.alert(
+        'Completion incomplete',
+        `Completed ${updated} of ${targets.length} passenger(s). Tap Complete Ride again to retry the rest.`,
+      );
+    }
+    return { ok: failedCount === 0, updated, total: targets.length, failedCount, riderIds };
   } catch (e) {
     showRideError(e);
-    return { ok: false, updated: 0, riderIds: [] };
+    return { ok: false, updated: 0, total: 0, failedCount: 0, riderIds: [] };
   }
 }
 
 // --- Backend update helper: Firebase Callable first, REST fallback to Express ---
-async function callUpdateRideStatus(rideId: string, action: 'driver_pickup' | 'driver_complete' | 'rider_pickup' | 'rider_complete'): Promise<boolean> {
-  try {
-    const res: any = await updateRideStatus({ rideId, action });
-    try { console.log('[updateRideStatus] callable response', res?.data ?? res); } catch {}
-    if (res && (res as any).data && (res as any).data.ok === false) {
-      // fall through to REST
-      throw new Error('callable_failed');
-    }
-    return true;
-  } catch (e) {
+async function callUpdateRideStatus(rideId: string, action: 'driver_pickup' | 'driver_complete' | 'rider_pickup' | 'rider_complete', extra?: Record<string, any>): Promise<{ ok: boolean; error?: string; code?: string }> {
+  // If extra params are present (e.g. verificationCode), skip the Cloud Function —
+  // it doesn't support these params and would bypass validation. Go straight to REST.
+  if (!extra || Object.keys(extra).length === 0) {
     try {
-      const base = getApiBaseUrl();
-      const token = await firebaseAuth.currentUser?.getIdToken();
-      const resp = await fetch(`${base}/rides/${encodeURIComponent(rideId)}/update-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ action, userId: firebaseAuth.currentUser?.uid }),
-      });
-      if (!resp.ok) return false;
-      const j = await resp.json().catch(() => ({ ok: true }));
-      return !!(j && j.ok !== false);
+      const res: any = await updateRideStatus({ rideId, action });
+      if (res && (res as any).data && (res as any).data.ok === false) {
+        throw new Error('callable_failed');
+      }
+      return { ok: true };
     } catch {
-      return false;
+      // fall through to REST
     }
+  }
+  try {
+    const base = getApiBaseUrl();
+    const token = await firebaseAuth.currentUser?.getIdToken();
+    const resp = await fetch(`${base}/rides/${encodeURIComponent(rideId)}/update-status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ action, userId: firebaseAuth.currentUser?.uid, ...(extra || {}) }),
+    });
+    const j = await resp.json().catch(() => ({ ok: resp.ok }));
+    if (!resp.ok) return { ok: false, error: j?.message || j?.error, code: j?.error };
+    return { ok: !!(j && j.ok !== false) };
+  } catch {
+    return { ok: false };
   }
 }

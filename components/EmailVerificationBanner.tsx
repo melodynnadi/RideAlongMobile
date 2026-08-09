@@ -33,7 +33,7 @@ export function EmailVerificationBanner({ userEmail }: EmailVerificationBannerPr
   };
 
   const handleGoToVerification = () => {
-    router.push('/email-verification');
+    router.push('/(auth)/verify-email' as any);
   };
 
   return (

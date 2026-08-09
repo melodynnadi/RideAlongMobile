@@ -1,1 +1,3 @@
-export { default } from './available-rides';
+import { RiderRequestsReference } from '@/components/reference/AppReferenceScreens';
+
+export default RiderRequestsReference;

@@ -47,7 +47,7 @@ export async function createDriverPreferredRoute(origin: string, destination: st
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Failed to create route');
-  return json.route;
+  return { ...json.route, duplicate: Boolean(json.duplicate) };
 }
 
 export async function updateDriverPreferredRoute(id: string, origin: string, destination: string): Promise<DriverPreferredRoute> {
@@ -95,7 +95,7 @@ export async function createRiderPreferredRoute(origin: string, destination: str
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Failed to create route');
-  return json.route;
+  return { ...json.route, duplicate: Boolean(json.duplicate) };
 }
 
 export async function updateRiderPreferredRoute(id: string, origin: string, destination: string): Promise<RiderPreferredRoute> {

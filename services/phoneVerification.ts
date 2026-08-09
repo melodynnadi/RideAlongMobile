@@ -3,13 +3,13 @@
  * Handles OTP verification flow for phone number changes
  */
 
-import { firebaseAuth } from '@/constants/services';
-import { getApiBaseUrl } from '@/constants/services';
+import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
 
 export interface OTPResponse {
   success: boolean;
   message: string;
   expiresAt?: number;
+  devCode?: string;
   error?: string;
 }
 

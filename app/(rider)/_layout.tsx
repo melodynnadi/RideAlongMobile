@@ -1,19 +1,24 @@
-import { Tabs } from 'expo-router';
+import { router, Tabs } from 'expo-router';
 import React, { useEffect } from 'react';
-import { Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { RouteErrorFallback } from '@/components/ErrorBoundary';
+
+export { RouteErrorFallback as ErrorBoundary };
 
 import { HapticTab } from '@/components/HapticTab';
 import TabBarBackground from '@/components/ui/TabBarBackground';
-import { useTheme } from '@/hooks/useTheme';
+import { useAppTheme } from '@/hooks/ThemeContext';
 import { useAuthStore } from '@/stores/authStore';
-import { useUnreadMessages } from '@/hooks/useUnreadMessages';
+import { useRiderUnreadCounts } from '@/hooks/useRiderUnreadCounts';
+import { usePendingRatingGate } from '@/src/hooks/usePendingRatingGate';
+import { useGlobalRiderTracking } from '@/src/hooks/useGlobalRiderTracking';
 
 export default function RiderTabLayout() {
-  const theme = useTheme();
+  const { colors } = useAppTheme();
   const { isAuthenticated, isEmailVerified, checkEmailVerification } = useAuthStore();
-  const totalUnread = useUnreadMessages();
+  const { messageCount: totalUnread } = useRiderUnreadCounts();
+  usePendingRatingGate('rider', isAuthenticated && isEmailVerified);
+  useGlobalRiderTracking(isAuthenticated && isEmailVerified);
 
   useEffect(() => {
     if (isAuthenticated && !isEmailVerified) {
@@ -32,18 +37,13 @@ export default function RiderTabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: theme.colors.primary,
-        tabBarInactiveTintColor: theme.colors.muted,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textSecondary,
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarBackground: TabBarBackground,
         tabBarStyle: {
-          backgroundColor: '#101826',
-          borderTopColor: '#1E2D45',
-          borderTopWidth: 1,
-          height: Platform.OS === 'ios' ? 90 : 80,
-          paddingBottom: Platform.OS === 'ios' ? 25 : 15,
-          paddingTop: 10,
+          display: 'none',
         },
       }}
     >
@@ -57,8 +57,8 @@ export default function RiderTabLayout() {
       <Tabs.Screen
         name="book"
         options={{
-          title: 'Book',
-          tabBarIcon: ({ color, size }) => <Ionicons name="car" size={size || 24} color={color} />,
+          title: 'Request',
+          tabBarIcon: ({ color, size }) => <Ionicons name="add-circle-outline" size={size || 24} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -74,16 +74,10 @@ export default function RiderTabLayout() {
           title: 'Messages',
           tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" size={size || 24} color={color} />,
           tabBarBadge: totalUnread > 0 ? totalUnread : undefined,
-          tabBarBadgeStyle: { backgroundColor: '#EF4444', color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' },
+          tabBarBadgeStyle: { backgroundColor: colors.redDeep, color: colors.textInverse, fontSize: 12, fontWeight: 'bold' },
         }}
       />
-      <Tabs.Screen
-        name="notifications"
-        options={{
-          title: 'Alerts',
-          tabBarIcon: ({ color, size }) => <Ionicons name="notifications" size={size || 24} color={color} />,
-        }}
-      />
+      <Tabs.Screen name="notifications" options={{ href: null }} />
       <Tabs.Screen
         name="profile"
         options={{
@@ -92,14 +86,39 @@ export default function RiderTabLayout() {
         }}
       />
       {/* Hide all non-tab screens from the tab bar */}
-      <Tabs.Screen name="available-rides" options={{ href: null }} />
-      <Tabs.Screen name="settings" options={{ href: null, tabBarStyle: { display: 'none' } }} />
-      <Tabs.Screen name="legal" options={{ href: null }} />
-      <Tabs.Screen name="legal/privacy" options={{ href: null }} />
-      <Tabs.Screen name="legal/terms" options={{ href: null }} />
+      <Tabs.Screen name="available-rides" options={{ href: null, title: 'Rides' }} />
+      <Tabs.Screen name="booking-confirmed" options={{ href: null }} />
+      <Tabs.Screen name="trip-in-progress" options={{ href: null }} />
+      <Tabs.Screen name="rate-trip" options={{ href: null }} />
+      {/*
+        Each settings screen is registered individually here (not as a single
+        "settings" tab wrapping a nested Stack) so they don't share a
+        navigator's history. Tabs keep child navigators mounted in the
+        background rather than resetting them, so a shared nested Stack
+        accumulated every screen ever pushed into it across the whole
+        session (visit Emergency Contacts, then later Ride History, and
+        Emergency Contacts was still sitting underneath it) — that stale
+        history is what caused back navigation to land on old, unrelated
+        screens. As independent leaf tabs (the same pattern already used
+        successfully for messages/[chatId], driver/[driverId], etc. below),
+        each one is self-contained with no shared history to go stale.
+      */}
+      <Tabs.Screen name="settings/index" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/account-settings" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/change-password" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/change-phone" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/emergency-contacts" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/payment-methods" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/ride-history" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/ride-preferences" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/saved-routes" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/student-verification" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/payment-methods-enhanced" options={{ href: null, tabBarStyle: { display: 'none' } }} />
       <Tabs.Screen name="messages/[chatId]" options={{ href: null }} />
       <Tabs.Screen name="ride/[id]" options={{ href: null }} />
+      <Tabs.Screen name="trip/[confirmedRideId]" options={{ href: null }} />
       <Tabs.Screen name="driver/[driverId]" options={{ href: null }} />
+      <Tabs.Screen name="become-driver" options={{ href: null }} />
     </Tabs>
   );
 }

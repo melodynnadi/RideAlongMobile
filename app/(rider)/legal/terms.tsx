@@ -1,12 +1,5 @@
-import React from 'react';
-import { router } from 'expo-router';
-import DynamicLegalDocument from '@/components/DynamicLegalDocument';
+import { LegalWebViewScreen } from '@/components/LegalWebViewScreen';
 
 export default function TermsScreen() {
-  return (
-    <DynamicLegalDocument 
-      documentType="terms" 
-      onBack={() => router.push('/sign-up')}
-    />
-  );
+  return <LegalWebViewScreen title="Terms of service" url="https://ridealongapp.com/pages/terms" />;
 }

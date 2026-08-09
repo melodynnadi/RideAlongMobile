@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Modal, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform } from 'react-native';
-import { X } from 'lucide-react-native';
-import { useTheme } from '@/hooks/useTheme';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
+import { Check, CreditCard, Plus, ShieldCheck, Smartphone, X } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { computeTotals } from '@/utils/fees';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs, addDoc, Timestamp } from 'firebase/firestore';
-import { firestore } from '@/constants/services';
-import { useStripe, isPlatformPaySupported, PlatformPay } from '@stripe/stripe-react-native';
+import { useStripe, isPlatformPaySupported, PlatformPay } from '@/components/platform/stripe';
+import { listPaymentMethods } from '@/services/payments';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import { AddCardModal } from '@/components/AddCardModal';
 
 export type PaymentModalProps = {
   visible: boolean;
@@ -20,21 +20,79 @@ export type PaymentModalProps = {
 };
 
 export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onPaymentSuccess }: PaymentModalProps) {
-  const theme = useTheme();
-
+  const { colors } = useAppTheme();
   const riderId = firebaseAuth.currentUser?.uid ?? null;
   const [creating, setCreating] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  // Payment flow bypassed for now; keep minimal state
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [cardComplete, setCardComplete] = useState(false);
   const [selectedMethod, setSelectedMethod] = useState<'card' | 'apple' | null>(null);
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
-  const [savedCards, setSavedCards] = useState<Array<{ id: string; brand: string; last4: string; isDefault?: boolean }>>([]);
+  const [savedCards, setSavedCards] = useState<{ id: string; brand: string; last4: string; isDefault?: boolean }[]>([]);
   const [appleSupported, setAppleSupported] = useState(false);
   const [pendingIntentId, setPendingIntentId] = useState<string | null>(null);
+  const [showAddCard, setShowAddCard] = useState(false);
   const { confirmPayment, confirmPlatformPayPayment } = useStripe();
   const loadKeyRef = useRef<string | null>(null);
+
+  const styles = useMemo(() => StyleSheet.create({
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.48)', justifyContent: 'flex-end' },
+    modalContent: {
+      backgroundColor: colors.bg,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      maxHeight: '92%',
+      overflow: 'hidden',
+    },
+    sheetHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginTop: 10 },
+    modalHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 16 },
+    headerIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+    headerCopy: { flex: 1 },
+    modalTitle: { color: colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: '700' },
+    modalSubtitle: { color: colors.textSecondary, fontSize: 13, lineHeight: 18, fontWeight: '500', marginTop: 2 },
+    closeButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' },
+    modalBody: { flexGrow: 0 },
+    modalBodyContent: { paddingHorizontal: 20, paddingBottom: 12, gap: 14 },
+    totalHero: { backgroundColor: colors.textPrimary, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 18 },
+    totalEyebrow: { color: colors.textSecondary, fontSize: 11, lineHeight: 15, fontWeight: '700', letterSpacing: 1.1 },
+    totalHeroValue: { color: colors.textInverse, fontSize: 32, lineHeight: 39, fontWeight: '700', marginTop: 2 },
+    totalHeroCaption: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, fontWeight: '500', marginTop: 4 },
+    section: { backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border, borderRadius: 18, padding: 16 },
+    sectionTitle: { color: colors.textPrimary, fontSize: 16, lineHeight: 22, fontWeight: '700', marginBottom: 9 },
+    rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 32 },
+    lineLabel: { color: colors.textSecondary, fontSize: 13, fontWeight: '500' },
+    lineValue: { color: colors.textPrimary, fontSize: 13, fontWeight: '600' },
+    totalRow: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, marginTop: 7, paddingTop: 10 },
+    totalLabel: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
+    totalValue: { color: colors.textPrimary, fontSize: 17, fontWeight: '700' },
+    methodRow: { minHeight: 62, borderWidth: 1, borderColor: colors.border, borderRadius: 14, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', marginTop: 8 },
+    methodRowSelected: { borderColor: colors.primary, backgroundColor: colors.primaryDim },
+    methodRowUnavailable: { opacity: 0.55 },
+    methodIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center' },
+    methodCopy: { flex: 1, marginLeft: 11 },
+    methodLabel: { color: colors.textPrimary, fontSize: 14, fontWeight: '700', textTransform: 'capitalize' },
+    methodMeta: { color: colors.textSecondary, fontSize: 11, lineHeight: 16, fontWeight: '500', marginTop: 1 },
+    selection: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+    selectionActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+    savedCardList: { marginTop: 8, gap: 7 },
+    cardRow: { minHeight: 58, borderWidth: 1, borderColor: colors.border, borderRadius: 14, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bgCard },
+    cardRowSelected: { borderColor: colors.primary, backgroundColor: colors.primaryDim },
+    cardBrand: { width: 32, height: 32, borderRadius: 10, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
+    cardCopy: { flex: 1, marginLeft: 10 },
+    cardText: { color: colors.textPrimary, fontSize: 13, fontWeight: '700', textTransform: 'capitalize' },
+    cardMeta: { color: colors.textSecondary, fontSize: 11, fontWeight: '500', marginTop: 2 },
+    addCardHint: { color: colors.textSecondary, fontSize: 12, lineHeight: 18, fontWeight: '500', paddingVertical: 10 },
+    addCardRow: { minHeight: 52, borderWidth: 1.5, borderStyle: 'dashed', borderColor: colors.primary, borderRadius: 14, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 10 },
+    addCardIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: colors.primaryDim, alignItems: 'center', justifyContent: 'center' },
+    addCardRowText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
+    securityNote: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 14 },
+    securityText: { color: colors.green, fontSize: 12, fontWeight: '600' },
+    errorBanner: { backgroundColor: colors.redDim, borderWidth: 1, borderColor: colors.redBorder, borderRadius: 14, padding: 12 },
+    errorBannerText: { color: colors.red, fontSize: 12, lineHeight: 18, fontWeight: '600' },
+    formActions: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: Platform.OS === 'ios' ? 30 : 20, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.bg },
+    confirmBtn: { minHeight: 54, borderRadius: 27, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18 },
+    confirmBtnDisabled: { opacity: 0.5 },
+    confirmBtnText: { color: colors.textInverse, fontSize: 15, fontWeight: '700', textAlign: 'center' },
+  }), [colors]);
 
   // Check if Apple Pay is supported
   useEffect(() => {
@@ -49,17 +107,16 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
 
   const totals = useMemo(() => computeTotals(baseFare), [baseFare]);
   const baseUrl = getApiBaseUrl();
-  const log = (...args: any[]) => {
-    try {
-      // eslint-disable-next-line no-console
-      console.log('[PaymentModal]', ...args);
-    } catch {}
-  };
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const log = (..._args: any[]) => {};
 
   useEffect(() => {
     let cancelled = false;
     async function loadPaymentUI() {
-      if (!visible) return;
+      if (!visible) {
+        loadKeyRef.current = null;
+        return;
+      }
       setErrorMsg(null);
       if (!riderId) {
         Alert.alert('Sign in required', 'You need to be signed in to request a ride.');
@@ -76,7 +133,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       try {
         setCreating(true);
         const userRef = doc(firestore, 'riders', riderId);
-        const applyCards = (cards: Array<{ id: string; brand: string; last4: string; isDefault?: boolean }>) => {
+        const applyCards = (cards: { id: string; brand: string; last4: string; isDefault?: boolean }[]) => {
           if (cancelled) return;
           setSavedCards(cards);
           const def = cards.find((x) => x.isDefault) || cards[0];
@@ -98,25 +155,16 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           }));
 
         try {
-          const url = `${baseUrl}/api/payment-methods?userId=${encodeURIComponent(riderId)}`;
-          log('Fetching payment methods', { url, riderId });
-          const resp = await fetch(url);
-          if (!resp.ok) {
-            let message = `Unable to refresh payment methods. [${resp.status}]`;
-            try {
-              const text = await resp.text();
-              log('payment-methods error body', text);
-              try {
-                const data = JSON.parse(text);
-                if (data?.error) message = `${message} ${data.error}`;
-              } catch {
-                if (text) message = `${message} ${text}`;
-              }
-            } catch {}
-            throw new Error(message);
-          }
-          const data = await resp.json();
-          const arr = (data?.paymentMethods ?? []) as any[];
+          // Use the same listPaymentMethods() service call the (working)
+          // Payment Methods settings screen uses, instead of a separate
+          // inline fetch — this modal was silently ending up with an empty
+          // saved-cards list even though the account genuinely had a saved
+          // card and the API endpoint itself returned it correctly when
+          // queried directly, while the settings screen (using this same
+          // service function) displayed it fine. Sharing the exact same
+          // networking path eliminates whatever was diverging between them.
+          log('Fetching payment methods', { riderId });
+          const arr = await listPaymentMethods(riderId);
           const normalized = normalizeCards(arr);
           applyCards(normalized);
           try {
@@ -127,11 +175,8 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
               isDefault: m.isDefault,
             }));
             await updateDoc(userRef, { paymentMethods: stored });
-          } catch (persistErr) {
-            console.error('Failed to persist payment methods', persistErr);
-          }
+          } catch {}
         } catch (err: any) {
-          console.error('Failed to fetch payment methods', err);
           if (!cancelled) {
             const message = err?.message ? `Couldn't refresh payment methods: ${err.message}` : 'Unable to refresh payment methods.';
             setErrorMsg(message);
@@ -141,8 +186,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
             const arr = (snap.data()?.paymentMethods ?? []) as any[];
             const normalized = normalizeCards(arr);
             applyCards(normalized);
-          } catch (fallbackErr) {
-            console.error('Failed to load fallback payment methods', fallbackErr);
+          } catch (fsErr: any) {
             if (!cancelled) {
               setSavedCards([]);
               setSelectedPaymentMethodId(null);
@@ -163,15 +207,35 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
     return () => {
       cancelled = true;
       setErrorMsg(null);
-      setCardComplete(false);
       setCreating(false);
       setConfirming(false);
-      if (!visible) {
-        // Allow refetch on next open
-        loadKeyRef.current = null;
-      }
     };
-  }, [visible, riderId]);
+    // appleSupported is intentionally excluded: it flips async shortly after
+    // mount (from the Apple Pay support check effect above), and including it
+    // here tore down this effect mid-fetch, cancelling the in-flight
+    // saved-cards request before it could apply its result.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, riderId, baseUrl, onClose]);
+
+  // Re-fetch saved cards after a new card is added, and select it as the default choice.
+  const refetchSavedCards = async () => {
+    if (!riderId) return;
+    try {
+      const arr = await listPaymentMethods(riderId);
+      const normalized = arr.map((m) => ({
+        id: String(m.id),
+        brand: String(m.brand || 'card'),
+        last4: String(m.last4 || '0000'),
+        isDefault: Boolean(m.isDefault),
+      }));
+      setSavedCards(normalized);
+      const def = normalized.find((x) => x.isDefault) || normalized[normalized.length - 1];
+      if (def) {
+        setSelectedMethod('card');
+        setSelectedPaymentMethodId(def.id);
+      }
+    } catch {}
+  };
 
   const handleCancel = async () => {
     try {
@@ -196,12 +260,38 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
     try {
       setErrorMsg(null);
       setConfirming(true);
+
+      const authToken = await firebaseAuth.currentUser?.getIdToken().catch(() => null);
+      const authHeaders: Record<string, string> = authToken
+        ? { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }
+        : { 'Content-Type': 'application/json' };
+
+      // Cancel any PI left over from a previous failed attempt before creating a new one
+      if (pendingIntentId) {
+        try {
+          const cancelResp = await fetch(`${baseUrl}/api/payments/cancel-intent`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paymentIntentId: pendingIntentId }),
+          });
+          if (cancelResp.ok) setPendingIntentId(null);
+          else log('cancel-intent non-ok (keeping id for retry):', cancelResp.status);
+        } catch (cancelErr) {
+          log('cancel-intent failed (keeping id for retry):', cancelErr);
+          // Do NOT clear pendingIntentId — keep it so we can retry cancellation later
+        }
+      }
       if (!selectedMethod) {
         Alert.alert('Select a method', 'Please select a payment method.');
         return;
       }
       if (!riderId) {
         Alert.alert('Sign in required', 'Please sign in to continue.');
+        return;
+      }
+      if (driverId && riderId === driverId) {
+        Alert.alert('Not allowed', 'You cannot request your own ride posting.');
+        onClose();
         return;
       }
 
@@ -215,10 +305,10 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
         );
         const dupSnap = await getDocs(dupQuery);
         const hasPendingOrAccepted = dupSnap.docs.some(d => {
-          const status = d.data()?.status;
+          const status = String(d.data()?.status || '').toLowerCase();
           return status === 'pending' || status === 'accepted';
         });
-        
+
         if (hasPendingOrAccepted) {
           Alert.alert(
             'Already Requested',
@@ -229,7 +319,10 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           return;
         }
       } catch (dupErr) {
-        log('Duplicate check failed (continuing):', dupErr);
+        log('Duplicate check failed:', dupErr);
+        // Fail safe — don't proceed if we can't confirm no duplicate exists
+        Alert.alert('Error', 'Could not verify your request status. Please try again.');
+        return;
       }
 
       // 0) Ensure/refresh Stripe customer to get customerId
@@ -239,13 +332,13 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       log('Refresh customer', { custUrl, riderId });
       const custResp = await fetch(custUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({ userId: riderId, email, name }),
       });
       if (!custResp.ok) {
         const t = await custResp.text().catch(() => '');
         log('refresh-customer error', { status: custResp.status, body: t });
-        
+
         // Parse error response for user-friendly message
         let userMessage = `Failed to refresh customer [${custResp.status}]`;
         try {
@@ -258,7 +351,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
         } catch {
           if (t) userMessage = t;
         }
-        
+
         throw new Error(userMessage);
       }
       const { customerId } = await custResp.json();
@@ -284,11 +377,11 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       if (!createResp.ok) {
         const t = await createResp.text().catch(() => '');
         log('create-intent error', { status: createResp.status, body: t });
-        
+
         // Parse error response from backend
         let errorData: any = {};
         let userMessage = `Failed to create PaymentIntent [${createResp.status}]`;
-        
+
         try {
           errorData = JSON.parse(t);
           // Extract user-friendly message from backend response
@@ -298,25 +391,14 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           } else if (errorData.error) {
             userMessage = errorData.error;
           }
-        } catch (parseErr) {
+        } catch {
           // If parsing fails, use raw text if available
           if (t) userMessage = t;
         }
-        
-        // Check if the error is due to invalid payment method (test/live mode mismatch)
-        if (errorData.requiresPaymentMethod || errorData.cleared) {
-          Alert.alert(
-            'Payment Method Required',
-            'Your saved payment method is no longer valid. Please add a new payment method in the Payment Methods section.',
-            [{ text: 'OK' }]
-          );
-          onClose();
-          return;
-        }
-        
+
         throw new Error(userMessage);
       }
-      const { clientSecret, id, stripeStatus } = (await createResp.json()) as { clientSecret: string; id: string; stripeStatus?: string };
+      const { clientSecret, id } = (await createResp.json()) as { clientSecret: string; id: string; stripeStatus?: string };
       setPendingIntentId(id);
 
       // 2) Confirm payment with Apple Pay or saved card
@@ -329,12 +411,11 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
               {
                 label: 'RideAlong Total',
                 amount: (totals.rideFee + totals.platformFee + totals.stripeFee).toFixed(2),
-                paymentType: 'Immediate',
+                paymentType: PlatformPay.PaymentType.Immediate,
               },
             ],
             merchantCountryCode: 'US',
             currencyCode: 'USD',
-            merchantIdentifier: 'merchant.com.ridealong.rider',
           },
         });
         if (error) {
@@ -346,20 +427,17 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           Alert.alert('No card selected', 'Please select a saved card or add one in Payment Methods.');
           return;
         }
-        
-        // Skip confirmation if already confirmed by backend (stripeStatus: requires_capture)
-        if (stripeStatus === 'requires_capture') {
-          log('Payment already confirmed by backend', { stripeStatus });
-        } else {
-          log('Confirming payment with saved card', { paymentMethodId: selectedPaymentMethodId });
-          const { error } = await confirmPayment(clientSecret, {
-            paymentMethodType: 'Card',
-            paymentMethodData: {
-              paymentMethodId: selectedPaymentMethodId,
-            },
-          });
-          if (error) throw new Error(error.message || 'Payment confirmation failed');
-        }
+
+        // Always confirm via the Stripe SDK so that 3DS / authentication challenges
+        // are handled correctly. The backend pre-attaches the payment method but
+        // intentionally does NOT auto-confirm, so this step is always required.
+        const { error } = await confirmPayment(clientSecret, {
+          paymentMethodType: 'Card',
+          paymentMethodData: {
+            paymentMethodId: selectedPaymentMethodId,
+          },
+        });
+        if (error) throw new Error(error.message || 'Payment confirmation failed');
       } else {
         Alert.alert('Payment method not supported', 'Please select a payment method.');
         return;
@@ -372,33 +450,33 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       } else {
         // Direct Firestore creation (matching web app implementation)
         log('Creating ridePostingRequest document', { rideId, paymentIntentId: id });
-        
+
         // Fetch the ride posting to get pickup, dropoff, and other details
         const ridePostingDoc = await getDoc(doc(firestore, 'ridePostings', rideId));
         const ridePostingData = ridePostingDoc.exists() ? ridePostingDoc.data() : {};
-        
+
         // Get rider's profile information
         const userDoc = await getDoc(doc(firestore, 'riders', riderId));
         const userData = userDoc.exists() ? userDoc.data() : {};
-        const riderName = userData.firstName && userData.lastName ? 
+        const riderName = userData.firstName && userData.lastName ?
           `${userData.firstName} ${userData.lastName}` :
           userData.name || firebaseAuth.currentUser?.displayName || 'RideAlong User';
-        
+
         // Get driver information from ride posting
         const driverDoc = driverId ? await getDoc(doc(firestore, 'drivers', driverId)) : null;
         const driverData = driverDoc?.exists() ? driverDoc.data() : {};
-        const driverName = driverData.firstName && driverData.lastName ? 
+        const driverName = driverData.firstName && driverData.lastName ?
           `${driverData.firstName} ${driverData.lastName}` :
           driverData.name || 'Driver';
-        
+
         // Extract addresses from ride posting (same logic as available-rides page)
-        const pickup = ridePostingData.pickupAddress || ridePostingData.pickup || 
-                      ridePostingData.pickupLocation?.address || ridePostingData.origin || 
+        const pickup = ridePostingData.pickupAddress || ridePostingData.pickup ||
+                      ridePostingData.pickupLocation?.address || ridePostingData.origin ||
                       ridePostingData.from || 'Pickup Location';
-        const dropoff = ridePostingData.dropoffAddress || ridePostingData.dropoff || 
-                       ridePostingData.dropoffLocation?.address || ridePostingData.destination || 
+        const dropoff = ridePostingData.dropoffAddress || ridePostingData.dropoff ||
+                       ridePostingData.dropoffLocation?.address || ridePostingData.destination ||
                        ridePostingData.to || 'Dropoff Location';
-        
+
         // Create the request document with all required fields
         const ridePostingRequestData = {
           ridePostingId: rideId,  // CRITICAL: Use ridePostingId, not rideId
@@ -426,20 +504,20 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         };
-        
-        console.log('🚀 Creating ridePostingRequest document with data:', JSON.stringify(ridePostingRequestData, null, 2));
-        
+
         const rprCol = collection(firestore, 'ridePostingRequests');
-        const docRef = await addDoc(rprCol, ridePostingRequestData);
-        
-        console.log('✅ RidePostingRequest created successfully!');
-        console.log('   Document ID:', docRef.id);
-        console.log('   ridePostingId:', rideId);
-        console.log('   riderId:', riderId);
-        console.log('   status:', 'pending');
-        log('RidePostingRequest created:', docRef.id);
-        
-        // Show success message
+        try {
+          await addDoc(rprCol, ridePostingRequestData);
+        } catch (firestoreErr: any) {
+          Alert.alert(
+            'Payment authorized — request not saved',
+            `Your payment was authorized (ref: ${id}) but we could not save your ride request. Please contact support@ridealongapp.com with this reference so we can complete your booking.`,
+            [{ text: 'OK' }]
+          );
+          throw firestoreErr;
+        }
+
+
         Alert.alert(
           'Request Sent!',
           'Your ride request has been sent to the driver. Payment has been authorized and will be captured when the driver confirms pickup.',
@@ -450,146 +528,164 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       onClose();
       // Success alert removed - handled by the calling component (book.tsx) or shown above
     } catch (err: any) {
-      console.error('Payment flow error', err);
       setErrorMsg(err?.message || 'Payment failed');
     } finally {
       setConfirming(false);
     }
   };
 
+  const canConfirm = selectedMethod === 'apple' || (selectedMethod === 'card' && !!selectedPaymentMethodId);
+
   return (
-    <Modal animationType="slide" transparent visible={visible} onRequestClose={handleCancel}>
+    <>
+    <Modal animationType="slide" transparent visible={visible && !showAddCard} onRequestClose={handleCancel}>
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
-          {/* Header */}
+          <View style={styles.sheetHandle} />
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Payment</Text>
-            <TouchableOpacity onPress={handleCancel} style={styles.closeButton}>
-              <X size={22} color="#64748B" />
+            <View style={styles.headerIcon}>
+              <Ionicons name="card-outline" size={18} color={colors.primary} />
+            </View>
+            <View style={styles.headerCopy}>
+              <Text style={styles.modalTitle}>Confirm payment</Text>
+              <Text style={styles.modalSubtitle}>Review your fare and payment method</Text>
+            </View>
+            <TouchableOpacity onPress={handleCancel} style={styles.closeButton} accessibilityRole="button" accessibilityLabel="Close payment">
+              <X size={20} color={colors.textPrimary} />
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} showsVerticalScrollIndicator={false}>
             {errorMsg ? (
               <View style={styles.errorBanner}>
                 <Text style={styles.errorBannerText}>{errorMsg}</Text>
               </View>
             ) : null}
-            {/* Line items */}
-            <Card style={styles.summaryCard}>
-              <Text style={[styles.summaryTitle, { color: theme.colors.secondary }]}>Summary</Text>
+
+            <View style={styles.totalHero}>
+              <Text style={styles.totalEyebrow}>TOTAL DUE</Text>
+              <Text style={styles.totalHeroValue}>${totals.total.toFixed(2)}</Text>
+              <Text style={styles.totalHeroCaption}>Authorized now and captured after your ride.</Text>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Fare details</Text>
               <View style={styles.rowBetween}>
                 <Text style={styles.lineLabel}>Ride fee</Text>
                 <Text style={styles.lineValue}>${totals.rideFee.toFixed(2)}</Text>
               </View>
               <View style={styles.rowBetween}>
-                <Text style={styles.lineLabel}>Platform fee (7.25%)</Text>
+                <Text style={styles.lineLabel}>Platform fee</Text>
                 <Text style={styles.lineValue}>${totals.platformFee.toFixed(2)}</Text>
               </View>
               <View style={styles.rowBetween}>
-                <Text style={styles.lineLabel}>Stripe fee (2.9% + $0.30)</Text>
+                <Text style={styles.lineLabel}>Processing fee</Text>
                 <Text style={styles.lineValue}>${totals.stripeFee.toFixed(2)}</Text>
               </View>
               <View style={[styles.rowBetween, styles.totalRow]}>
-                <Text style={[styles.totalLabel, { color: theme.colors.secondary }]}>Total</Text>
-                <Text style={[styles.totalValue, { color: theme.colors.secondary }]}>${totals.total.toFixed(2)}</Text>
+                <Text style={styles.totalLabel}>Total</Text>
+                <Text style={styles.totalValue}>${totals.total.toFixed(2)}</Text>
               </View>
-              <Text style={styles.holdNote}>A temporary hold will be placed. You won’t be charged until the driver confirms.</Text>
-            </Card>
+            </View>
 
-            {/* Payment method selection */}
-            <Card style={styles.methodCard}>
-              <Text style={[styles.summaryTitle, { color: theme.colors.secondary }]}>Payment method</Text>
-              {Platform.OS === 'ios' && appleSupported && (
-                <TouchableOpacity style={styles.methodRow} onPress={() => setSelectedMethod('apple')}>
-                  <View style={[styles.radio, selectedMethod === 'apple' && styles.radioSelected]} />
-                  <Text style={styles.methodLabel}>Apple Pay {appleSupported ? '' : '(Unavailable)'}</Text>
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Payment method</Text>
+              {Platform.OS === 'ios' ? (
+                <TouchableOpacity
+                  style={[styles.methodRow, selectedMethod === 'apple' && styles.methodRowSelected, !appleSupported && styles.methodRowUnavailable]}
+                  onPress={() => setSelectedMethod('apple')}
+                  disabled={!appleSupported}
+                >
+                  <View style={styles.methodIcon}><Smartphone size={19} color={colors.textPrimary} /></View>
+                  <View style={styles.methodCopy}>
+                    <Text style={styles.methodLabel}>Apple Pay</Text>
+                    <Text style={styles.methodMeta}>{appleSupported ? 'Pay with your Apple Wallet' : 'Unavailable on this device'}</Text>
+                  </View>
+                  <View style={[styles.selection, selectedMethod === 'apple' && styles.selectionActive]}>
+                    {selectedMethod === 'apple' ? <Check size={13} color={colors.textInverse} strokeWidth={3} /> : null}
+                  </View>
                 </TouchableOpacity>
-              )}
-              <TouchableOpacity style={styles.methodRow} onPress={() => setSelectedMethod('card')}>
-                <View style={[styles.radio, selectedMethod === 'card' && styles.radioSelected]} />
-                <Text style={styles.methodLabel}>Credit or Debit Card</Text>
+              ) : null}
+
+              <TouchableOpacity style={[styles.methodRow, selectedMethod === 'card' && styles.methodRowSelected]} onPress={() => setSelectedMethod('card')}>
+                <View style={styles.methodIcon}><CreditCard size={19} color={colors.textPrimary} /></View>
+                <View style={styles.methodCopy}>
+                  <Text style={styles.methodLabel}>Saved card</Text>
+                  <Text style={styles.methodMeta}>{savedCards.length ? 'Choose a card below' : 'No saved cards available'}</Text>
+                </View>
+                <View style={[styles.selection, selectedMethod === 'card' && styles.selectionActive]}>
+                  {selectedMethod === 'card' ? <Check size={13} color={colors.textInverse} strokeWidth={3} /> : null}
+                </View>
               </TouchableOpacity>
 
-              {selectedMethod === 'card' && (
-                <View style={{ marginTop: 8 }}>
+              {selectedMethod === 'card' ? (
+                <View style={styles.savedCardList}>
                   {creating ? (
-                    <ActivityIndicator />
-                  ) : savedCards.length ? (
-                    savedCards.map((c) => (
-                      <TouchableOpacity key={c.id} style={styles.cardRow} onPress={() => setSelectedPaymentMethodId(c.id)}>
-                        <View style={[styles.radioSm, selectedPaymentMethodId === c.id && styles.radioSelected]} />
-                        <Text style={styles.cardText}>{(c.brand || 'Card').toUpperCase()} •••• {c.last4} {c.isDefault ? '(Default)' : ''}</Text>
-                      </TouchableOpacity>
-                    ))
+                    <ActivityIndicator color={colors.primary} />
                   ) : (
-                    <Text style={styles.addCardHint}>No saved cards. Add one in Payment Methods.</Text>
+                    <>
+                      {savedCards.map((card) => (
+                        <TouchableOpacity
+                          key={card.id}
+                          style={[styles.cardRow, selectedPaymentMethodId === card.id && styles.cardRowSelected]}
+                          onPress={() => { setSelectedMethod('card'); setSelectedPaymentMethodId(card.id); }}
+                        >
+                          <View style={styles.cardBrand}><CreditCard size={17} color={colors.primary} /></View>
+                          <View style={styles.cardCopy}>
+                            <Text style={styles.cardText}>{card.brand || 'Card'} ending in {card.last4}</Text>
+                            <Text style={styles.cardMeta}>{card.isDefault ? 'Default payment method' : 'Saved payment method'}</Text>
+                          </View>
+                          <View style={[styles.selection, selectedPaymentMethodId === card.id && styles.selectionActive]}>
+                            {selectedPaymentMethodId === card.id ? <Check size={13} color={colors.textInverse} strokeWidth={3} /> : null}
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                      {!savedCards.length ? (
+                        <Text style={styles.addCardHint}>Add a card to pay for this ride.</Text>
+                      ) : null}
+                      <TouchableOpacity
+                        style={styles.addCardRow}
+                        onPress={() => setShowAddCard(true)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Add new payment method"
+                      >
+                        <View style={styles.addCardIcon}><Plus size={17} color={colors.primary} /></View>
+                        <Text style={styles.addCardRowText}>Add new card</Text>
+                      </TouchableOpacity>
+                    </>
                   )}
                 </View>
-              )}
+              ) : null}
 
-              {/* Temporarily suppress errors in UI */}
-            </Card>
+              <View style={styles.securityNote}>
+                <ShieldCheck size={17} color={colors.green} />
+                <Text style={styles.securityText}>Secure payment powered by Stripe</Text>
+              </View>
+            </View>
           </ScrollView>
 
           <View style={styles.formActions}>
-            <Button variant="outline" style={styles.cancelBtn} onPress={handleCancel} disabled={confirming}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              style={styles.confirmBtn}
+            <TouchableOpacity
+              style={[styles.confirmBtn, (creating || confirming || !canConfirm) && styles.confirmBtnDisabled]}
               onPress={handleConfirm}
-              disabled={creating || confirming || !selectedMethod}
-              loading={confirming}
+              disabled={creating || confirming || !canConfirm}
+              activeOpacity={0.84}
             >
-              Confirm
-            </Button>
+              {confirming ? (
+                <ActivityIndicator color={colors.textInverse} />
+              ) : (
+                <Text style={styles.confirmBtnText}>Confirm and request ride - ${totals.total.toFixed(2)}</Text>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
       </View>
     </Modal>
+    <AddCardModal
+      visible={showAddCard}
+      onClose={() => setShowAddCard(false)}
+      onSuccess={() => void refetchSavedCards()}
+    />
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: 'white', borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '85%' },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E7EB' },
-  modalTitle: { fontSize: 22, fontWeight: 'bold' },
-  closeButton: { padding: 8 },
-  modalBody: { paddingHorizontal: 16 },
-  summaryCard: { backgroundColor: 'white', padding: 16, marginTop: 16 },
-  summaryTitle: { fontSize: 16, fontWeight: '600', marginBottom: 8 },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6 },
-  lineLabel: { fontSize: 14, color: '#374151' },
-  lineValue: { fontSize: 14, color: '#111827' },
-  totalRow: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E5E7EB', marginTop: 8, paddingTop: 8 },
-  totalLabel: { fontSize: 16, fontWeight: '700' },
-  totalValue: { fontSize: 16, fontWeight: '700' },
-  cardFieldCard: { backgroundColor: 'white', padding: 16, marginTop: 16 },
-  holdNote: { marginTop: 8, color: '#64748B', fontSize: 12 },
-  methodCard: { backgroundColor: 'white', padding: 16, marginTop: 16 },
-  methodRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
-  methodLabel: { marginLeft: 10, fontSize: 14, color: '#0F172A' },
-  radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#CBD5E1' },
-  radioSm: { width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: '#CBD5E1', marginRight: 8 },
-  radioSelected: { backgroundColor: '#111827', borderColor: '#111827' },
-  cardRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
-  cardText: { fontSize: 14, color: '#0F172A' },
-  addCardHint: { marginTop: 8, fontSize: 12, color: '#64748B' },
-  errorText: { marginTop: 8, color: '#DC2626' },
-  errorBanner: {
-    backgroundColor: '#FEE2E2',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 16,
-  },
-  errorBannerText: {
-    color: '#B91C1C',
-    fontSize: 13,
-  },
-  formActions: { flexDirection: 'row', gap: 12, padding: 16 },
-  cancelBtn: { flex: 1 },
-  confirmBtn: { flex: 1 },
-});

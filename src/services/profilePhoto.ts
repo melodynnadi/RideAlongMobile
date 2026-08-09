@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { ref } from 'firebase/storage';
+import { ref, deleteObject } from 'firebase/storage';
 import { doc, getDoc, setDoc, serverTimestamp, deleteField } from 'firebase/firestore';
 import { updateProfile } from 'firebase/auth';
 import { firebaseAuth, firestore, storage, firebaseApp, firebaseConfig } from '@/constants/services';
@@ -61,7 +61,7 @@ export async function pickAndUploadProfilePhoto(): Promise<PickUploadResult> {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${idToken}`,
     },
-    body: JSON.stringify({ base64: manipulated.base64, oldPhotoPath }),
+    body: JSON.stringify({ base64: manipulated.base64, oldPhotoPath, role: 'driver' }),
   });
 
   if (!resp.ok) {
@@ -86,6 +86,7 @@ export async function pickAndUploadProfilePhoto(): Promise<PickUploadResult> {
     userDocRef,
     {
       avatarUrl: photoURL,
+      avatarUrl1: photoURL,
       photoURL,
       photoPath,
       updatedAt: serverTimestamp(),
@@ -108,12 +109,9 @@ export async function pickAndUploadProfilePhoto(): Promise<PickUploadResult> {
     },
   });
 
-  // 7) Optional: update Firebase Auth profile (non-fatal)
-  try {
-    await updateProfile(user, { photoURL });
-  } catch {
-    // ignore
-  }
+  // Do NOT call updateProfile(user, { photoURL }) — that sets auth.currentUser.photoURL
+  // which bleeds into the rider account's profile picture fallback.
+  // Each role's photo is stored only in its own Firestore collection.
 
   return { canceled: false, photoURL, photoPath };
 }
