@@ -90,7 +90,30 @@ export default function RiderTabLayout() {
       <Tabs.Screen name="booking-confirmed" options={{ href: null }} />
       <Tabs.Screen name="trip-in-progress" options={{ href: null }} />
       <Tabs.Screen name="rate-trip" options={{ href: null }} />
-      <Tabs.Screen name="settings" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      {/*
+        Each settings screen is registered individually here (not as a single
+        "settings" tab wrapping a nested Stack) so they don't share a
+        navigator's history. Tabs keep child navigators mounted in the
+        background rather than resetting them, so a shared nested Stack
+        accumulated every screen ever pushed into it across the whole
+        session (visit Emergency Contacts, then later Ride History, and
+        Emergency Contacts was still sitting underneath it) — that stale
+        history is what caused back navigation to land on old, unrelated
+        screens. As independent leaf tabs (the same pattern already used
+        successfully for messages/[chatId], driver/[driverId], etc. below),
+        each one is self-contained with no shared history to go stale.
+      */}
+      <Tabs.Screen name="settings/index" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/account-settings" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/change-password" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/change-phone" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/emergency-contacts" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/payment-methods" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/ride-history" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/ride-preferences" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/saved-routes" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/student-verification" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/payment-methods-enhanced" options={{ href: null, tabBarStyle: { display: 'none' } }} />
       <Tabs.Screen name="messages/[chatId]" options={{ href: null }} />
       <Tabs.Screen name="ride/[id]" options={{ href: null }} />
       <Tabs.Screen name="trip/[confirmedRideId]" options={{ href: null }} />

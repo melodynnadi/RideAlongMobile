@@ -30,7 +30,7 @@ import { useRideBrowseStore, type RiderRideFilter } from '@/stores/rideBrowseSto
 import { ReportIssueModal } from '@/components/ReportIssueModal';
 import { CityAutocomplete } from '@/components/CityAutocomplete';
 import { DatePickerModal, TimePickerModal, formatDateLabel } from '@/components/DateTimePickerModals';
-import { computeRiderSuggestedPrice, formatContributionRange, getRideType } from '@/src/utils/pricing';
+import { computeRiderSuggestedPrice, computeDriverMaxPrice, formatContributionRange, getRideType } from '@/src/utils/pricing';
 import { chatBelongsToRole, roleKey } from '@/src/utils/roleIdentity';
 import { getOrCreateRideChat } from '@/src/services/chatAvailability';
 import { createRoleNotification } from '@/src/services/notificationRecords';
@@ -1953,9 +1953,19 @@ export function RiderRequestReference() {
   const { colors } = useAppTheme();
   const riderPageTitleColor = colors.statusBar === 'light-content' ? '#FFFFFF' : colors.textPrimary;
   const params = useLocalSearchParams<{ pickup?: string; dropoff?: string }>();
-  const initialPickup = String(params.pickup || '');
-  const [pickup, setPickup] = useState(initialPickup);
+  const [pickup, setPickup] = useState(String(params.pickup || ''));
   const [dropoff, setDropoff] = useState(String(params.dropoff || ''));
+
+  // This screen lives inside a Tabs navigator, so it stays mounted across
+  // navigations — the useState initializers above only run once, on first
+  // mount. Without this effect, tapping "Ride again" (which re-pushes this
+  // route with new pickup/dropoff params) has no effect once the tab has
+  // already been visited once in the session, since the params change but
+  // the component never remounts to pick them up.
+  useEffect(() => {
+    if (params.pickup) setPickup(String(params.pickup));
+    if (params.dropoff) setDropoff(String(params.dropoff));
+  }, [params.pickup, params.dropoff]);
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [dateModalOpen, setDateModalOpen] = useState(false);
@@ -2106,9 +2116,16 @@ export function RiderRequestReference() {
         }
       }
       const routeSuggestedPrice = submitDistanceMiles && submitDistanceMiles > 0 ? computeRiderSuggestedPrice(submitDistanceMiles, 1) : 0;
+      const routeMaxPrice = submitDistanceMiles && submitDistanceMiles > 0 ? computeDriverMaxPrice(submitDistanceMiles, 1) : 0;
       const enteredPrice = Number(String(price).replace(/[^0-9.\-]/g, ''));
       const resolvedPrice = !Number.isNaN(enteredPrice) && enteredPrice > 0 ? enteredPrice : routeSuggestedPrice;
       if (!resolvedPrice || resolvedPrice <= 0) return Alert.alert('Missing price', 'Add a max price or enter a route so we can suggest one.');
+      if (routeSuggestedPrice > 0 && resolvedPrice < routeSuggestedPrice) {
+        return Alert.alert('Contribution too low', `The minimum contribution for this route is $${routeSuggestedPrice.toFixed(2)}.`);
+      }
+      if (routeMaxPrice > 0 && resolvedPrice > routeMaxPrice) {
+        return Alert.alert('Contribution too high', `The maximum contribution for this route is $${routeMaxPrice.toFixed(2)}.`);
+      }
 
       // Prevent duplicate pending requests for the same route + date
       try {

@@ -25,7 +25,10 @@ import { useAppTheme } from '@/hooks/ThemeContext';
 import { AppColors } from '@/constants/theme';
 
 export default function SettingsScreen() {
-  const handleBack = () => router.replace('/(driver)/profile' as any);
+  // navigate, not replace: this screen is its own independent hidden tab
+  // (see (driver)/_layout.tsx), while /(driver)/profile is a different tab.
+  // navigate() is what Expo Router maps to the tab-navigator JUMP_TO action.
+  const handleBack = () => router.navigate('/(driver)/profile' as any);
   const { isVerified, verificationStatus } = useVerificationStore();
   const { isDark, setDark, colors } = useAppTheme();
   const [pushEnabled, setPushEnabled] = useState(true);

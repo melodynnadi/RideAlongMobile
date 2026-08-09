@@ -6,6 +6,7 @@ import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { computeTotals } from '@/utils/fees';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs, addDoc, Timestamp } from 'firebase/firestore';
 import { useStripe, isPlatformPaySupported, PlatformPay } from '@/components/platform/stripe';
+import { listPaymentMethods } from '@/services/payments';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { AddCardModal } from '@/components/AddCardModal';
 
@@ -154,25 +155,16 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           }));
 
         try {
-          const url = `${baseUrl}/api/payment-methods?userId=${encodeURIComponent(riderId)}`;
-          log('Fetching payment methods', { url, riderId });
-          const resp = await fetch(url);
-          if (!resp.ok) {
-            let message = `Unable to refresh payment methods. [${resp.status}]`;
-            try {
-              const text = await resp.text();
-              log('payment-methods error body', text);
-              try {
-                const data = JSON.parse(text);
-                if (data?.error) message = `${message} ${data.error}`;
-              } catch {
-                if (text) message = `${message} ${text}`;
-              }
-            } catch {}
-            throw new Error(message);
-          }
-          const data = await resp.json();
-          const arr = (data?.paymentMethods ?? []) as any[];
+          // Use the same listPaymentMethods() service call the (working)
+          // Payment Methods settings screen uses, instead of a separate
+          // inline fetch — this modal was silently ending up with an empty
+          // saved-cards list even though the account genuinely had a saved
+          // card and the API endpoint itself returned it correctly when
+          // queried directly, while the settings screen (using this same
+          // service function) displayed it fine. Sharing the exact same
+          // networking path eliminates whatever was diverging between them.
+          log('Fetching payment methods', { riderId });
+          const arr = await listPaymentMethods(riderId);
           const normalized = normalizeCards(arr);
           applyCards(normalized);
           try {
@@ -194,7 +186,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
             const arr = (snap.data()?.paymentMethods ?? []) as any[];
             const normalized = normalizeCards(arr);
             applyCards(normalized);
-          } catch {
+          } catch (fsErr: any) {
             if (!cancelled) {
               setSavedCards([]);
               setSelectedPaymentMethodId(null);
@@ -218,22 +210,23 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       setCreating(false);
       setConfirming(false);
     };
-  }, [visible, riderId, appleSupported, baseUrl, onClose]);
+    // appleSupported is intentionally excluded: it flips async shortly after
+    // mount (from the Apple Pay support check effect above), and including it
+    // here tore down this effect mid-fetch, cancelling the in-flight
+    // saved-cards request before it could apply its result.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, riderId, baseUrl, onClose]);
 
   // Re-fetch saved cards after a new card is added, and select it as the default choice.
   const refetchSavedCards = async () => {
     if (!riderId) return;
     try {
-      const url = `${baseUrl}/api/payment-methods?userId=${encodeURIComponent(riderId)}`;
-      const resp = await fetch(url);
-      if (!resp.ok) return;
-      const data = await resp.json();
-      const arr = (data?.paymentMethods ?? []) as any[];
+      const arr = await listPaymentMethods(riderId);
       const normalized = arr.map((m) => ({
         id: String(m.id),
-        brand: String(m.brand || m.type || 'card'),
-        last4: String(m.last4 || m.lastFour || '0000'),
-        isDefault: Boolean(m.isDefault || m.default || m.is_default),
+        brand: String(m.brand || 'card'),
+        last4: String(m.last4 || '0000'),
+        isDefault: Boolean(m.isDefault),
       }));
       setSavedCards(normalized);
       const def = normalized.find((x) => x.isDefault) || normalized[normalized.length - 1];

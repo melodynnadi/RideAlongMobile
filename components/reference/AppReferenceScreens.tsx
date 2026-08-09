@@ -146,8 +146,32 @@ function Phone({
                   style={s.circle}
                   onPress={() => {
                     if (onBack) { onBack(); return; }
-                    const dest = returnTo || backTarget || backHref;
+                    // Trust an explicit, caller-supplied returnTo over
+                    // router.back(): this screen may live in a hidden tab's
+                    // nested Stack shared with sibling screens (e.g. rider
+                    // settings) whose Tabs navigator keeps stale history
+                    // mounted in the background, so canGoBack()/back() can
+                    // silently pop to an unrelated leftover screen instead of
+                    // where the caller actually asked to return to. The
+                    // static backTarget/backHref fallback (no dynamic
+                    // returnTo) keeps the original back()-first behavior,
+                    // since that's the legitimate "go to the previous
+                    // screen" case, not a caller-specified destination.
+                    //
+                    // Use navigate, not replace or dismissTo: returnTo
+                    // targets a route in a DIFFERENT navigator (e.g. the
+                    // profile tab, while this screen lives inside the
+                    // settings tab's nested Stack). replace() can't leave
+                    // the nested Stack — it pushes a new instance while the
+                    // old Stack lingers underneath, looking like a duplicate
+                    // screen opening. dismissTo maps to a Stack-only POP_TO
+                    // action, which a tab navigator doesn't know how to
+                    // handle, so it silently no-ops when the destination is
+                    // a different tab. navigate() is what Expo Router itself
+                    // maps to the tab-navigator JUMP_TO action.
+                    if (returnTo) { router.navigate(returnTo as any); return; }
                     if (router.canGoBack()) { router.back(); return; }
+                    const dest = backTarget || backHref;
                     if (dest) router.replace(dest as any);
                   }}
                   accessibilityRole="button"
@@ -1215,7 +1239,11 @@ function DriverPublicProfileReferenceInner() {
   const { driverId, returnTo } = useLocalSearchParams<{ driverId?: string; returnTo?: string | string[] }>();
   const id = Array.isArray(driverId) ? driverId[0] : driverId;
   const returnTarget = Array.isArray(returnTo) ? returnTo[0] : returnTo;
-  const goBack = () => router.replace((returnTarget || '/(rider)/available-rides') as any);
+  // navigate, not replace or dismissTo: avoids leaving a stale duplicate
+  // screen mounted, without dismissTo's silent no-op when crossing into a
+  // different tab navigator (same issue as the settings-tab back navigation
+  // bug — see useReturnNavigation.ts).
+  const goBack = () => router.navigate((returnTarget || '/(rider)/available-rides') as any);
   const insets = useSafeAreaInsets();
 
   const [loading, setLoading] = useState(true);

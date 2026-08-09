@@ -262,7 +262,12 @@ export default function RiderProfilePage() {
   const riderId = Array.isArray(id) ? id[0] : id;
   const goBack = () => {
     const dest = Array.isArray(returnTo) ? returnTo[0] : returnTo;
-    router.replace((dest || '/(driver)') as any);
+    // navigate, not replace or dismissTo: dest is a different tab than this
+    // screen. replace() can't leave this screen's own navigator context
+    // (pushes a duplicate instead), and dismissTo's Stack-only POP_TO action
+    // is silently ignored by tab navigators. navigate() is what Expo Router
+    // maps to the tab-navigator JUMP_TO action.
+    router.navigate((dest || '/(driver)') as any);
   };
 
   const [loading, setLoading]       = useState(true);

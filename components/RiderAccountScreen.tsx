@@ -135,7 +135,12 @@ export default function RiderAccountScreen() {
 
   const { returnTo } = useLocalSearchParams<{ returnTo?: string | string[] }>();
   const returnTarget = Array.isArray(returnTo) ? returnTo[0] : returnTo;
-  const goBack = () => router.replace((returnTarget || '/(rider)/settings') as any);
+  // navigate, not replace or dismissTo: returnTarget may point to a
+  // different tab than this screen's own settings-tab nested Stack.
+  // replace() can't leave this Stack (pushes a duplicate instead). dismissTo
+  // maps to a Stack-only POP_TO action that tab navigators silently ignore.
+  // navigate() is what Expo Router maps to the tab-navigator JUMP_TO action.
+  const goBack = () => router.navigate((returnTarget || '/(rider)/settings') as any);
   const refreshProfiles = useAuthStore((state) => state.refreshProfiles);
   const [profile, setProfile] = useState<RiderAccountProfile | null>(null);
   const [loading, setLoading] = useState(true);

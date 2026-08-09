@@ -83,7 +83,11 @@ export default function EditPostingScreen() {
     buttonDisabled: { opacity: 0.65 },
   }), [colors]);
   const { postingId } = useLocalSearchParams<{ postingId: string }>();
-  const handleBack = () => router.replace('/(driver)/my-postings');
+  // navigate, not replace or dismissTo: avoids leaving a stale duplicate
+  // screen mounted, without dismissTo's silent no-op when crossing into a
+  // different tab navigator (same issue as the settings-tab back navigation
+  // bug — see useReturnNavigation.ts).
+  const handleBack = () => router.navigate('/(driver)/my-postings' as any);
   const [saving, setSaving] = useState(false);
   const [fetching, setFetching] = useState(true);
 

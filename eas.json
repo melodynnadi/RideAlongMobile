@@ -20,7 +20,8 @@
     "production": {
       "ios": {
         "appleId": "melodynnadi2@gmail.com",
-        "appleTeamId": "82C8T7LU5S"
+        "appleTeamId": "82C8T7LU5S",
+        "ascAppId": "6793355660"
       }
     }
   }
