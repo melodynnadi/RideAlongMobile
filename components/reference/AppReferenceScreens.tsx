@@ -763,14 +763,20 @@ function RiderRequestsReferenceInner() {
           <Text style={{ color: colors.textSecondary, fontSize: 14 }}>Loading requests…</Text>
         </View>
       ) : filtered.length === 0 ? (
-        <View style={(s as any).emptyState ?? { alignItems: 'center', justifyContent: 'center', paddingVertical: 48, paddingHorizontal: 24 }}>
-          <Ionicons name="car-outline" size={32} color={colors.primary} />
-          <Text style={{ color: colors.textPrimary, fontSize: 18, fontWeight: '700', marginTop: 14, textAlign: 'center' }}>
-            {filter === 'open' ? 'No open requests' : 'No past requests'}
-          </Text>
-          <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 6, textAlign: 'center', maxWidth: 260 }}>
-            {filter === 'open' ? 'Request a ride and nearby drivers will send you offers.' : 'Completed and cancelled rides will appear here.'}
-          </Text>
+        <View style={{ minHeight: 420, justifyContent: 'center' }}>
+          <View style={s.riderHistoryEmpty}>
+            <View style={s.riderHistoryEmptyIcon}><Ionicons name="car-outline" size={26} color={colors.primary} /></View>
+            <Text style={s.riderHistoryEmptyTitle}>{filter === 'open' ? 'No open requests' : 'No past requests'}</Text>
+            <Text style={s.riderHistoryEmptyText}>
+              {filter === 'open' ? 'Request a ride and nearby drivers will send you offers.' : 'Completed and cancelled rides will appear here.'}
+            </Text>
+            {filter === 'open' && (
+              <TouchableOpacity style={s.riderHistoryBrowseButton} onPress={() => router.push('/(rider)/available-rides' as any)}>
+                <Ionicons name="search-outline" size={17} color={colors.textInverse} />
+                <Text style={s.riderHistoryBrowseText}>Browse available rides</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       ) : null}
       {!loading && filtered.map((request) => {
@@ -779,6 +785,8 @@ function RiderRequestsReferenceInner() {
         const hasOffers = offers.length > 0;
         const statusLabel = expired && OPEN.has(request.status)
           ? 'Expired'
+          : expired && MATCHED.has(request.status)
+          ? 'Completed'
           : hasOffers
           ? `${offers.length} offer${offers.length === 1 ? '' : 's'} received`
           : request.status.includes('offer')
@@ -924,8 +932,6 @@ function RiderRequestsReferenceInner() {
           onPaymentSuccess={handleOfferPaymentSuccess}
         />
       )}
-      {!filtered.length ? <View style={s.panel}><Text style={s.routeTitle}>Nothing here yet</Text><Text style={s.messagePreview}>Post a request or choose another status tab.</Text></View> : null}
-
       {/* Waitlist section */}
       {waitlistEntries.length > 0 && (
         <View style={{ marginTop: 8 }}>
@@ -2359,7 +2365,7 @@ function RiderProfileReferenceInner() {
           )}
         </TouchableOpacity>
       ) : null}
-      <View style={s.menuCard}><MenuRow icon="wallet" title="Payment methods" href="/(rider)/settings/payment-methods" returnTo="/(rider)/profile" /><MenuRow icon="time" title="Ride history" href="/(rider)/settings/ride-history" returnTo="/(rider)/profile" /><MenuRow icon="notifications" title="Notifications" href="/(rider)/notifications" returnTo="/(rider)/profile" /></View>
+      <View style={s.menuCard}><MenuRow icon="list" title="My requests" href="/(rider)/requests" returnTo="/(rider)/profile" /><MenuRow icon="wallet" title="Payment methods" href="/(rider)/settings/payment-methods" returnTo="/(rider)/profile" /><MenuRow icon="time" title="Ride history" href="/(rider)/settings/ride-history" returnTo="/(rider)/profile" /><MenuRow icon="notifications" title="Notifications" href="/(rider)/notifications" returnTo="/(rider)/profile" /></View>
     </Phone>
   );
 }
@@ -3247,7 +3253,7 @@ function makeStyles(colors: any) {
   statValue: { fontSize: 30, fontWeight: '300' },
   statLabel: { color: colors.textSecondary, fontSize: 12, marginTop: 4 },
   menuCard: { borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, overflow: 'hidden', marginBottom: 18 },
-  logoutBtn: { height: 52, borderRadius: 26, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  logoutBtn: { height: 52, borderRadius: 26, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginTop: 16, marginBottom: 8 },
   logoutBtnText: { color: colors.textInverse, fontSize: 15, fontWeight: '700' },
   menuRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 18, borderBottomWidth: 1, borderBottomColor: colors.border },
   menuRowLast: { borderBottomWidth: 0 },
