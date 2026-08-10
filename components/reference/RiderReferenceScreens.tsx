@@ -30,7 +30,7 @@ import { useRideBrowseStore, type RiderRideFilter } from '@/stores/rideBrowseSto
 import { ReportIssueModal } from '@/components/ReportIssueModal';
 import { CityAutocomplete } from '@/components/CityAutocomplete';
 import { DatePickerModal, TimePickerModal, formatDateLabel } from '@/components/DateTimePickerModals';
-import { computeRiderSuggestedPrice, computeDriverMaxPrice, formatContributionRange, getRideType } from '@/src/utils/pricing';
+import { computeRiderSuggestedPrice, formatContributionRange, getRideType } from '@/src/utils/pricing';
 import { chatBelongsToRole, roleKey } from '@/src/utils/roleIdentity';
 import { getOrCreateRideChat } from '@/src/services/chatAvailability';
 import { createRoleNotification } from '@/src/services/notificationRecords';
@@ -2116,15 +2116,13 @@ export function RiderRequestReference() {
         }
       }
       const routeSuggestedPrice = submitDistanceMiles && submitDistanceMiles > 0 ? computeRiderSuggestedPrice(submitDistanceMiles, 1) : 0;
-      const routeMaxPrice = submitDistanceMiles && submitDistanceMiles > 0 ? computeDriverMaxPrice(submitDistanceMiles, 1) : 0;
       const enteredPrice = Number(String(price).replace(/[^0-9.\-]/g, ''));
       const resolvedPrice = !Number.isNaN(enteredPrice) && enteredPrice > 0 ? enteredPrice : routeSuggestedPrice;
       if (!resolvedPrice || resolvedPrice <= 0) return Alert.alert('Missing price', 'Add a max price or enter a route so we can suggest one.');
+      // Riders can offer more than the suggested price (e.g. to get matched faster) —
+      // only enforce the floor so they can't lowball below what the ride actually costs.
       if (routeSuggestedPrice > 0 && resolvedPrice < routeSuggestedPrice) {
         return Alert.alert('Contribution too low', `The minimum contribution for this route is $${routeSuggestedPrice.toFixed(2)}.`);
-      }
-      if (routeMaxPrice > 0 && resolvedPrice > routeMaxPrice) {
-        return Alert.alert('Contribution too high', `The maximum contribution for this route is $${routeMaxPrice.toFixed(2)}.`);
       }
 
       // Prevent duplicate pending requests for the same route + date

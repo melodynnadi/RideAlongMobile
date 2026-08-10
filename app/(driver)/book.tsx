@@ -25,7 +25,7 @@ import { firestore, firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import { addDoc, collection, serverTimestamp, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
 import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import * as Location from 'expo-location';
-import { computeMaxPrice, computeDriverMaxPrice, computeRiderSuggestedPrice, formatContributionRange } from '@/src/utils/pricing';
+import { computeMaxPrice, computeDriverMaxPrice, formatContributionRange } from '@/src/utils/pricing';
 import EmailTriggerService from '@/services/EmailTriggerService';
 import { Ionicons } from '@expo/vector-icons';
 import { DriverBottomNav } from '@/components/DriverBottomNav';
@@ -1008,13 +1008,8 @@ export default function BookScreen() {
         return;
       }
 
-      // Enforce min/max price bounds based on distance & seats
-      const floor = computeRiderSuggestedPrice(dist, seatsNum);
-      if (floor > 0 && resolvedPriceNum < floor) {
-        Alert.alert('Price below minimum', `The minimum for ${seatsNum} seat(s) is $${floor.toFixed(2)} based on ${dist ? dist.toFixed(1) : '--'} mi.`);
-        return;
-      }
-
+      // Enforce max price cap based on distance & seats — drivers can charge
+      // as little as they want, but not more than the calculated ceiling.
       const cap = computeMaxPrice(dist, seatsNum);
       if (cap > 0 && resolvedPriceNum > cap) {
         Alert.alert('Price exceeds maximum', `The maximum for ${seatsNum} seat(s) is $${cap.toFixed(2)} based on ${dist ? dist.toFixed(1) : '--'} mi.`);
