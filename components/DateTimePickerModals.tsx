@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import type { AppColors } from '@/constants/theme';
@@ -102,13 +102,29 @@ export function DatePickerModal({
   const { colors } = useAppTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [month, setMonth] = useState(() => parseSelectedDate(selectedDate || initialDisplayDate));
+  const [yearPickerOpen, setYearPickerOpen] = useState(false);
   useEffect(() => {
-    if (visible) setMonth(parseSelectedDate(selectedDate || initialDisplayDate));
+    if (visible) {
+      setMonth(parseSelectedDate(selectedDate || initialDisplayDate));
+      setYearPickerOpen(false);
+    }
   }, [selectedDate, visible, initialDisplayDate]);
 
   const weeks = useMemo(() => monthGrid(month), [month]);
   const today = toYMD(new Date());
   const monthLabel = month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+  // Bound the quick-jump year list by minDate/maxDate when given, otherwise
+  // default to a wide range — this is what makes picking a birth year (or
+  // any far-off date) a single tap instead of dozens of month-chevron taps.
+  const years = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const minYear = minDate ? Number(minDate.slice(0, 4)) : currentYear - 100;
+    const maxYear = maxDate ? Number(maxDate.slice(0, 4)) : currentYear + 10;
+    const list: number[] = [];
+    for (let y = maxYear; y >= minYear; y--) list.push(y);
+    return list;
+  }, [minDate, maxDate]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -125,59 +141,93 @@ export function DatePickerModal({
           </View>
 
           <View style={styles.monthRow}>
-            <TouchableOpacity style={styles.navButton} onPress={() => setMonth(addMonths(month, -1))}>
-              <Ionicons name="chevron-back" size={18} color={colors.textPrimary} />
+            <TouchableOpacity
+              style={styles.navButton}
+              onPress={() => setMonth(addMonths(month, -1))}
+              disabled={yearPickerOpen}
+            >
+              <Ionicons name="chevron-back" size={18} color={yearPickerOpen ? colors.textSecondary : colors.textPrimary} />
             </TouchableOpacity>
-            <Text style={styles.monthLabel}>{monthLabel}</Text>
-            <TouchableOpacity style={styles.navButton} onPress={() => setMonth(addMonths(month, 1))}>
-              <Ionicons name="chevron-forward" size={18} color={colors.textPrimary} />
+            <TouchableOpacity onPress={() => setYearPickerOpen((open) => !open)} accessibilityRole="button">
+              <Text style={styles.monthLabel}>{monthLabel}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.navButton}
+              onPress={() => setMonth(addMonths(month, 1))}
+              disabled={yearPickerOpen}
+            >
+              <Ionicons name="chevron-forward" size={18} color={yearPickerOpen ? colors.textSecondary : colors.textPrimary} />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.weekdayRow}>
-            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
-              <Text key={`${day}-${index}`} style={styles.weekday}>{day}</Text>
-            ))}
-          </View>
-
-          {weeks.map((week, rowIndex) => (
-            <View key={rowIndex} style={styles.dayRow}>
-              {week.map((date, colIndex) => {
-                const value = date ? toYMD(date) : '';
-                const outOfRange = !!date && ((!!minDate && value < minDate) || (!!maxDate && value > maxDate));
-                const isDisabled = !date || outOfRange;
-                const selected = !!date && !outOfRange && value === selectedDate;
-                const isToday = !!date && value === today;
+          {yearPickerOpen ? (
+            <ScrollView style={styles.yearList} contentContainerStyle={styles.yearGrid}>
+              {years.map((year) => {
+                const selected = year === month.getFullYear();
                 return (
                   <TouchableOpacity
-                    key={`${rowIndex}-${colIndex}`}
-                    disabled={isDisabled}
-                    style={[
-                      styles.dayButton,
-                      !date && styles.dayButtonEmpty,
-                      outOfRange && styles.dayButtonDisabled,
-                      isToday && !selected && !outOfRange && styles.dayButtonToday,
-                      selected && styles.dayButtonSelected,
-                    ]}
+                    key={year}
+                    style={[styles.yearChip, selected && styles.yearChipSelected]}
                     onPress={() => {
-                      if (isDisabled) return;
-                      onSelect(value);
-                      onClose();
+                      const next = new Date(month);
+                      next.setFullYear(year);
+                      setMonth(next);
+                      setYearPickerOpen(false);
                     }}
                   >
-                    <Text style={[
-                      styles.dayText,
-                      outOfRange && styles.dayTextDisabled,
-                      selected && styles.dayTextSelected,
-                      isToday && !selected && !outOfRange && styles.dayTextToday,
-                    ]}>
-                      {date ? date.getDate() : ''}
-                    </Text>
+                    <Text style={[styles.yearChipText, selected && styles.yearChipTextSelected]}>{year}</Text>
                   </TouchableOpacity>
                 );
               })}
-            </View>
-          ))}
+            </ScrollView>
+          ) : (
+            <>
+              <View style={styles.weekdayRow}>
+                {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
+                  <Text key={`${day}-${index}`} style={styles.weekday}>{day}</Text>
+                ))}
+              </View>
+
+              {weeks.map((week, rowIndex) => (
+                <View key={rowIndex} style={styles.dayRow}>
+                  {week.map((date, colIndex) => {
+                    const value = date ? toYMD(date) : '';
+                    const outOfRange = !!date && ((!!minDate && value < minDate) || (!!maxDate && value > maxDate));
+                    const isDisabled = !date || outOfRange;
+                    const selected = !!date && !outOfRange && value === selectedDate;
+                    const isToday = !!date && value === today;
+                    return (
+                      <TouchableOpacity
+                        key={`${rowIndex}-${colIndex}`}
+                        disabled={isDisabled}
+                        style={[
+                          styles.dayButton,
+                          !date && styles.dayButtonEmpty,
+                          outOfRange && styles.dayButtonDisabled,
+                          isToday && !selected && !outOfRange && styles.dayButtonToday,
+                          selected && styles.dayButtonSelected,
+                        ]}
+                        onPress={() => {
+                          if (isDisabled) return;
+                          onSelect(value);
+                          onClose();
+                        }}
+                      >
+                        <Text style={[
+                          styles.dayText,
+                          outOfRange && styles.dayTextDisabled,
+                          selected && styles.dayTextSelected,
+                          isToday && !selected && !outOfRange && styles.dayTextToday,
+                        ]}>
+                          {date ? date.getDate() : ''}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ))}
+            </>
+          )}
         </View>
       </View>
     </Modal>
@@ -406,6 +456,12 @@ function makeStyles(colors: AppColors) {
   dayTextDisabled: { color: colors.textSecondary },
   dayTextToday: { color: colors.primary },
   dayTextSelected: { color: colors.textInverse, fontWeight: '900' },
+  yearList: { maxHeight: 260 },
+  yearGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingBottom: 4 },
+  yearChip: { minWidth: 72, flexGrow: 1, height: 42, borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' },
+  yearChipSelected: { borderColor: colors.primary, backgroundColor: colors.primary },
+  yearChipText: { color: colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  yearChipTextSelected: { color: colors.textInverse, fontWeight: '900' },
   timeDisplay: { minHeight: 110, borderRadius: 18, backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   timeValue: { color: colors.textPrimary, fontSize: 46, lineHeight: 54, fontWeight: '900' },
   timeStepper: { position: 'absolute', right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
