@@ -25,7 +25,7 @@ module.exports = ({ config }) => ({
       backgroundColor: "#FBFAF7",
     },
     ios: {
-      supportsTablet: true,
+      supportsTablet: false,
       bundleIdentifier: "com.ridealong.mobile",
       statusBarStyle: "dark",
       infoPlist: {
