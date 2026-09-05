@@ -45,6 +45,8 @@ export const ACTIVE_RIDE_STATUSES = [
   'OFFERED',
   'offer_sent',
   'OFFER_SENT',
+  'accepted',
+  'ACCEPTED',
 ] as const;
 
 export const normalizeRideStatus = (status: string | undefined | null): string =>
