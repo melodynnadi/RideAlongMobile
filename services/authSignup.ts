@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/react-native';
 import { getApiBaseUrl } from '@/constants/services';
 
 export type SignupUniversity = {
@@ -39,13 +40,28 @@ export function getAuthErrorMessage(error: unknown, action: 'sign-in' | 'sign-up
     case 'auth/too-many-requests':
       return 'Too many attempts. Wait a moment and try again.';
     case 'auth/network-request-failed':
-      return 'Could not connect. Check your internet connection and try again.';
+    case 'auth/timeout':
+      return 'Connection interrupted. Check your signal and try again.';
     case 'auth/user-disabled':
       return 'This account has been disabled. Contact RideAlong support.';
+    case 'auth/internal-error':
+    case 'auth/quota-exceeded':
+    case 'auth/app-not-authorized':
+    case 'auth/operation-not-allowed':
+      // These usually surface when the request to Firebase got interrupted or
+      // malformed mid-flight (e.g. a weak/flaky connection) rather than
+      // anything about the account itself - point at connectivity, since
+      // that's the actionable thing on the user's end.
+      Sentry.captureException(error, { tags: { authAction: action, authErrorCode: code } });
+      return 'Connection interrupted. Check your signal and try again.';
     default:
+      // Unrecognized Firebase error code - capture it so we can see exactly
+      // which code this was next time, instead of it being invisible (this
+      // handler never rethrows, so the global Sentry handler never sees it).
+      if (code) Sentry.captureException(error, { tags: { authAction: action, authErrorCode: code } });
       if (fallback && !fallback.startsWith('Firebase:')) return fallback;
-      if (action === 'sign-up') return 'We could not create your account. Please try again.';
-      if (action === 'reset') return 'We could not send the reset email. Please try again.';
-      return 'We could not sign you in. Please try again.';
+      if (action === 'sign-up') return 'Something interrupted account creation. Check your connection and try again.';
+      if (action === 'reset') return 'Something interrupted sending the reset email. Check your connection and try again.';
+      return 'Something interrupted sign-in. Check your connection and try again.';
   }
 }
