@@ -157,6 +157,8 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
         totalInCents: serverPricing.totalCents,
       }
     : { rideFee: localTotals.rideFee, platformFee: localTotals.platformFee, discount: 0, stripeFee: localTotals.stripeFee, total: localTotals.total, totalInCents: localTotals.totalInCents };
+  // Scope of the applied discount, from the server's own price breakdown.
+  const discountIsRide = (serverPricing?.discountAppliesTo ?? quote?.promotion?.appliesTo) === 'ride';
   const bookingKey = booking ? JSON.stringify(booking) : null;
 
   // Load the server quote and the available checkout offers each time the modal opens.
@@ -726,7 +728,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
               </View>
               {totals.discount > 0 ? (
                 <View style={styles.rowBetween}>
-                  <Text style={styles.lineLabel}>{quote?.promotion?.appliesTo === 'ride' ? 'Promo' : 'Promo (RideAlong fee)'}</Text>
+                  <Text style={styles.lineLabel}>{discountIsRide ? 'Promo (ride)' : 'Promo (RideAlong fee)'}</Text>
                   <Text style={styles.discountValue}>−${totals.discount.toFixed(2)}</Text>
                 </View>
               ) : null}
@@ -752,7 +754,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
                     <View style={{ flex: 1 }}>
                       <Text style={styles.promoAppliedText}>{quote.promotion.title}</Text>
                       <Text style={styles.promoAppliedMeta}>
-                        −${totals.discount.toFixed(2)} {quote.promotion.appliesTo === 'ride' ? 'off your ride' : 'off the RideAlong fee'}
+                        −${totals.discount.toFixed(2)} {discountIsRide ? 'off your ride' : 'off the RideAlong fee'}
                       </Text>
                     </View>
                     <TouchableOpacity onPress={() => void removePromo()} disabled={quoting || confirming} accessibilityRole="button" accessibilityLabel="Remove promo">

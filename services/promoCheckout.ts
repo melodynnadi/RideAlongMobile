@@ -22,6 +22,8 @@ export type CheckoutPricing = {
   baseFareCents: number;
   platformFeeCents: number;
   discountCents: number;
+  /** What the discount was applied to (null when there's no discount). */
+  discountAppliesTo?: 'platform_fee' | 'ride' | null;
   platformFeeAfterDiscountCents: number;
   processingFeeCents: number;
   totalCents: number;
