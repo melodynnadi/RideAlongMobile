@@ -8,6 +8,8 @@
  */
 
 import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
+import { promotionService } from '@/services/promotions';
+import type { Promotion } from '@/types';
 
 /** What is being booked. The server looks up the price from this. */
 export type CheckoutBooking =
@@ -65,6 +67,34 @@ export async function quoteCheckout(booking: CheckoutBooking, selection?: PromoS
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as any).error || 'Could not price this ride');
   return body as CheckoutQuote;
+}
+
+/**
+ * Checkout offers the signed-in rider can still use. The server applies the
+ * same rules as checkout (dates, per-rider and global limits, first-ride
+ * offers), so used-up offers aren't shown. Throws
+ * PromoCheckoutUnavailableError on servers without this endpoint.
+ */
+export async function fetchAvailableOffers(): Promise<Promotion[]> {
+  const res = await fetch(`${getApiBaseUrl()}/api/promotions/offers`, { headers: await authHeaders() });
+  if (res.status === 404) throw new PromoCheckoutUnavailableError('Offers unavailable');
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as any).error || 'Could not load offers');
+  return ((body as any).offers || []).map((o: any) => ({ ...o, redeemable: true })) as Promotion[];
+}
+
+/**
+ * Offers to show the rider. Prefers the server's per-rider list; falls back
+ * to all listed offers (without usage checks) on servers that predate it.
+ */
+export async function loadOffersForRider(): Promise<Promotion[]> {
+  try {
+    return await fetchAvailableOffers();
+  } catch (err) {
+    if (!(err instanceof PromoCheckoutUnavailableError)) throw err;
+    const active = await promotionService.getActivePromotions();
+    return active.filter((p) => p.redeemable);
+  }
 }
 
 /** One id per payment attempt; the server uses it to make retries idempotent. */

@@ -10,7 +10,7 @@ import { listPaymentMethods } from '@/services/payments';
 import { promotionService } from '@/services/promotions';
 import {
   CheckoutBooking, CheckoutPricing, CheckoutQuote, PromoSelection,
-  PromoCheckoutUnavailableError, newCheckoutId, quoteCheckout,
+  PromoCheckoutUnavailableError, loadOffersForRider, newCheckoutId, quoteCheckout,
 } from '@/services/promoCheckout';
 import { Promotion } from '@/types';
 import { useAppTheme } from '@/hooks/ThemeContext';
@@ -183,11 +183,10 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
         else setPromoMessage(err?.message ? `${err.message}. Close and try again.` : 'Couldn’t load the price for this ride. Close and try again.');
       })
       .finally(() => { if (!cancelled) setQuoting(false); });
-    // Listed redeemable promotions are offered to every rider at checkout
-    // (code-only ones are excluded by getActivePromotions). The server still
-    // decides eligibility when one is applied.
-    promotionService.getActivePromotions()
-      .then((active) => { if (!cancelled) setSavedOffers(active.filter((p) => p.redeemable)); })
+    // Offers this rider can still use (code-only and used-up ones are left
+    // out). The server re-checks eligibility when one is applied.
+    loadOffersForRider()
+      .then((offers) => { if (!cancelled) setSavedOffers(offers); })
       .catch(() => {});
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
