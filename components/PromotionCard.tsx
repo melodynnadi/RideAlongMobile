@@ -142,6 +142,11 @@ export const PromotionCard: React.FC<PromotionCardProps> = ({
             >
               {getDisplayValueOnly()}
             </Text>
+            {promotion.redeemable && (
+              <Text style={[styles.feeCaption, { color: promotion.textColor || '#FFFFFF' }]}>
+                off RideAlong fee
+              </Text>
+            )}
           </View>
         )}
       </View>
@@ -299,6 +304,11 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '900',
     lineHeight: 30,
+  },
+  feeCaption: {
+    fontSize: 11,
+    fontWeight: '600',
+    opacity: 0.9,
   },
   metaRow: {
     flexDirection: 'row',

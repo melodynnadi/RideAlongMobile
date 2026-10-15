@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { firebaseAuth, firestore, GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import { PaymentModal } from '@/components/PaymentModal';
+import type { CheckoutPricing } from '@/services/promoCheckout';
 import { RideFiltersModal } from '@/components/RideFiltersModal';
 import { useProfileCompleteness, ProfileCompletionItem } from '@/hooks/useProfileCompleteness';
 import { applyFiltersToRide, getDefaultFilters, hasActiveFilters, type RideFilterOptions } from '@/utils/rideFilters';
@@ -1684,6 +1685,7 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
         rideId={offerInfo?.offerId || request.id}
         driverId={offerInfo?.driverId || null}
         baseFare={offerInfo?.offerPrice ?? price}
+        booking={offerInfo?.offerId ? { type: 'ride_offer', offerId: offerInfo.offerId } : undefined}
         onPaymentSuccess={handleOfferPaymentSuccess}
       />
     </View>
@@ -2211,7 +2213,7 @@ export function RiderRequestReference() {
     }
   };
 
-  const handleRequestPaymentSuccess = async (paymentIntentId: string) => {
+  const handleRequestPaymentSuccess = async (paymentIntentId: string, pricing?: CheckoutPricing | null) => {
     setRequestPaymentVisible(false);
     const data = pendingRequestDataRef.current;
     if (!data) return;
@@ -2219,6 +2221,12 @@ export function RiderRequestReference() {
     try {
       await addDoc(collection(firestore, 'rideRequests'), {
         ...data,
+        // What was actually authorized (server pricing; includes any promo on the RideAlong fee)
+        ...(pricing && {
+          platformFee: pricing.platformFeeAfterDiscount,
+          paymentAmount: pricing.total,
+          ...(pricing.discountCents > 0 && { promoDiscount: pricing.discount, platformFeeBeforeDiscount: pricing.platformFee }),
+        }),
         paymentIntentId,
         paymentStatus: 'authorized',
         status: 'pending',
@@ -2327,6 +2335,7 @@ export function RiderRequestReference() {
         rideId={`req_${firebaseAuth.currentUser?.uid ?? 'anon'}_${Date.now()}`}
         driverId={null}
         baseFare={pendingRequestDataRef.current?.resolvedPrice ?? 0}
+        booking={pendingRequestDataRef.current?.resolvedPrice ? { type: 'new_request', fare: pendingRequestDataRef.current.resolvedPrice } : undefined}
         onPaymentSuccess={handleRequestPaymentSuccess}
       />
     </PhoneScreen>
@@ -3621,7 +3630,8 @@ export function RiderDetailReference() {
         rideId={ride.id}
         driverId={ride.driverId || null}
         baseFare={ride.price}
-        onPaymentSuccess={async (paymentIntentId: string) => {
+        booking={{ type: 'ride_posting', ridePostingId: ride.id }}
+        onPaymentSuccess={async (paymentIntentId: string, pricing) => {
           setPaymentVisible(false);
           const riderId = firebaseAuth.currentUser?.uid;
           const user = firebaseAuth.currentUser;
@@ -3682,8 +3692,14 @@ export function RiderDetailReference() {
               date,
               time,
               passengers: 1,
-              contributionAmount: ride.price,
-              price: ride.price,
+              contributionAmount: pricing ? pricing.baseFare : ride.price,
+              price: pricing ? pricing.baseFare : ride.price,
+              // What was actually authorized (server pricing; includes any promo on the RideAlong fee)
+              ...(pricing && {
+                platformFee: pricing.platformFeeAfterDiscount,
+                paymentAmount: pricing.total,
+                ...(pricing.discountCents > 0 && { promoDiscount: pricing.discount, platformFeeBeforeDiscount: pricing.platformFee }),
+              }),
               paymentIntentId,
               paymentStatus: 'authorized',
               status: 'pending',

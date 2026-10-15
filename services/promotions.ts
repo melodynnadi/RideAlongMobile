@@ -90,6 +90,8 @@ export class PromotionService {
 
         const isTargetMatch = promotion.target === 'riders' || promotion.target === 'both';
         const isPlatformMatch = promotion.platforms?.includes('mobile');
+        // Code-only discounts aren't advertised in the offers list.
+        if (promotion.listed === false) return;
         const isTimeValid =
           promotion.type === 'informational'
             ? true
@@ -138,7 +140,9 @@ export class PromotionService {
   }
 
   /**
-   * Claim a promotion for a user
+   * Claim (save) a promotion for a user. Claiming never uses up a
+   * redemption: limits are counted by the server only when the offer is
+   * applied at checkout and the payment succeeds.
    */
   async claimPromotion(userId: string, promotionId: string): Promise<ClaimedPromotion> {
     try {
@@ -163,11 +167,6 @@ export class PromotionService {
         throw new Error('Promotion is not available');
       }
 
-      // Check usage limit
-      if (promotion.usageLimit && promotion.currentUsageCount && promotion.currentUsageCount >= promotion.usageLimit) {
-        throw new Error('Promotion usage limit reached');
-      }
-
       // Create claimed promotion record
       const claimedPromotion: Omit<ClaimedPromotion, 'id'> = {
         userId,
@@ -180,15 +179,6 @@ export class PromotionService {
         ...claimedPromotion,
         claimedAt: Timestamp.fromDate(claimedPromotion.claimedAt),
       });
-
-      // Update promotion usage count
-      if (promotion.currentUsageCount !== undefined) {
-        const promotionRef = doc(firestore, this.COLLECTION_NAME, promotionId);
-        await updateDoc(promotionRef, {
-          currentUsageCount: (promotion.currentUsageCount || 0) + 1,
-          updatedAt: Timestamp.fromDate(now),
-        });
-      }
 
       return {
         id: docRef.id,
@@ -285,6 +275,10 @@ export class PromotionService {
    * Get promotion display value (e.g., "50% OFF", "$10 CASHBACK")
    */
   getPromotionDisplayValue(promotion: Promotion): string {
+    if (promotion.redeemable) {
+      const amount = promotion.valueType === 'percentage' ? `${promotion.value}%` : `$${promotion.value}`;
+      return `${amount} off RideAlong fee`;
+    }
     switch (promotion.valueType) {
       case 'percentage':
         return `${promotion.value}% OFF`;

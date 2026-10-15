@@ -929,6 +929,7 @@ function RiderRequestsReferenceInner() {
           rideId={acceptingOffer.request.id}
           driverId={acceptingOffer.offer.driverId}
           baseFare={acceptingOffer.offer.offerPrice ?? acceptingOffer.request.price}
+          booking={{ type: 'ride_offer', offerId: acceptingOffer.offer.offerId }}
           onPaymentSuccess={handleOfferPaymentSuccess}
         />
       )}
