@@ -349,6 +349,7 @@ class NotificationService {
           break;
 
         case 'payment_received':
+        case 'driver_bonus':
           router.replace('/(driver)/earnings');
           break;
 

@@ -15,6 +15,17 @@ import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { doc, setDoc, getDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { authHeaders } from '@/services/promoCheckout';
+
+// A driver bonus as returned by GET /api/driver-bonuses/earnings
+type BonusEarning = {
+  id: string;
+  campaignTitle: string | null;
+  amount: number;
+  status: 'earned' | 'paying' | 'paid' | 'owed' | 'held' | 'failed';
+  payableAt: string | null;
+  paidAt: string | null;
+};
 
 type EarningsSummary = {
   available: number;
@@ -135,6 +146,7 @@ export default function EarningsScreen() {
   const [linking, setLinking]             = useState(false);
   const [showAddBankModal, setShowAddBankModal] = useState(false);
   const [recentPayouts, setRecentPayouts] = useState<Payout[]>([]);
+  const [bonusEarnings, setBonusEarnings] = useState<BonusEarning[]>([]);
 
   const {
     payoutStatus,
@@ -169,11 +181,17 @@ export default function EarningsScreen() {
     const payoutsPromise = (async () => {
       try { const r = await fetchPayouts(3); setRecentPayouts(r.payouts); } catch { setRecentPayouts([]); }
     })();
+    const bonusesPromise = (async () => {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/api/driver-bonuses/earnings`, { headers: await authHeaders() });
+        if (res.ok) setBonusEarnings(((await res.json()).earnings || []) as BonusEarning[]);
+      } catch {}
+    })();
 
     try {
       await refreshPromise;
       setDataLoaded(true);
-      await Promise.allSettled([firestorePromise, payoutsPromise]);
+      await Promise.allSettled([firestorePromise, payoutsPromise, bonusesPromise]);
     } catch (e: any) {
       Alert.alert('Failed to load', e?.message || 'Could not load earnings');
       setDataLoaded(true);
@@ -568,6 +586,42 @@ export default function EarningsScreen() {
                   </View>
                 )}
               </View>
+
+              {/* Driver bonuses (paid separately from ride fares) */}
+              {bonusEarnings.length > 0 ? (
+                <>
+                  <View style={s.recentHdr}>
+                    <Text style={s.sectionLabel}>BONUSES</Text>
+                  </View>
+                  <View style={s.sectionCard}>
+                    {bonusEarnings.map((b, idx) => {
+                      const paid = b.status === 'paid';
+                      const owed = b.status === 'owed';
+                      const detail = paid
+                        ? `Paid ${formatDate(b.paidAt) || ''}`.trim()
+                        : owed
+                          ? 'Set up payouts to receive it'
+                          : b.status === 'held'
+                            ? 'Under review'
+                            : b.status === 'failed'
+                              ? 'Payout delayed — we’re on it'
+                              : `On its way${b.payableAt ? ` · ${formatDate(b.payableAt)}` : ''}`;
+                      return (
+                        <View key={b.id} style={[s.payoutRow, idx < bonusEarnings.length - 1 && s.payoutRowBorder]}>
+                          <View style={[s.payoutIcon, paid ? s.payoutIconDone : s.payoutIconPending]}>
+                            <Ionicons name={paid ? 'gift' : 'gift-outline'} size={14} color={paid ? colors.green : colors.primary} />
+                          </View>
+                          <View style={s.payoutInfo}>
+                            <Text style={s.payoutType}>{b.campaignTitle || 'Driver bonus'}</Text>
+                            <Text style={s.payoutDate}>{detail}</Text>
+                          </View>
+                          <Text style={[s.payoutAmount, !paid && s.payoutAmountPending]}>+${b.amount.toFixed(2)}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </>
+              ) : null}
 
               <View style={{ height: 120 }} />
             </ScrollView>
