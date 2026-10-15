@@ -125,7 +125,10 @@ function useStyles(colors: AppColors) {
           gap: 8,
         },
         inputError: { borderColor: colors.red },
-        input: { flex: 1, minWidth: 0, color: colors.textPrimary, fontSize: 16, paddingVertical: 0, textAlignVertical: 'center' },
+        // Fill the 56px wrapper instead of sizing to measured text: on iOS that
+        // measurement can run before the font/autofill bar settles and leave the
+        // field shorter than its text, clipping the placeholder.
+        input: { flex: 1, minWidth: 0, alignSelf: 'stretch', minHeight: 54, color: colors.textPrimary, fontSize: 16, paddingVertical: 0, textAlignVertical: 'center' },
         errorText: { color: colors.red, fontSize: 12, lineHeight: 17, marginTop: 5 },
 
         // Buttons
