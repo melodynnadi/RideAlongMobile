@@ -10,6 +10,7 @@ import { PaymentModal } from '@/components/PaymentModal';
 import type { CheckoutPricing } from '@/services/promoCheckout';
 import { RideFiltersModal } from '@/components/RideFiltersModal';
 import { useProfileCompleteness, ProfileCompletionItem } from '@/hooks/useProfileCompleteness';
+import { useHomeOffers } from '@/hooks/useHomeOffers';
 import { applyFiltersToRide, getDefaultFilters, hasActiveFilters, type RideFilterOptions } from '@/utils/rideFilters';
 import { addDoc, collection, doc, getDoc, getDocs, limit as fsLimit, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
 import { StatusBar } from 'expo-status-bar';
@@ -493,6 +494,9 @@ export function RiderHomeReference() {
   const [promotionIndex, setPromotionIndex] = useState(0);
   const promotionScrollRef = useRef<ScrollView>(null);
   const { items: profileTasks, loading: profileTasksLoading } = useProfileCompleteness('rider');
+  // Checkout offers first, then profile to-dos, in one carousel.
+  const homeOffers = useHomeOffers();
+  const homeCards = useMemo(() => [...homeOffers, ...profileTasks], [homeOffers, profileTasks]);
   const promotionCardWidth = Math.min(windowWidth, 430) - 40;
   const promotionSnapInterval = promotionCardWidth;
   const [monthlyStats, setMonthlyStats] = useState<{ rides: number; spent: number; rating: number | null; loaded: boolean }>({ rides: 0, spent: 0, rating: null, loaded: false });
@@ -693,16 +697,16 @@ export function RiderHomeReference() {
     });
   }, [uid]);
   useEffect(() => {
-    if (profileTasks.length < 2) return;
+    if (homeCards.length < 2) return;
     const interval = setInterval(() => {
       setPromotionIndex((current) => {
-        const next = (current + 1) % profileTasks.length;
+        const next = (current + 1) % homeCards.length;
         promotionScrollRef.current?.scrollTo({ x: next * promotionSnapInterval, animated: true });
         return next;
       });
     }, 5000);
     return () => clearInterval(interval);
-  }, [profileTasks.length, promotionSnapInterval]);
+  }, [homeCards.length, promotionSnapInterval]);
 
   useEffect(() => {
     if (from.trim()) return;
@@ -936,9 +940,9 @@ export function RiderHomeReference() {
           </View>
         )}
 
-        {profileTasksLoading && profileTasks.length === 0 ? (
+        {profileTasksLoading && homeCards.length === 0 ? (
           <View style={styles.promotionLoading}><ActivityIndicator color={colors.primary} /></View>
-        ) : profileTasks.length > 0 ? (
+        ) : homeCards.length > 0 ? (
           <>
           <ScrollView
             ref={promotionScrollRef}
@@ -951,10 +955,10 @@ export function RiderHomeReference() {
             disableIntervalMomentum
             onMomentumScrollEnd={(event) => {
               const next = Math.round(event.nativeEvent.contentOffset.x / promotionSnapInterval);
-              setPromotionIndex(Math.max(0, Math.min(next, profileTasks.length - 1)));
+              setPromotionIndex(Math.max(0, Math.min(next, homeCards.length - 1)));
             }}
           >
-            {profileTasks.map((item, index) => (
+            {homeCards.map((item, index) => (
               <ProfileTaskCard
                 key={item.id}
                 item={item}
@@ -964,9 +968,9 @@ export function RiderHomeReference() {
               />
             ))}
           </ScrollView>
-          {profileTasks.length > 1 ? (
+          {homeCards.length > 1 ? (
             <View style={styles.promotionDots}>
-              {profileTasks.map((item, index) => (
+              {homeCards.map((item, index) => (
                 <View key={item.id} style={[styles.promotionDot, index === promotionIndex && styles.promotionDotActive]} />
               ))}
             </View>
