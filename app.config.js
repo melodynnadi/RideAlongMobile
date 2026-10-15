@@ -78,12 +78,12 @@ module.exports = ({ config }) => ({
         {
           action: "VIEW",
           autoVerify: true,
+          // Must match the paths in ridealongapp.com/.well-known (Android
+          // verifies them against assetlinks.json at install time).
           data: [
-            {
-              scheme: "https",
-              host: "ridealongapp.com",
-              pathPrefix: "/ride",
-            },
+            { scheme: "https", host: "ridealongapp.com", pathPrefix: "/open" },
+            { scheme: "https", host: "ridealongapp.com", pathPrefix: "/ride" },
+            { scheme: "https", host: "ridealongapp.com", pathPrefix: "/request" },
           ],
           category: [
             "BROWSABLE",
