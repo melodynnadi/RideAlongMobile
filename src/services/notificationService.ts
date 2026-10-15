@@ -415,6 +415,8 @@ class NotificationService {
       ? { token: this.expoPushToken, type: 'expo' as const }
       : await this.registerForPushNotifications();
     if (!result?.token) return;
+    // Don't write to an account the user logged out of while we waited.
+    if (firebaseAuth.currentUser?.uid !== uid) return;
     await this.savePushToken(uid, result.token, role);
   }
 

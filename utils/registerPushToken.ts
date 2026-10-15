@@ -67,6 +67,9 @@ export async function registerRiderPushToken(userId: string): Promise<boolean> {
   try {
     const pushToken = await getExpoPushToken();
     if (!pushToken) return false;
+    // The user may have logged out or switched accounts while we waited for
+    // permission/token — never write this phone's token to an old account.
+    if (firebaseAuth.currentUser?.uid !== userId) return false;
 
     // Write to riders collection. Also write to drivers if this is a dual-role account
     // so server-side getUserPushToken('rider') can find the token either way.
@@ -96,6 +99,7 @@ export async function registerDriverPushToken(userId: string): Promise<boolean> 
   try {
     const pushToken = await getExpoPushToken();
     if (!pushToken) return false;
+    if (firebaseAuth.currentUser?.uid !== userId) return false; // logged out/switched meanwhile
 
     // Write to drivers collection. Also write to riders if this is a dual-role account.
     try {
@@ -116,6 +120,37 @@ export async function registerDriverPushToken(userId: string): Promise<boolean> 
   } catch (e) {
     console.warn('[registerDriverPushToken] Error:', e);
     return false;
+  }
+}
+
+/**
+ * Logout: ask the server to remove this phone's token from the signed-in
+ * account and from any other account still holding it. Must run before
+ * Firebase sign-out (the request is authenticated). Doesn't prompt for
+ * permission — it only reads the token if permission is already granted.
+ */
+export async function unregisterPushToken(): Promise<void> {
+  let pushToken: string | null = null;
+  try {
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+    const perms = await Notifications.getPermissionsAsync();
+    if (projectId && perms.status === 'granted') {
+      pushToken = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+    }
+  } catch {}
+  const idToken = await firebaseAuth.currentUser?.getIdToken().catch(() => null);
+  if (!idToken) return;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000); // don't hold up logout
+  try {
+    await fetch(`${getApiBaseUrl()}/api/push/unregister`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      body: JSON.stringify({ pushToken }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
   }
 }
 

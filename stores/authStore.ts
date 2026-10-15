@@ -18,7 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 
 import { firebaseAuth, firestore } from '@/services/firebase';
-import { registerRiderPushToken, registerDriverPushToken } from '@/utils/registerPushToken';
+import { registerRiderPushToken, registerDriverPushToken, unregisterPushToken } from '@/utils/registerPushToken';
 import { SignupUniversity, validateSignupUniversity } from '@/services/authSignup';
 import { sendVerificationEmailWithFallback } from '@/src/services/emailVerification';
 
@@ -489,16 +489,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
-    // Clear push token from Firestore before signing out so the logged-out
-    // device no longer receives push notifications.
+    // Clear push token before signing out so the logged-out device no longer
+    // receives push notifications. Done on the server (while still signed in)
+    // so it also clears legacy fields and any other account holding this
+    // phone's token; the direct writes below are a fallback.
     try {
-      const uid = get().uid;
+      const uid = get().uid || firebaseAuth.currentUser?.uid;
       if (uid) {
+        await unregisterPushToken().catch(() => {});
         const { doc, updateDoc } = await import('firebase/firestore');
         const { firestore } = await import('@/constants/services');
         await Promise.allSettled([
-          updateDoc(doc(firestore, 'drivers', uid), { pushToken: null }),
-          updateDoc(doc(firestore, 'riders', uid), { pushToken: null }),
+          updateDoc(doc(firestore, 'drivers', uid), { pushToken: null, expoPushToken: null }),
+          updateDoc(doc(firestore, 'riders', uid), { pushToken: null, expoPushToken: null }),
+          updateDoc(doc(firestore, 'users', uid), { pushToken: null }),
         ]);
       }
     } catch {}
