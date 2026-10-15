@@ -15,6 +15,7 @@ import { buildToastKey, shouldShowToastEvent } from '../utils/toastDeduper';
 import { settingsService } from './settingsService';
 import { useAuthStore } from '@/stores/authStore';
 import { firebaseAuth, firestore } from '@/constants/services';
+import { setupAndroidChannels } from '@/utils/registerPushToken';
 
 // ============================================================================
 // NOTIFICATION DEDUPLICATION
@@ -159,6 +160,10 @@ class NotificationService {
         return null;
       }
 
+      // Android 13+ only shows the permission prompt once a channel exists,
+      // so create channels before asking (Expo's documented order).
+      await setupAndroidChannels();
+
       // Request notification permissions
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
@@ -198,37 +203,6 @@ class NotificationService {
 
       this.expoPushToken = token.data;
       console.log('Expo Push Token:', token.data);
-
-      // Configure notification channel for Android
-      if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('default', {
-          name: 'default',
-          importance: Notifications.AndroidImportance.MAX,
-          vibrationPattern: [0, 250, 250, 250],
-          lightColor: '#E05E1A',
-          sound: 'default',
-        });
-
-        // Create ride-specific channel
-        await Notifications.setNotificationChannelAsync('rides', {
-          name: 'Ride Requests',
-          importance: Notifications.AndroidImportance.HIGH,
-          vibrationPattern: [0, 250, 250, 250],
-          lightColor: '#E05E1A',
-          sound: 'default',
-          description: 'Notifications about ride requests and updates',
-        });
-
-        // Create earnings channel
-        await Notifications.setNotificationChannelAsync('earnings', {
-          name: 'Earnings',
-          importance: Notifications.AndroidImportance.DEFAULT,
-          vibrationPattern: [0, 250],
-          lightColor: '#10B981',
-          sound: 'default',
-          description: 'Notifications about your earnings',
-        });
-      }
 
       return {
         token: token.data,

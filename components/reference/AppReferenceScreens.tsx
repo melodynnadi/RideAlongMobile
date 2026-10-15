@@ -46,6 +46,7 @@ import { useAppTheme } from '@/hooks/ThemeContext';
 import type { AppColors } from '@/constants/theme';
 import { submitRating } from '@/src/services/functions';
 import { notificationService } from '@/src/services/notificationService';
+import { ensurePushRegistered } from '@/utils/registerPushToken';
 import { settingsService } from '@/src/services/settingsService';
 import { hasUserRatedRide } from '@/src/services/ratings';
 const FONT_SANS = Platform.OS === 'web' ? '"Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, sans-serif' : undefined;
@@ -2456,6 +2457,8 @@ function RiderSettingsReferenceInner() {
       const currentUser = firebaseAuth.currentUser;
       if (currentUser) await setDoc(doc(firestore, 'riders', currentUser.uid), { pushNotificationsEnabled: value, settings: { pushNotificationsEnabled: value }, updatedAt: serverTimestamp() }, { merge: true });
       await notificationService.updateNotificationHandler();
+      // Turning it on must also register this phone.
+      if (value && currentUser) await ensurePushRegistered(currentUser.uid, 'rider');
     } catch {
       setPushEnabled(previous);
       Alert.alert('Settings not saved', 'We could not update your notification setting. Please try again.');

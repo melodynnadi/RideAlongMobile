@@ -1,10 +1,10 @@
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
-import { Platform } from 'react-native';
+import { Alert, Linking, Platform } from 'react-native';
 import { doc, updateDoc } from 'firebase/firestore';
 import { firestore, getApiBaseUrl, firebaseAuth } from '@/constants/services';
 
-async function setupAndroidChannels() {
+export async function setupAndroidChannels() {
   if (Platform.OS !== 'android') return;
   await Promise.all([
     Notifications.setNotificationChannelAsync('default', {
@@ -48,22 +48,25 @@ async function getExpoPushToken(): Promise<string | null> {
     return null;
   }
 
+  // Android 13+ only shows the permission prompt once a channel exists, so
+  // create channels first (Expo's documented order).
+  await setupAndroidChannels();
+
   const perms = await Notifications.getPermissionsAsync();
   if (perms.status !== 'granted') {
     const req = await Notifications.requestPermissionsAsync();
     if (req.status !== 'granted') return null;
   }
 
-  await setupAndroidChannels();
-
   const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
   return tokenData.data;
 }
 
-export async function registerRiderPushToken(userId: string) {
+/** Returns true when this device's token was saved for the account. */
+export async function registerRiderPushToken(userId: string): Promise<boolean> {
   try {
     const pushToken = await getExpoPushToken();
-    if (!pushToken) return;
+    if (!pushToken) return false;
 
     // Write to riders collection. Also write to drivers if this is a dual-role account
     // so server-side getUserPushToken('rider') can find the token either way.
@@ -81,15 +84,18 @@ export async function registerRiderPushToken(userId: string) {
       body: JSON.stringify({ userId, pushToken, role: 'rider' }),
     });
     if (!response.ok) console.warn('[registerRiderPushToken] Server rejected token');
+    return true;
   } catch (e) {
     console.warn('[registerRiderPushToken] Error:', e);
+    return false;
   }
 }
 
-export async function registerDriverPushToken(userId: string) {
+/** Returns true when this device's token was saved for the account. */
+export async function registerDriverPushToken(userId: string): Promise<boolean> {
   try {
     const pushToken = await getExpoPushToken();
-    if (!pushToken) return;
+    if (!pushToken) return false;
 
     // Write to drivers collection. Also write to riders if this is a dual-role account.
     try {
@@ -106,7 +112,31 @@ export async function registerDriverPushToken(userId: string) {
       body: JSON.stringify({ userId, pushToken, role: 'driver' }),
     });
     if (!response.ok) console.warn('[registerDriverPushToken] Server rejected token');
+    return true;
   } catch (e) {
     console.warn('[registerDriverPushToken] Error:', e);
+    return false;
   }
+}
+
+/**
+ * Called when a user turns push notifications on in settings: make sure this
+ * device is actually registered. If iOS/Android permission is off, offer to
+ * open system settings (the in-app toggle alone can't deliver anything).
+ */
+export async function ensurePushRegistered(userId: string, role: 'rider' | 'driver'): Promise<boolean> {
+  const ok = role === 'driver' ? await registerDriverPushToken(userId) : await registerRiderPushToken(userId);
+  if (ok) return true;
+  const perms = await Notifications.getPermissionsAsync().catch(() => null);
+  if (perms && perms.status !== 'granted') {
+    Alert.alert(
+      'Notifications are off for RideAlong',
+      'Turn on notifications for RideAlong in your phone’s Settings so you don’t miss ride requests and messages.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Open Settings', onPress: () => { void Linking.openSettings(); } },
+      ],
+    );
+  }
+  return false;
 }

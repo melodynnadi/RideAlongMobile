@@ -124,6 +124,14 @@ module.exports = ({ config }) => ({
       ],
       "expo-font",
       "expo-web-browser",
+      // Required for remote push: adds the iOS push entitlement and Android
+      // notification setup at build time (takes effect in the next build).
+      [
+        "expo-notifications",
+        {
+          color: "#DE5D20",
+        },
+      ],
     ],
     experiments: {
       typedRoutes: true,
