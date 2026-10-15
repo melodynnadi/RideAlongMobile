@@ -338,6 +338,11 @@ class NotificationService {
           router.replace(isDriver ? '/(driver)/earnings' : '/(rider)');
           break;
 
+        // Driver marked drop-off: the rider home card shows "Confirm arrival".
+        case 'confirm_dropoff':
+          router.replace(isDriver ? '/(driver)' : '/(rider)');
+          break;
+
         case 'ride_cancelled':
         case 'rider_cancelled':
           router.replace(isDriver ? '/(driver)' : '/(rider)');
