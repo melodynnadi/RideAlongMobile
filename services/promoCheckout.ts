@@ -37,7 +37,8 @@ export type CheckoutPricing = {
 
 export type CheckoutQuote = {
   pricing: CheckoutPricing;
-  promotion: { id: string; title: string; description?: string; appliesTo: 'platform_fee' } | null;
+  /** appliesTo: 'platform_fee' = RideAlong fee only; 'ride' = fare + RideAlong fee (driver still paid in full). */
+  promotion: { id: string; title: string; description?: string; appliesTo: 'platform_fee' | 'ride' } | null;
   promotionError: { reason: string; message: string } | null;
 };
 

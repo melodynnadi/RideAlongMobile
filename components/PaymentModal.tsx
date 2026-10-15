@@ -159,7 +159,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
     : { rideFee: localTotals.rideFee, platformFee: localTotals.platformFee, discount: 0, stripeFee: localTotals.stripeFee, total: localTotals.total, totalInCents: localTotals.totalInCents };
   const bookingKey = booking ? JSON.stringify(booking) : null;
 
-  // Load the server quote and the rider's saved (claimed) checkout offers each time the modal opens.
+  // Load the server quote and the available checkout offers each time the modal opens.
   useEffect(() => {
     setQuote(null);
     setPromoSelection(null);
@@ -181,15 +181,12 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
         else setPromoMessage(err?.message ? `${err.message}. Close and try again.` : 'Couldn’t load the price for this ride. Close and try again.');
       })
       .finally(() => { if (!cancelled) setQuoting(false); });
-    if (riderId) {
-      Promise.all([promotionService.getActivePromotions(), promotionService.getUserClaimedPromotions(riderId)])
-        .then(([active, claimed]) => {
-          if (cancelled) return;
-          const claimedIds = new Set(claimed.map((c) => c.promotionId));
-          setSavedOffers(active.filter((p) => p.redeemable && claimedIds.has(p.id)));
-        })
-        .catch(() => {});
-    }
+    // Listed redeemable promotions are offered to every rider at checkout
+    // (code-only ones are excluded by getActivePromotions). The server still
+    // decides eligibility when one is applied.
+    promotionService.getActivePromotions()
+      .then((active) => { if (!cancelled) setSavedOffers(active.filter((p) => p.redeemable)); })
+      .catch(() => {});
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, bookingKey, riderId]);
@@ -729,7 +726,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
               </View>
               {totals.discount > 0 ? (
                 <View style={styles.rowBetween}>
-                  <Text style={styles.lineLabel}>Promo (RideAlong fee)</Text>
+                  <Text style={styles.lineLabel}>{quote?.promotion?.appliesTo === 'ride' ? 'Promo' : 'Promo (RideAlong fee)'}</Text>
                   <Text style={styles.discountValue}>−${totals.discount.toFixed(2)}</Text>
                 </View>
               ) : null}
@@ -747,14 +744,16 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Promo</Text>
                 <Text style={styles.promoCaption}>
-                  Offers take money off the RideAlong platform fee only. Your driver still gets their full fare. One promo per ride.
+                  Your driver always gets their full fare. One promo per ride.
                 </Text>
                 {promoSelection && quote?.promotion ? (
                   <View style={styles.promoApplied}>
                     <Check size={16} color={colors.green} strokeWidth={3} />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.promoAppliedText}>{quote.promotion.title}</Text>
-                      <Text style={styles.promoAppliedMeta}>−${totals.discount.toFixed(2)} off the RideAlong fee</Text>
+                      <Text style={styles.promoAppliedMeta}>
+                        −${totals.discount.toFixed(2)} {quote.promotion.appliesTo === 'ride' ? 'off your ride' : 'off the RideAlong fee'}
+                      </Text>
                     </View>
                     <TouchableOpacity onPress={() => void removePromo()} disabled={quoting || confirming} accessibilityRole="button" accessibilityLabel="Remove promo">
                       <Text style={styles.promoRemove}>Remove</Text>
@@ -771,7 +770,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
                             onPress={() => void applyPromo({ promotionId: offer.id })}
                             disabled={quoting || confirming}
                             accessibilityRole="button"
-                            accessibilityLabel={`Apply saved offer ${offer.title}`}
+                            accessibilityLabel={`Apply offer ${offer.title}`}
                           >
                             <Tag size={13} color={colors.primary} />
                             <Text style={styles.promoChipText}>{promotionService.getPromotionDisplayValue(offer)}</Text>

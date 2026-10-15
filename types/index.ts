@@ -169,12 +169,13 @@ export interface Promotion {
   totalUsageLimit?: number; // Global
   currentUsageCount?: number;
 
-  // Checkout-redeemable discounts. These only ever reduce the RideAlong
-  // platform fee; the driver's fare is never discounted. Eligibility, limits
-  // and the discount amount are enforced by the server at checkout.
+  // Checkout-redeemable discounts. `appliesTo` is the RideAlong platform fee
+  // only, or the whole ride (fare + fee, funded by RideAlong). The driver is
+  // always paid their full fare. Eligibility, limits and the discount amount
+  // are enforced by the server at checkout.
   redeemable?: boolean;
-  appliesTo?: 'platform_fee' | null;
-  listed?: boolean; // false = code-only, hidden from the offers list
+  appliesTo?: 'platform_fee' | 'ride' | null;
+  listed?: boolean; // false = code-only, not offered at checkout
   firstPaidRideOnly?: boolean;
   maxDiscount?: number | null; // dollars
   minOrderValue?: number | null; // minimum base fare, dollars

@@ -144,7 +144,7 @@ export const PromotionCard: React.FC<PromotionCardProps> = ({
             </Text>
             {promotion.redeemable && (
               <Text style={[styles.feeCaption, { color: promotion.textColor || '#FFFFFF' }]}>
-                off RideAlong fee
+                {promotion.appliesTo === 'ride' ? 'off your ride' : 'off RideAlong fee'}
               </Text>
             )}
           </View>

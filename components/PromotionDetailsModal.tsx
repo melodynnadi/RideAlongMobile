@@ -156,7 +156,7 @@ export const PromotionDetailsModal: React.FC<PromotionDetailsModalProps> = ({
           <View style={styles.valueBadge}>
             <Text style={styles.valueBadgeText}>
               {promotion.redeemable
-                ? 'OFF YOUR RIDEALONG FEE'
+                ? (promotion.appliesTo === 'ride' ? 'OFF YOUR RIDE' : 'OFF YOUR RIDEALONG FEE')
                 : promotion.valueType === 'percentage'
                   ? `+${promotion.value}% BONUS`
                   : `+${getDisplayValueOnly()} BONUS`}
@@ -191,8 +191,10 @@ export const PromotionDetailsModal: React.FC<PromotionDetailsModalProps> = ({
           <Text style={styles.descriptionText}>{promotion.description}</Text>
           {promotion.redeemable && (
             <Text style={[styles.descriptionText, { marginTop: 10 }]}>
-              Applies to the RideAlong platform fee at checkout — your driver still receives their full fare.
-              Claiming saves this offer; select it when you pay. One offer per booking.
+              {promotion.appliesTo === 'ride'
+                ? 'Applies to your ride at checkout — your driver still receives their full fare.'
+                : 'Applies to the RideAlong platform fee at checkout — your driver still receives their full fare.'}
+              {' Select it when you pay. One offer per booking.'}
               {promotion.firstPaidRideOnly ? ' Valid on your first paid ride only.' : ''}
             </Text>
           )}

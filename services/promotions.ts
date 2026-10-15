@@ -277,7 +277,7 @@ export class PromotionService {
   getPromotionDisplayValue(promotion: Promotion): string {
     if (promotion.redeemable) {
       const amount = promotion.valueType === 'percentage' ? `${promotion.value}%` : `$${promotion.value}`;
-      return `${amount} off RideAlong fee`;
+      return promotion.appliesTo === 'ride' ? `${amount} off your ride` : `${amount} off RideAlong fee`;
     }
     switch (promotion.valueType) {
       case 'percentage':
