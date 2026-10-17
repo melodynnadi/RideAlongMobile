@@ -708,20 +708,6 @@ export function RiderHomeReference() {
     return () => clearInterval(interval);
   }, [homeCards.length, promotionSnapInterval]);
 
-  useEffect(() => {
-    if (from.trim()) return;
-    let cancelled = false;
-
-    (async () => {
-      const current = await getCurrentLocationAddressAsync();
-      if (!cancelled && current) setFrom(current);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [from]);
-
   // The top card should always be whichever ride is happening soonest — an
   // in-progress ride still wins outright since it needs immediate attention —
   // matching the driver home screen's single soonest-first timeline instead of
