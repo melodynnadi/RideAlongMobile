@@ -780,7 +780,7 @@ export function SignUpScreen({ forcedRole }: { forcedRole?: Role }) {
         universityData: university!,
         role,
       });
-      // AuthGate takes it from here: riders go to the profile steps, everyone else to verify-email.
+      // AuthGate takes it from here: verify-email first, then (riders) the profile steps.
     } catch (submitError) {
       setFormError(getAuthErrorMessage(submitError, 'sign-up'));
     } finally {

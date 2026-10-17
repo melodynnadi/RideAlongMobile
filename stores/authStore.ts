@@ -72,11 +72,10 @@ interface AuthState {
   activeRole: ActiveRole | null;
   riderProfile: RiderProfile | null;
   driverProfile: DriverProfile | null;
-  /** True right after a rider signs up, until they finish (or skip) the profile onboarding steps. */
-  onboardingPending: boolean;
 
   initializeAuth: () => () => void;
-  finishOnboarding: () => void;
+  /** Marks the rider's post-verification profile steps (photo, about, preferences) as done. */
+  finishOnboarding: () => Promise<void>;
   signIn: (email: string, password: string, preferredRole?: 'rider' | 'driver') => Promise<void>;
   signUp: (params: SignUpParams) => Promise<string>;
   signOut: () => Promise<void>;
@@ -220,9 +219,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   activeRole: null,
   riderProfile: null,
   driverProfile: null,
-  onboardingPending: false,
 
-  finishOnboarding: () => set({ onboardingPending: false }),
+  finishOnboarding: async () => {
+    const { uid } = get();
+    if (!uid) return;
+    await updateDoc(doc(firestore, 'riders', uid), {
+      profileOnboardingPending: false,
+      profileOnboardingCompletedAt: serverTimestamp(),
+    }).catch((err) => console.warn('[authStore] finishOnboarding write failed:', err));
+    // Clear locally after the write so a slower in-flight refreshProfiles can't flip it back.
+    const latest = get().riderProfile;
+    if (latest) set({ riderProfile: { ...latest, profileOnboardingPending: false } });
+  },
 
   initializeAuth: () => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
@@ -432,6 +440,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           await setDoc(doc(firestore, 'riders', user.uid), {
             ...baseProfile,
             role: 'rider',
+            // Shown the profile steps once their email is verified; existing riders never have this flag.
+            profileOnboardingPending: true,
           });
         }
 
@@ -478,7 +488,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           activeRole: initialActiveRole,
           riderProfile: profiles.riderProfile,
           driverProfile: profiles.driverProfile,
-          onboardingPending: initialActiveRole === 'rider',
           isLoading: false,
         });
 
@@ -526,7 +535,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       activeRole: null,
       riderProfile: null,
       driverProfile: null,
-      onboardingPending: false,
     });
   },
 

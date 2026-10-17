@@ -552,7 +552,8 @@ function yearsAgo(years: number) {
 export function CompleteProfileScreen() {
   const { colors } = useAppTheme();
   const s = useStyles(colors);
-  const { isEmailVerified, finishOnboarding, refreshProfiles } = useAuthStore();
+  const { finishOnboarding, refreshProfiles } = useAuthStore();
+  const [finishing, setFinishing] = useState(false);
   const savePreferences = usePreferencesStore((st) => st.savePreferences);
 
   const [stage, setStage] = useState<Stage>('photo');
@@ -1058,14 +1059,14 @@ export function CompleteProfileScreen() {
           ))}
         </View>
 
-        {!isEmailVerified ? (
-          <View style={s.infoNote}>
-            <Ionicons name="mail-unread-outline" size={17} color={colors.primary} />
-            <Text style={s.infoNoteText}>One last thing — confirm your .edu email so you can start booking rides.</Text>
-          </View>
-        ) : null}
-
-        <PrimaryButton label="Find a ride →" onPress={finishOnboarding} />
+        <PrimaryButton
+          label="Find a ride →"
+          loading={finishing}
+          onPress={() => {
+            setFinishing(true);
+            finishOnboarding().finally(() => setFinishing(false));
+          }}
+        />
       </>
     );
   }

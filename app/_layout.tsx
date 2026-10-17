@@ -47,7 +47,8 @@ let splashAlreadyShown = false;
 function AuthGate() {
   const router = useRouter();
   const segments = useSegments();
-  const { isAuthenticated, isLoading, isEmailVerified, activeRole, onboardingPending } = useAuthStore();
+  const { isAuthenticated, isLoading, isEmailVerified, activeRole, riderProfile } = useAuthStore();
+  const riderOnboardingPending = riderProfile?.profileOnboardingPending === true;
 
   useEffect(() => {
     if (isLoading) return;
@@ -58,12 +59,6 @@ function AuthGate() {
 
     if (!isAuthenticated) {
       if (!inAuth) router.replace('/(auth)/welcome');
-      return;
-    }
-
-    // Fresh rider sign-ups finish their profile (photo, about, preferences) before anything else.
-    if (onboardingPending) {
-      if (segments[1] !== 'complete-profile') router.replace('/(auth)/complete-profile');
       return;
     }
 
@@ -86,10 +81,16 @@ function AuthGate() {
     }
 
     if (activeRole === 'rider') {
+      // New riders set up their profile (photo, about, preferences) once, right after verifying.
+      // The flag lives on the rider doc, so it survives closing the app to go check email.
+      if (riderOnboardingPending) {
+        if (segments[1] !== 'complete-profile') router.replace('/(auth)/complete-profile');
+        return;
+      }
       if (!inRider) router.replace('/(rider)');
       return;
     }
-  }, [isAuthenticated, isLoading, isEmailVerified, activeRole, onboardingPending, segments, router]);
+  }, [isAuthenticated, isLoading, isEmailVerified, activeRole, riderOnboardingPending, segments, router]);
 
   return null;
 }
