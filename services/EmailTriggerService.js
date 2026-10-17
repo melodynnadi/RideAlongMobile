@@ -9,9 +9,10 @@
 
 import axios from 'axios';
 import { getAuth } from 'firebase/auth';
+import { getApiBaseUrl } from '@/constants/services';
 
-// API base URL - configure in your .env or config file
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4001';
+// Resolves localhost to the dev machine's LAN IP so physical devices can reach it.
+const API_BASE_URL = getApiBaseUrl();
 
 class EmailTriggerService {
   constructor() {

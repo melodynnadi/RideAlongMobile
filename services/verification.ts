@@ -4,7 +4,7 @@
  */
 
 import { doc, onSnapshot, Timestamp } from 'firebase/firestore';
-import { firebaseAuth, firestore } from '@/constants/services';
+import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { useVerificationStore } from '@/stores/verificationStore';
 import { useAuthStore } from '@/stores/authStore';
 import { Alert, ToastAndroid, Platform } from 'react-native';
@@ -15,7 +15,7 @@ let unsubscribeVerificationListener: (() => void) | null = null;
 
 // Dynamic base URL for backend. Prefer EXPO_PUBLIC_API_URL (set via .env), fallback to Cloud Function.
 // Convention: EXPO_PUBLIC_API_URL should NOT include trailing /api; we'll append it when needed.
-const RAW_BASE = process.env.EXPO_PUBLIC_API_URL || 'https://us-central1-ridealong-33528.cloudfunctions.net';
+const RAW_BASE = process.env.EXPO_PUBLIC_API_URL ? getApiBaseUrl() : 'https://us-central1-ridealong-33528.cloudfunctions.net';
 
 function normalizeBase(base: string) {
   return base.replace(/\/$/, '');

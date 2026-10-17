@@ -3,7 +3,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { ref, deleteObject } from 'firebase/storage';
 import { doc, getDoc, setDoc, serverTimestamp, deleteField } from 'firebase/firestore';
 import { updateProfile } from 'firebase/auth';
-import { firebaseAuth, firestore, storage, firebaseApp, firebaseConfig } from '@/constants/services';
+import { firebaseAuth, firestore, storage, firebaseApp, firebaseConfig, getApiBaseUrl } from '@/constants/services';
 import { logActivity } from '@/src/services/activity';
 
 export type PickUploadResult =
@@ -53,7 +53,7 @@ export async function pickAndUploadProfilePhoto(): Promise<PickUploadResult> {
   }
 
   // Send to backend for upload (avoids client storage SDK Blob usage)
-  const apiBase = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4001';
+  const apiBase = getApiBaseUrl();
   const idToken = await user.getIdToken();
   const resp = await fetch(`${apiBase}/api/upload-avatar`, {
     method: 'POST',

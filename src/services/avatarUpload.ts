@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { firebaseAuth, firestore } from '@/constants/services';
+import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export type AvatarUploadResult = { canceled: true } | { canceled: false; avatarUrl: string; photoPath: string };
@@ -36,7 +36,7 @@ export async function pickAndUploadAvatar(): Promise<AvatarUploadResult> {
   );
   if (!manipulated.base64) throw new Error('Missing base64');
 
-  const apiBase = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4001';
+  const apiBase = getApiBaseUrl();
   const idToken = await user.getIdToken();
   const resp = await fetch(`${apiBase}/api/upload-avatar`, {
     method: 'POST',

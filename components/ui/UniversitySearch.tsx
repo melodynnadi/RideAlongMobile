@@ -10,7 +10,7 @@ import {
   Modal,
 } from 'react-native';
 import { Search, X, MapPin, Plus } from 'lucide-react-native';
-import { firebaseAuth } from '@/constants/services';
+import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
 
 interface University {
@@ -102,8 +102,8 @@ export function UniversitySearch({
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      // Use backend URL from environment variable
-      const baseUrl = process.env.EXPO_PUBLIC_API_URL || 'https://ridealongwebapp.onrender.com';
+      // getApiBaseUrl swaps localhost for the dev machine's LAN IP so this works on a physical phone.
+      const baseUrl = getApiBaseUrl();
 
       const response = await fetch(
         `${baseUrl}/api/universities/search?query=${encodeURIComponent(query)}&limit=50`,
