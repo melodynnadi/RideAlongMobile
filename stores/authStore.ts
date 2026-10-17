@@ -72,8 +72,11 @@ interface AuthState {
   activeRole: ActiveRole | null;
   riderProfile: RiderProfile | null;
   driverProfile: DriverProfile | null;
+  /** True right after a rider signs up, until they finish (or skip) the profile onboarding steps. */
+  onboardingPending: boolean;
 
   initializeAuth: () => () => void;
+  finishOnboarding: () => void;
   signIn: (email: string, password: string, preferredRole?: 'rider' | 'driver') => Promise<void>;
   signUp: (params: SignUpParams) => Promise<string>;
   signOut: () => Promise<void>;
@@ -217,6 +220,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   activeRole: null,
   riderProfile: null,
   driverProfile: null,
+  onboardingPending: false,
+
+  finishOnboarding: () => set({ onboardingPending: false }),
 
   initializeAuth: () => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
@@ -472,6 +478,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           activeRole: initialActiveRole,
           riderProfile: profiles.riderProfile,
           driverProfile: profiles.driverProfile,
+          onboardingPending: initialActiveRole === 'rider',
           isLoading: false,
         });
 
@@ -519,6 +526,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       activeRole: null,
       riderProfile: null,
       driverProfile: null,
+      onboardingPending: false,
     });
   },
 

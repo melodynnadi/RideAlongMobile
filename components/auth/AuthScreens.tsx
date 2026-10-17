@@ -42,7 +42,7 @@ function useStyles(colors: AppColors) {
           maxWidth: 520,
           alignSelf: 'center',
           paddingHorizontal: 24,
-          paddingTop: 100,
+          paddingTop: 12,
           paddingBottom: 40,
           flexGrow: 1,
         },
@@ -742,7 +742,6 @@ export function SignUpScreen({ forcedRole }: { forcedRole?: Role }) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
   const [university, setUniversity] = useState<SignupUniversity | null>(null);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -777,12 +776,11 @@ export function SignUpScreen({ forcedRole }: { forcedRole?: Role }) {
         password,
         firstName: firstName.trim(),
         lastName: lastName.trim(),
-        phone: phone.trim(),
         university: university!.name,
         universityData: university!,
         role,
       });
-      router.replace('/(auth)/verify-email');
+      // AuthGate takes it from here: riders go to the profile steps, everyone else to verify-email.
     } catch (submitError) {
       setFormError(getAuthErrorMessage(submitError, 'sign-up'));
     } finally {
@@ -831,7 +829,7 @@ export function SignUpScreen({ forcedRole }: { forcedRole?: Role }) {
         </>
       ) : null}
 
-      {/* ── Step 2: university + phone ── */}
+      {/* ── Step 2: university ── */}
       {step === 2 ? (
         <>
           <View style={styles.field}>
@@ -840,7 +838,6 @@ export function SignUpScreen({ forcedRole }: { forcedRole?: Role }) {
               <UniversitySearch value={university?.name || ''} onSelect={(s) => setUniversity(s)} placeholder="Search your university" allowCustom />
             </View>
           </View>
-          <AuthInput label="PHONE (OPTIONAL)" value={phone} onChangeText={setPhone} placeholder="(512) 555-0123" keyboardType="phone-pad" textContentType="telephoneNumber" />
           <PrimaryButton label="Continue →" onPress={advanceStep} />
         </>
       ) : null}
@@ -901,7 +898,7 @@ export function SelectRoleScreen() {
   };
 
   return (
-    <AuthShell>
+    <AuthShell back={router.canGoBack()}>
       <Heading
         title="How are you"
         accent="riding along?"

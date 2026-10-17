@@ -5,16 +5,23 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export type AvatarUploadResult = { canceled: true } | { canceled: false; avatarUrl: string; photoPath: string };
 
-export async function pickAndUploadAvatar(): Promise<AvatarUploadResult> {
-  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!perm.granted) throw new Error('Media library permission required');
+export async function pickAndUploadAvatar(source: 'library' | 'camera' = 'library'): Promise<AvatarUploadResult> {
+  const perm = source === 'camera'
+    ? await ImagePicker.requestCameraPermissionsAsync()
+    : await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!perm.granted) {
+    throw new Error(source === 'camera' ? 'Camera permission required' : 'Media library permission required');
+  }
 
-  const picked = await ImagePicker.launchImageLibraryAsync({
+  const pickerOptions: ImagePicker.ImagePickerOptions = {
     mediaTypes: 'images',
     allowsEditing: true,
     aspect: [1, 1],
     quality: 1,
-  });
+  };
+  const picked = source === 'camera'
+    ? await ImagePicker.launchCameraAsync({ ...pickerOptions, cameraType: ImagePicker.CameraType.front })
+    : await ImagePicker.launchImageLibraryAsync(pickerOptions);
   if (picked.canceled) return { canceled: true };
   const asset = picked.assets?.[0];
   if (!asset?.uri) return { canceled: true };

@@ -13,11 +13,13 @@ export default function AuthLayout() {
         gestureEnabled: true,
       }}
     >
+      <Stack.Screen name="welcome" options={{ animation: 'fade' }} />
       <Stack.Screen name="sign-in" />
       <Stack.Screen name="sign-up" />
       <Stack.Screen name="driver-signup" />
       <Stack.Screen name="select-role" />
       <Stack.Screen name="verify-email" />
+      <Stack.Screen name="complete-profile" options={{ gestureEnabled: false }} />
       <Stack.Screen name="forgot-password" />
       <Stack.Screen name="terms" />
       <Stack.Screen name="privacy" />

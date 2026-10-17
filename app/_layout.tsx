@@ -47,7 +47,7 @@ let splashAlreadyShown = false;
 function AuthGate() {
   const router = useRouter();
   const segments = useSegments();
-  const { isAuthenticated, isLoading, isEmailVerified, activeRole } = useAuthStore();
+  const { isAuthenticated, isLoading, isEmailVerified, activeRole, onboardingPending } = useAuthStore();
 
   useEffect(() => {
     if (isLoading) return;
@@ -57,7 +57,13 @@ function AuthGate() {
     const inDriver = segments[0] === '(driver)';
 
     if (!isAuthenticated) {
-      if (!inAuth) router.replace('/(auth)/sign-in');
+      if (!inAuth) router.replace('/(auth)/welcome');
+      return;
+    }
+
+    // Fresh rider sign-ups finish their profile (photo, about, preferences) before anything else.
+    if (onboardingPending) {
+      if (segments[1] !== 'complete-profile') router.replace('/(auth)/complete-profile');
       return;
     }
 
@@ -83,7 +89,7 @@ function AuthGate() {
       if (!inRider) router.replace('/(rider)');
       return;
     }
-  }, [isAuthenticated, isLoading, isEmailVerified, activeRole, segments, router]);
+  }, [isAuthenticated, isLoading, isEmailVerified, activeRole, onboardingPending, segments, router]);
 
   return null;
 }

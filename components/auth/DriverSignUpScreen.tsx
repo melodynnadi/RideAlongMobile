@@ -235,7 +235,7 @@ function makeStyles(colors: AppColors) {
     progressFill: { height: '100%', backgroundColor: colors.primary, borderRadius: 2 },
 
     scroll: { flex: 1 },
-    content: { paddingHorizontal: 24, paddingTop: 28, paddingBottom: 48 },
+    content: { paddingHorizontal: 24, paddingTop: 12, paddingBottom: 48 },
 
     // Heading
     headingWrap: { marginBottom: 28 },
