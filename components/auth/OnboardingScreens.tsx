@@ -585,10 +585,13 @@ export function CompleteProfileScreen() {
   }, [stage, question]);
 
   const firstName = (firebaseAuth.currentUser?.displayName || '').split(' ')[0];
-  const classYears = useMemo(() => {
-    const y = new Date().getFullYear();
-    return [String(y), String(y + 1), String(y + 2), String(y + 3), 'Grad'];
-  }, []);
+  const currentYear = new Date().getFullYear();
+  // Most common years as quick picks; "Other" lets anyone type their own (part-time, 5th year, older grads, etc).
+  const classYears = useMemo(
+    () => [String(currentYear), String(currentYear + 1), String(currentYear + 2), String(currentYear + 3), 'Grad'],
+    [currentYear],
+  );
+  const [otherYearOpen, setOtherYearOpen] = useState(false);
 
   const majorSuggestions = useMemo(() => {
     const q = major.trim().toLowerCase();
@@ -621,6 +624,13 @@ export function CompleteProfileScreen() {
   };
 
   const saveAbout = async () => {
+    if (otherYearOpen && classYear) {
+      const n = Number(classYear);
+      if (!/^\d{4}$/.test(classYear) || n < 1950 || n > currentYear + 10) {
+        Alert.alert('Check your class year', `Enter a 4-digit year between 1950 and ${currentYear + 10}.`);
+        return;
+      }
+    }
     const uid = firebaseAuth.currentUser?.uid;
     const update: Record<string, unknown> = {};
     if (major.trim()) update.major = major.trim();
@@ -811,18 +821,48 @@ export function CompleteProfileScreen() {
         <View style={s.field}>
           <Text style={s.fieldLabel}>CLASS YEAR</Text>
           <View style={s.chipRow}>
-            {classYears.map((y) => (
-              <TouchableOpacity
-                key={y}
-                style={[s.chip, classYear === y && s.chipActive]}
-                onPress={() => { tapFeedback(); setClassYear(classYear === y ? '' : y); }}
-                accessibilityRole="button"
-                accessibilityState={{ selected: classYear === y }}
-              >
-                <Text style={[s.chipText, classYear === y && s.chipTextActive]}>{y}</Text>
-              </TouchableOpacity>
-            ))}
+            {classYears.map((y) => {
+              const active = !otherYearOpen && classYear === y;
+              return (
+                <TouchableOpacity
+                  key={y}
+                  style={[s.chip, active && s.chipActive]}
+                  onPress={() => { tapFeedback(); setOtherYearOpen(false); setClassYear(active ? '' : y); }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                >
+                  <Text style={[s.chipText, active && s.chipTextActive]}>{y}</Text>
+                </TouchableOpacity>
+              );
+            })}
+            <TouchableOpacity
+              style={[s.chip, otherYearOpen && s.chipActive]}
+              onPress={() => {
+                tapFeedback();
+                setOtherYearOpen((open) => !open);
+                setClassYear('');
+              }}
+              accessibilityRole="button"
+              accessibilityState={{ selected: otherYearOpen }}
+            >
+              <Text style={[s.chipText, otherYearOpen && s.chipTextActive]}>Other</Text>
+            </TouchableOpacity>
           </View>
+          {otherYearOpen ? (
+            <View style={[s.inputWrap, { marginTop: 10 }]}>
+              <Ionicons name="calendar-number-outline" size={19} color={colors.textSecondary} />
+              <TextInput
+                style={s.input}
+                value={classYear}
+                onChangeText={(t) => setClassYear(t.replace(/\D/g, '').slice(0, 4))}
+                placeholder="Graduation year, e.g. 2031"
+                placeholderTextColor={colors.textSecondary}
+                keyboardType="number-pad"
+                maxLength={4}
+                autoFocus
+              />
+            </View>
+          ) : null}
         </View>
 
         <View style={s.field}>
