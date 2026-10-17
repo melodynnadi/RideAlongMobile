@@ -42,7 +42,7 @@ function useStyles(colors: AppColors) {
           maxWidth: 520,
           alignSelf: 'center',
           paddingHorizontal: 24,
-          paddingTop: 12,
+          paddingTop: 100,
           paddingBottom: 40,
           flexGrow: 1,
         },
@@ -406,7 +406,7 @@ function BrandMark() {
   );
 }
 
-function AuthShell({ children, back = false, showBrand = false }: { children: React.ReactNode; back?: boolean; showBrand?: boolean }) {
+function AuthShell({ children, back = false, showBrand = false, topAligned = false }: { children: React.ReactNode; back?: boolean; showBrand?: boolean; topAligned?: boolean }) {
   const { colors } = useAppTheme();
   const styles = useStyles(colors);
   return (
@@ -414,7 +414,7 @@ function AuthShell({ children, back = false, showBrand = false }: { children: Re
       <StatusBar style={colors.statusBar === 'light-content' ? 'light' : 'dark'} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, topAligned && { paddingTop: 12 }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -795,7 +795,7 @@ export function SignUpScreen({ forcedRole }: { forcedRole?: Role }) {
   };
 
   return (
-    <AuthShell>
+    <AuthShell topAligned>
       {/* Step header */}
       <View style={styles.signupStepHeader}>
         <TouchableOpacity style={styles.stepBackBtn} onPress={goBack} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={hitSlop}>
@@ -898,7 +898,7 @@ export function SelectRoleScreen() {
   };
 
   return (
-    <AuthShell back={router.canGoBack()}>
+    <AuthShell>
       <Heading
         title="How are you"
         accent="riding along?"
