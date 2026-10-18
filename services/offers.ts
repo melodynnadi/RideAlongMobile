@@ -29,4 +29,13 @@ export function proposalLimits(distanceMiles: number | null | undefined, seats: 
   };
 }
 
-export const formatMoney = (n: number | null | undefined) => `$${Number(n || 0).toFixed(2)}`;
+/**
+ * A rider offering their own price on a driver's posting: from the minimum fare up to
+ * the listed price (offering more than the driver asked for doesn't make sense).
+ */
+export function postingOfferLimits(listedPrice: number) {
+  const MIN_FARE = 5;
+  return { min: Math.min(MIN_FARE, listedPrice), max: listedPrice };
+}
+
+export const formatMoney =(n: number | null | undefined) => `$${Number(n || 0).toFixed(2)}`;

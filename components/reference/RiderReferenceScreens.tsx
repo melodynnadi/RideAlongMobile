@@ -18,7 +18,7 @@ type OfferInfo = {
   offerCount: number;
   status?: string;
 };
-import { declineRideOffer, formatMoney, proposalLimits } from '@/services/offers';
+import { declineRideOffer, formatMoney, postingOfferLimits } from '@/services/offers';
 import { RideFiltersModal } from '@/components/RideFiltersModal';
 import { useProfileCompleteness, ProfileCompletionItem } from '@/hooks/useProfileCompleteness';
 import { applyFiltersToRide, getDefaultFilters, hasActiveFilters, type RideFilterOptions } from '@/utils/rideFilters';
@@ -3693,7 +3693,10 @@ export function RiderDetailReference() {
         </View>
       </PhoneScreen>
       {(() => {
-        const limits = proposalLimits(ride.raw?.distance?.miles, ride.raw?.availableSeats ?? ride.raw?.seatsAvailable, 'rider');
+        // Offering on a driver's posting: anything from the minimum fare up to the listed price.
+        // (The route's rider minimum is for the rider's own requests — on longer routes it
+        // equals the driver max, which would block any offer below a listing priced under the cap.)
+        const limits = postingOfferLimits(ride.price);
         return (
           <PriceOfferModal
             visible={priceOfferOpen}
