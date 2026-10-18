@@ -2,16 +2,24 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const SETTINGS_KEY = '@ridealong_driver_settings';
 
+/** 'system' follows the phone's light/dark setting (and updates live when it changes). */
+export type ThemeMode = 'system' | 'light' | 'dark';
+
 export interface UserSettings {
   pushNotificationsEnabled: boolean;
   soundEffectsEnabled: boolean;
+  /** @deprecated superseded by themeMode; kept so older stored settings still parse. */
   darkModeEnabled: boolean;
+  themeMode: ThemeMode;
 }
 
 const DEFAULT_SETTINGS: UserSettings = {
   pushNotificationsEnabled: true,
   soundEffectsEnabled: true,
   darkModeEnabled: false,
+  // Settings saved before themeMode existed have no value here, so everyone starts on
+  // 'system' — the old darkModeEnabled default of false can't be told apart from a choice.
+  themeMode: 'system',
 };
 
 class SettingsService {

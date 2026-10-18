@@ -17,7 +17,8 @@ import { router } from 'expo-router';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 
 import { firebaseAuth, firestore } from '@/constants/services';
-import { settingsService } from '@/src/services/settingsService';
+import { settingsService, type ThemeMode } from '@/src/services/settingsService';
+import { AppearanceSelector } from '@/components/ui/AppearanceSelector';
 import { notificationService } from '@/src/services/notificationService';
 import { useVerificationStore } from '@/stores/verificationStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -30,7 +31,7 @@ export default function SettingsScreen() {
   // navigate() is what Expo Router maps to the tab-navigator JUMP_TO action.
   const handleBack = () => router.navigate('/(driver)/profile' as any);
   const { isVerified, verificationStatus } = useVerificationStore();
-  const { isDark, setDark, colors } = useAppTheme();
+  const { colors } = useAppTheme();
   const [pushEnabled, setPushEnabled] = useState(true);
 
   const s = useMemo(() => makeStyles(colors), [colors]);
@@ -78,22 +79,15 @@ export default function SettingsScreen() {
     }
   };
 
-  const toggleDarkMode = async (value: boolean) => {
-    const previous = isDark;
-    setDark(value);
-    try {
-      const currentUser = firebaseAuth.currentUser;
-      if (currentUser) {
-        await setDoc(doc(firestore, 'drivers', currentUser.uid), {
-          darkModeEnabled: value,
-          settings: { darkModeEnabled: value },
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
-      }
-    } catch {
-      setDark(previous);
-      Alert.alert('Settings not saved', 'We could not update your dark mode setting. Please try again.');
-    }
+  // The choice applies instantly and is stored on the device; this also records it on the profile.
+  const saveThemeMode = (mode: ThemeMode) => {
+    const currentUser = firebaseAuth.currentUser;
+    if (!currentUser) return;
+    setDoc(doc(firestore, 'drivers', currentUser.uid), {
+      themeMode: mode,
+      settings: { themeMode: mode },
+      updatedAt: serverTimestamp(),
+    }, { merge: true }).catch(() => undefined);
   };
 
   const { driverProfile, signOut } = useAuthStore();
@@ -185,16 +179,7 @@ export default function SettingsScreen() {
               value={pushEnabled}
               onToggle={togglePush}
             />
-            <ToggleRow
-              colors={colors}
-              s={s}
-              icon="moon-outline"
-              label="Dark mode"
-              sub={isDark ? 'On' : 'Off'}
-              value={isDark}
-              onToggle={toggleDarkMode}
-              isLast
-            />
+            <AppearanceSelector onChange={saveThemeMode} />
           </View>
 
           <Text style={s.groupLabel}>HELP & LEGAL</Text>

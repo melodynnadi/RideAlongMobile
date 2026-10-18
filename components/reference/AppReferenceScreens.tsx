@@ -46,7 +46,8 @@ import { useAppTheme } from '@/hooks/ThemeContext';
 import type { AppColors } from '@/constants/theme';
 import { submitRating } from '@/src/services/functions';
 import { notificationService } from '@/src/services/notificationService';
-import { settingsService } from '@/src/services/settingsService';
+import { settingsService, type ThemeMode } from '@/src/services/settingsService';
+import { AppearanceSelector } from '@/components/ui/AppearanceSelector';
 import { hasUserRatedRide } from '@/src/services/ratings';
 const FONT_SANS = Platform.OS === 'web' ? '"Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, sans-serif' : undefined;
 const FONT_MONO = Platform.OS === 'web' ? '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace' : undefined;
@@ -2421,7 +2422,6 @@ export function RiderSettingsReference() {
 }
 function RiderSettingsReferenceInner() {
   const { s } = useScreenCtx();
-  const { isDark, setDark } = useAppTheme();
   const { riderProfile, signOut } = useAuthStore();
   const { isVerified, verificationStatus } = useVerificationStore();
   const [pushEnabled, setPushEnabled] = useState(true);
@@ -2461,16 +2461,11 @@ function RiderSettingsReferenceInner() {
     }
   };
 
-  const toggleDarkMode = async (value: boolean) => {
-    const previous = isDark;
-    setDark(value);
-    try {
-      const currentUser = firebaseAuth.currentUser;
-      if (currentUser) await setDoc(doc(firestore, 'riders', currentUser.uid), { darkModeEnabled: value, settings: { darkModeEnabled: value }, updatedAt: serverTimestamp() }, { merge: true });
-    } catch {
-      setDark(previous);
-      Alert.alert('Settings not saved', 'We could not update your dark mode setting. Please try again.');
-    }
+  // The choice applies instantly and is stored on the device; this also records it on the profile.
+  const saveThemeMode = (mode: ThemeMode) => {
+    const currentUser = firebaseAuth.currentUser;
+    if (!currentUser) return;
+    setDoc(doc(firestore, 'riders', currentUser.uid), { themeMode: mode, settings: { themeMode: mode }, updatedAt: serverTimestamp() }, { merge: true }).catch(() => undefined);
   };
   return (
     <Phone title="Settings" back backTarget="/(rider)/profile" compactContent headerGap={0}>
@@ -2491,7 +2486,7 @@ function RiderSettingsReferenceInner() {
       <Text style={s.settingsSectionLabel}>APP PREFERENCES</Text>
       <View style={[s.menuCard, s.settingsMenuCard]}>
         <SettingsToggleRow icon="notifications" title="Push notifications" sub="Ride offers and account alerts" value={pushEnabled} onChange={(value) => void togglePush(value)} />
-        <SettingsToggleRow icon="moon" title="Dark mode" sub={isDark ? 'On' : 'Off'} value={isDark} onChange={(value) => void toggleDarkMode(value)} isLast />
+        <AppearanceSelector onChange={saveThemeMode} />
       </View>
       <Text style={s.settingsSectionLabel}>HELP & LEGAL</Text>
       <View style={[s.menuCard, s.settingsMenuCard, s.settingsMenuCardLast]}>
