@@ -1,3 +1,4 @@
+import { singleLineInput } from '@/constants/inputStyles';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
@@ -47,7 +48,7 @@ export default function EmergencyContactsScreen() {
     formTitle:  { color: colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 20 },
     formGroup:  { marginBottom: 14 },
     formLabel:  { color: colors.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 6 },
-    input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: colors.textPrimary, fontSize: 14, fontWeight: '500', backgroundColor: colors.bgSecondary },
+    input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, height: 44, ...singleLineInput, color: colors.textPrimary, fontSize: 14, fontWeight: '500', backgroundColor: colors.bgSecondary },
     formActions:    { flexDirection: 'row', gap: 12, marginTop: 18 },
     cancelBtn:      { flex: 1, height: 46, borderRadius: 23, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
     cancelBtnText:  { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },

@@ -1,4 +1,5 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+﻿import { singleLineInput } from '@/constants/inputStyles';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, ScrollView, TouchableOpacity,
   Alert, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform,
@@ -64,12 +65,13 @@ export default function EditPostingScreen() {
     inputIcon: { marginLeft: 13 },
     inputIconMultiline: { marginTop: 15 },
     prefix: { marginLeft: 9, color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+    // Single-line: fill the row, no vertical padding or lineHeight (see constants/inputStyles).
     input: {
-      flex: 1, minWidth: 0, paddingHorizontal: 11, paddingVertical: 12,
-      color: colors.textPrimary, fontSize: 15, lineHeight: 20,
+      flex: 1, minWidth: 0, alignSelf: 'stretch', minHeight: 46, paddingHorizontal: 11, ...singleLineInput,
+      color: colors.textPrimary, fontSize: 15,
     },
     inputMultiline: {
-      minHeight: 104, paddingTop: 13, paddingBottom: 13, textAlignVertical: 'top',
+      minHeight: 104, paddingTop: 13, paddingBottom: 13, lineHeight: 20, textAlignVertical: 'top',
     },
     footer: {
       paddingHorizontal: 20, paddingTop: 10,
@@ -333,12 +335,13 @@ function Field({
     inputIcon: { marginLeft: 13 },
     inputIconMultiline: { marginTop: 15 },
     prefix: { marginLeft: 9, color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+    // Single-line: fill the row, no vertical padding or lineHeight (see constants/inputStyles).
     input: {
-      flex: 1, minWidth: 0, paddingHorizontal: 11, paddingVertical: 12,
-      color: colors.textPrimary, fontSize: 15, lineHeight: 20,
+      flex: 1, minWidth: 0, alignSelf: 'stretch', minHeight: 46, paddingHorizontal: 11, ...singleLineInput,
+      color: colors.textPrimary, fontSize: 15,
     },
     inputMultiline: {
-      minHeight: 104, paddingTop: 13, paddingBottom: 13, textAlignVertical: 'top',
+      minHeight: 104, paddingTop: 13, paddingBottom: 13, lineHeight: 20, textAlignVertical: 'top',
     },
   }), [colors]);
   return (

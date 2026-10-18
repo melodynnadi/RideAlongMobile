@@ -1,3 +1,4 @@
+import { singleLineInput } from '@/constants/inputStyles';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -176,7 +177,7 @@ function useStyles(colors: AppColors) {
           gap: 10,
         },
         inputWrapFocused: { borderColor: colors.primary },
-        input: { flex: 1, minWidth: 0, alignSelf: 'stretch', color: colors.textPrimary, fontSize: 16, paddingVertical: 0 },
+        input: { flex: 1, minWidth: 0, alignSelf: 'stretch', minHeight: 52, color: colors.textPrimary, fontSize: 16, ...singleLineInput },
         inputValue: { flex: 1, color: colors.textPrimary, fontSize: 16 },
         inputPlaceholder: { flex: 1, color: colors.textSecondary, fontSize: 16 },
         suggestions: {

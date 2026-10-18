@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { singleLineInput } from '@/constants/inputStyles';
 import { router, useLocalSearchParams } from 'expo-router';
 import { firestore, firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import { addDoc, collection, serverTimestamp, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
@@ -98,7 +99,8 @@ function AddressAutocomplete({
     autoWrap: { position: 'relative', marginBottom: 10 },
     label: { color: acColors.textSecondary, fontSize: 12, fontWeight: '700', marginBottom: 6 },
     input: {
-      minHeight: 48,
+      height: 48,
+      ...singleLineInput,
       borderRadius: 14,
       borderWidth: 1,
       borderColor: acColors.border,
@@ -629,7 +631,7 @@ export default function BookScreen() {
   priceRangeLabel:{ fontSize:12, color:colors.textSecondary },
   priceInputRow:  { flexDirection:'row', alignItems:'center', borderRadius:14, borderWidth:1.5, borderColor:colors.border, backgroundColor:colors.bgCard, overflow:'hidden', marginBottom:12 },
   priceDollarBox: { paddingHorizontal:16, paddingVertical:16, backgroundColor:colors.primaryDim, alignItems:'center', justifyContent:'center' },
-  priceInput:     { flex:1, fontSize:22, fontWeight:'700', color:colors.textPrimary, paddingHorizontal:12, paddingVertical:14 },
+  priceInput:     { flex:1, height:52, fontSize:22, fontWeight:'700', color:colors.textPrimary, paddingHorizontal:12, ...singleLineInput },
   pricePerSeat:   { paddingRight:16, fontSize:14, color:colors.textSecondary, fontWeight:'500' },
   earningsRow:    { flexDirection:'row', gap:12, marginBottom:10 },
   earningsItem:   { flex:1, backgroundColor:colors.bgSecondary, borderRadius:12, padding:12, alignItems:'center' },
@@ -660,7 +662,7 @@ export default function BookScreen() {
   goLiveSubText:  { textAlign:'center', fontSize:12, color:colors.textSecondary, marginBottom:4 },
   // ── Autocomplete (dark themed) ────────────────────────────────────────────
   label: { fontSize:12, fontWeight:'600', color:colors.textSecondary, marginBottom:5, textTransform:'uppercase', letterSpacing:0.5 },
-  input: { backgroundColor:colors.bgCard, borderWidth:1, borderColor:colors.border, borderRadius:14, paddingHorizontal:14, paddingVertical:12, fontSize:15, color:colors.textPrimary },
+  input: { backgroundColor:colors.bgCard, borderWidth:1, borderColor:colors.border, borderRadius:14, paddingHorizontal:14, height:48, ...singleLineInput, fontSize:15, color:colors.textPrimary },
   autoWrap: { position:'relative', marginBottom:10 },
   autoPanel: { position:'absolute', top:54, left:0, right:0, backgroundColor:colors.bgCard, borderRadius:16, borderWidth:1, borderColor:colors.border, maxHeight:268, overflow:'hidden', elevation:24, shadowColor:colors.textPrimary, shadowOffset:{width:0,height:10}, shadowOpacity:0.12, shadowRadius:18, zIndex:999 },
   autoItem:       { minHeight:56, paddingHorizontal:12, paddingVertical:10, borderBottomWidth:1, borderBottomColor:colors.border, flexDirection:'row', alignItems:'center', gap:10 },

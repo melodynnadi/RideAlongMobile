@@ -1,3 +1,4 @@
+import { singleLineInput } from '@/constants/inputStyles';
 import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, ScrollView, Share, StyleSheet, Text as RNText, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -4225,7 +4226,8 @@ function makeStyles(colors: AppColors) {
   priceBox: { borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, paddingHorizontal: 14, paddingVertical: 13, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
   priceInputGroup: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center' },
   bigPrice: { color: colors.primary, fontSize: 32, lineHeight: 38, fontWeight: '400', marginRight: 2 },
-  priceInput: { flex: 1, minWidth: 72, color: colors.textPrimary, fontSize: 32, lineHeight: 38, fontWeight: '400', paddingVertical: 0, paddingHorizontal: 0 },
+  // No lineHeight on TextInputs: iOS offsets the placeholder by it (see constants/inputStyles).
+  priceInput: { flex: 1, minWidth: 72, height: 44, color: colors.textPrimary, fontSize: 32, fontWeight: '400', ...singleLineInput, paddingHorizontal: 0 },
   requestSuggestedWrap: { width: 142, alignItems: 'flex-end', flexShrink: 0 },
   requestSuggestedLabel: { fontFamily: FONT_MONO, color: colors.textTertiary, fontSize: 9, fontWeight: '700', letterSpacing: 1 },
   requestSuggestedText: { color: colors.textSecondary, fontSize: 11, lineHeight: 15, fontWeight: '600', textAlign: 'right', marginTop: 2 },

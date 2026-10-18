@@ -4,6 +4,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Keyboard, type Sty
 import { getApiBaseUrl, firebaseAuth } from '@/constants/services';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import type { AppColors } from '@/constants/theme';
+import { singleLineInput } from '@/constants/inputStyles';
 
 type Suggestion = { description: string; place_id: string; displayText: string };
 
@@ -180,7 +181,9 @@ function makeStyles(colors: AppColors) {
   input: {
     backgroundColor: colors.bgCard,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    // Fixed height, no vertical padding — callers' inputStyle may set a different height.
+    height: 44,
+    ...singleLineInput,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.border,

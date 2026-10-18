@@ -1,3 +1,4 @@
+import { singleLineInput } from '@/constants/inputStyles';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
@@ -157,7 +158,8 @@ export default function VehicleInfoScreen() {
       borderColor: colors.border,
       borderRadius: 10,
       paddingHorizontal: 12,
-      paddingVertical: 10,
+      height: 44,
+      ...singleLineInput,
       color: colors.textPrimary,
       fontSize: 14,
       fontWeight: '500',

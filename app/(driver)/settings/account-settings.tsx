@@ -579,8 +579,10 @@ function makeStyles(colors: AppColors) {
     fieldLabelRow:   { flexDirection: 'row', alignItems: 'center', marginBottom: 7 },
     fieldLabel:      { color: colors.textSecondary, fontSize: 10, lineHeight: 15, fontWeight: '700', letterSpacing: 1.3, textTransform: 'uppercase' },
     fieldInput: {
+      // minHeight (not height) so the multiline About field can still grow; no vertical padding
+      // for single-line fields (see constants/inputStyles). aboutInput sets its own padding.
       minHeight: 54, borderWidth: 1, borderColor: colors.border, borderRadius: 14,
-      paddingHorizontal: 15, paddingVertical: 14, color: colors.textPrimary, fontSize: 15, backgroundColor: colors.bgCard,
+      paddingHorizontal: 15, paddingVertical: 0, justifyContent: 'center', color: colors.textPrimary, fontSize: 15, backgroundColor: colors.bgCard,
     },
     fieldInputDisabled: { color: colors.textSecondary, backgroundColor: colors.bgSecondary },
     fieldInputText:     { color: colors.textPrimary, fontSize: 14, fontWeight: '500' },

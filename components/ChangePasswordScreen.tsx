@@ -1,3 +1,4 @@
+import { singleLineInput } from '@/constants/inputStyles';
 import { Ionicons } from '@expo/vector-icons';
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
 import React, { useMemo, useState } from 'react';
@@ -23,7 +24,7 @@ function makeStyles(colors: any) {
     fieldGroup: { marginBottom: 16 },
     label: { color: colors.textSecondary, fontSize: 10, lineHeight: 15, letterSpacing: 1.3, fontWeight: '700', marginBottom: 7 },
     inputWrap: { minHeight: 54, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15 },
-    input: { flex: 1, color: colors.textPrimary, fontSize: 15, paddingVertical: 14, paddingRight: 12 },
+    input: { flex: 1, height: 50, color: colors.textPrimary, fontSize: 15, ...singleLineInput, paddingRight: 12 },
     requirement: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderRadius: 13, backgroundColor: colors.primaryDim, padding: 12 },
     requirementText: { flex: 1, color: colors.textSecondary, fontSize: 11, lineHeight: 17 },
     saveButton: { minHeight: 54, borderRadius: 27, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },

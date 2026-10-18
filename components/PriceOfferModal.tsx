@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { formatMoney } from '@/services/offers';
+import { singleLineInput } from '@/constants/inputStyles';
 
 type Props = {
   visible: boolean;
@@ -88,7 +89,7 @@ export function PriceOfferModal({
     stepBtn: { width: 48, height: 64, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, alignItems: 'center', justifyContent: 'center' },
     inputWrap: { flex: 1, height: 64, borderRadius: 16, borderWidth: 1.5, borderColor: error && text ? colors.red : colors.primary, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
     dollar: { color: colors.primary, fontSize: 28, fontWeight: '400', marginRight: 2 },
-    input: { minWidth: 90, color: colors.textPrimary, fontSize: 30, fontWeight: '600', textAlign: 'center', paddingVertical: 0 },
+    input: { minWidth: 90, alignSelf: 'stretch', color: colors.textPrimary, fontSize: 30, fontWeight: '600', textAlign: 'center', ...singleLineInput },
     range: { color: colors.textSecondary, fontSize: 12, textAlign: 'center', marginTop: 8 },
     error: { color: colors.red, fontSize: 12, fontWeight: '600', textAlign: 'center', marginTop: 6, minHeight: 16 },
     note: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginTop: 10, padding: 12, borderRadius: 12, backgroundColor: colors.primaryDim },

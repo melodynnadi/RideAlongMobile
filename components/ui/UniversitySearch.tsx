@@ -14,6 +14,7 @@ import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import type { AppColors } from '@/constants/theme';
+import { singleLineInput } from '@/constants/inputStyles';
 
 interface University {
   id: string;
@@ -386,7 +387,8 @@ const makeStyles = (colors: AppColors) => StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 16,
-    paddingVertical: 14,
+    height: 50,
+    ...singleLineInput,
     color: colors.textPrimary,
   },
   resultsList: {

@@ -1,3 +1,4 @@
+import { singleLineInput } from '@/constants/inputStyles';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
@@ -78,7 +79,8 @@ function makeStyles(colors: any) {
     inputWrap: { minHeight: 54, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15 },
     aboutInput: { minHeight: 112, alignItems: 'flex-start', color: colors.textPrimary, fontSize: 15, lineHeight: 21, paddingTop: 14, paddingBottom: 14 },
     inputReadOnly: { backgroundColor: colors.bgSecondary },
-    input: { flex: 1, color: colors.textPrimary, fontSize: 15, paddingVertical: 14 },
+    // Fill the 54px row instead of padding (see constants/inputStyles).
+    input: { flex: 1, alignSelf: 'stretch', minHeight: 52, color: colors.textPrimary, fontSize: 15, ...singleLineInput },
     readOnlyText: { color: colors.textSecondary },
     selectInput: { minHeight: 54, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, gap: 10 },
     selectInputText: { flex: 1, color: colors.textPrimary, fontSize: 15, fontWeight: '500' },

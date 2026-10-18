@@ -1,3 +1,4 @@
+import { singleLineInput } from '@/constants/inputStyles';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -25,7 +26,7 @@ function makeStyles(colors: any) {
     card: { borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgCard, padding: 17, marginBottom: 18 },
     label: { color: colors.textSecondary, fontSize: 10, lineHeight: 15, letterSpacing: 1.3, fontWeight: '700', marginBottom: 7 },
     inputWrap: { minHeight: 56, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 15 },
-    input: { flex: 1, color: colors.textPrimary, fontSize: 16, paddingVertical: 14 },
+    input: { flex: 1, height: 52, color: colors.textPrimary, fontSize: 16, ...singleLineInput },
     notice: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, borderRadius: 13, backgroundColor: colors.primaryDim, padding: 12, marginTop: 16 },
     noticeText: { flex: 1, color: colors.textSecondary, fontSize: 11, lineHeight: 17 },
     codeInput: { height: 62, borderRadius: 15, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg, color: colors.textPrimary, fontSize: 25, fontWeight: '700', letterSpacing: 10, textAlign: 'center' },
