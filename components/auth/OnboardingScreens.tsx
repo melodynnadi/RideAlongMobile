@@ -594,6 +594,45 @@ export function CompleteProfileScreen() {
   );
   const [otherYearOpen, setOtherYearOpen] = useState(false);
 
+  // Coming back after leaving partway: show what's already saved on their profile and
+  // start at the first step they haven't done, instead of a blank Profile 1.
+  const riderProfile = useAuthStore((st) => st.riderProfile);
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (prefilled.current || !riderProfile) return;
+    prefilled.current = true;
+    const p = riderProfile;
+
+    const photo = p.avatarUrl || p.photoURL || null;
+    if (photo) setAvatarUrl(photo);
+
+    if (p.major) setMajor(String(p.major));
+    if (p.classYear) {
+      const y = String(p.classYear);
+      setClassYear(y);
+      if (!classYears.includes(y)) setOtherYearOpen(true);
+    }
+    if (p.dateOfBirth) setDob(String(p.dateOfBirth));
+    if (p.phone) setPhone(String(p.phone));
+    if (p.pronouns) setPronouns(String(p.pronouns));
+    const hasAbout = !!(p.major || p.classYear || p.dateOfBirth || p.pronouns);
+    if (hasAbout) setAboutSaved(true);
+
+    const music = Array.isArray(p.musicPreference) ? p.musicPreference.map(String) : [];
+    setAnswers({
+      musicPreference: music,
+      conversationLevel: p.conversationLevel || '',
+      soundEnvironment: p.soundEnvironment || '',
+      smokingPreference: p.smokingPreference || '',
+      driverGender: p.driverGender || '',
+    });
+    if (p.preferencesUpdatedAt) setPrefsSaved(true);
+
+    if (p.preferencesUpdatedAt) setStage('done');
+    else if (hasAbout) setStage('prefs');
+    else if (photo) setStage('about');
+  }, [riderProfile, classYears]);
+
   const majorSuggestions = useMemo(() => {
     const q = major.trim().toLowerCase();
     if (!majorFocused || !q) return [];
