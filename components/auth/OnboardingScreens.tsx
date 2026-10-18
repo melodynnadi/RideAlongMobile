@@ -50,35 +50,10 @@ function useStyles(colors: AppColors) {
 
         // Welcome
         welcomeRoot: { flex: 1, backgroundColor: colors.bg },
-        welcomeBrand: {
-          position: 'absolute',
-          left: 24,
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 6,
-          paddingHorizontal: 12,
-          paddingVertical: 7,
-          borderRadius: 20,
-          backgroundColor: 'rgba(0,0,0,0.35)',
-        },
-        welcomeBrandText: { color: '#fff', fontSize: 15, fontWeight: '700', letterSpacing: -0.2 },
         welcomeBody: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 24 },
-        welcomeEyebrow: {
-          alignSelf: 'flex-start',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 6,
-          paddingHorizontal: 10,
-          paddingVertical: 5,
-          borderRadius: 14,
-          backgroundColor: colors.primaryDim,
-          marginBottom: 14,
-        },
-        welcomeEyebrowText: { color: colors.primary, fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
-        welcomeTitle: { color: colors.textPrimary, fontSize: 42, lineHeight: 48, fontWeight: '600', letterSpacing: -1 },
+        welcomeTitle: { color: colors.textPrimary, fontSize: 40, lineHeight: 46, fontWeight: '800', letterSpacing: -1 },
+        welcomeAccent: { color: colors.primary, fontStyle: 'italic', fontWeight: '800' },
         welcomeSubtitle: { color: colors.textSecondary, fontSize: 16, lineHeight: 23, marginTop: 12, marginBottom: 28 },
-        textButton: { alignItems: 'center', justifyContent: 'center', minHeight: 50, marginTop: 6 },
-        textButtonLabel: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
 
         // Shell
         content: {
@@ -409,46 +384,34 @@ export function WelcomeScreen() {
   const { colors } = useAppTheme();
   const s = useStyles(colors);
   const { height } = useWindowDimensions();
-  const photoHeight = Math.round(height * 0.6);
+  // Photo fills the top ~70% and melts into the background behind the headline.
+  const photoHeight = Math.round(height * 0.7);
+  // Fade to the page colour itself (not 'transparent', which is black at 0 alpha and leaves a grey band).
+  const fadeFrom = colors.bg.length === 7 ? `${colors.bg}00` : 'transparent';
+  const fadeMid = colors.bg.length === 7 ? `${colors.bg}B3` : colors.bg;
 
   return (
     <View style={s.welcomeRoot}>
-      <StatusBar style="light" />
+      <StatusBar style={colors.statusBar === 'light-content' ? 'light' : 'dark'} />
       <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: photoHeight }}>
-        <Image source={WELCOME_IMAGE} style={StyleSheet.absoluteFill} contentFit="cover" contentPosition="center" transition={250} />
+        <Image source={WELCOME_IMAGE} style={StyleSheet.absoluteFill} contentFit="cover" contentPosition="top" transition={250} />
         <LinearGradient
-          colors={['rgba(0,0,0,0.35)', 'transparent']}
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 140 }}
-        />
-        <LinearGradient
-          colors={['transparent', colors.bg]}
-          style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: photoHeight * 0.45 }}
+          colors={[fadeFrom, fadeMid, colors.bg]}
+          locations={[0, 0.55, 1]}
+          style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: photoHeight * 0.42 }}
         />
       </View>
 
       <SafeAreaView style={s.flex} edges={['top', 'bottom', 'left', 'right']}>
-        <View style={[s.welcomeBrand, { top: 12 }]}>
-          <Ionicons name="location" size={16} color={colors.primary} />
-          <Text style={s.welcomeBrandText}>RideAlong</Text>
-        </View>
-
-        <View style={[s.welcomeBody, { paddingBottom: 12 }]}>
-          <View style={s.welcomeEyebrow}>
-            <Ionicons name="school-outline" size={13} color={colors.primary} />
-            <Text style={s.welcomeEyebrowText}>.EDU STUDENTS ONLY</Text>
-          </View>
+        <View style={[s.welcomeBody, { paddingBottom: 8 }]}>
           <Text style={s.welcomeTitle}>
-            Your campus,{'\n'}
-            <Text style={s.titleAccent}>one ride away.</Text>
+            Share the ride,{'\n'}
+            <Text style={s.welcomeAccent}>split the cost.</Text>
           </Text>
-          <Text style={s.welcomeSubtitle}>
-            Share rides with verified students heading your way — to class, home, or the airport.
-          </Text>
+          <Text style={s.welcomeSubtitle}>Ride safely. Save money. Make friends.</Text>
 
           <PrimaryButton label="Get started →" onPress={() => router.push('/(auth)/select-role')} />
-          <TouchableOpacity style={s.textButton} onPress={() => router.push('/(auth)/sign-in')} accessibilityRole="button">
-            <Text style={s.textButtonLabel}>I already have an account</Text>
-          </TouchableOpacity>
+          <SecondaryButton label="I already have an account" onPress={() => router.push('/(auth)/sign-in')} />
         </View>
       </SafeAreaView>
     </View>
