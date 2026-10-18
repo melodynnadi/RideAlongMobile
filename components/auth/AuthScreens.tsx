@@ -19,8 +19,8 @@ import { sendPasswordResetEmail } from 'firebase/auth';
 import { StatusBar } from 'expo-status-bar';
 
 import { UniversitySearch } from '@/components/ui/UniversitySearch';
-import { firebaseAuth } from '@/constants/services';
-import { getAuthErrorMessage, type SignupUniversity } from '@/services/authSignup';
+import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
+import { emailDomainMismatch, getAuthErrorMessage, type SignupUniversity } from '@/services/authSignup';
 import { useAuthStore } from '@/stores/authStore';
 import { hitSlop } from '@/theme/designSystem';
 import { WebView } from 'react-native-webview';
@@ -749,7 +749,10 @@ export function SignUpScreen({ forcedRole }: { forcedRole?: Role }) {
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState('');
 
-  const { title, accent, subtitle } = SIGNUP_STEPS[step - 1];
+  const { title, accent } = SIGNUP_STEPS[step - 1];
+  const subtitle = step === 3 && email.trim()
+    ? `Create a secure password. We'll send a verification link to ${email.trim().toLowerCase()}.`
+    : SIGNUP_STEPS[step - 1].subtitle;
 
   const advanceStep = () => {
     setFormError('');
@@ -759,6 +762,20 @@ export function SignUpScreen({ forcedRole }: { forcedRole?: Role }) {
       setStep(2);
     } else if (step === 2) {
       if (!university?.name) { setFormError('Select your university.'); return; }
+      // Catch typos like "uc.mail.edu" before the account is created with an email that
+      // can never be verified. Some schools use a different email domain, so it's a nudge.
+      const schoolDomain = emailDomainMismatch(email, university);
+      if (schoolDomain) {
+        Alert.alert(
+          'Double-check your email',
+          `${email.trim()} doesn't look like a ${university.name} address (${schoolDomain}). We'll send your verification link there.`,
+          [
+            { text: 'Fix email', style: 'cancel', onPress: () => setStep(1) },
+            { text: "It's correct", onPress: () => setStep(3) },
+          ],
+        );
+        return;
+      }
       setStep(3);
     }
   };
@@ -972,6 +989,39 @@ export function VerifyEmailScreen() {
     }
   };
 
+  // A typo'd email can never be verified. Remove that account (server-side, so no orphaned
+  // profile is left) instead of just signing out — otherwise the person signs up again with
+  // the right email and the admin sees two accounts.
+  const [discarding, setDiscarding] = useState(false);
+  const discardAndRestart = async () => {
+    try {
+      setDiscarding(true);
+      const idToken = await firebaseAuth.currentUser?.getIdToken();
+      const res = await fetch(`${getApiBaseUrl()}/api/account/discard-unverified`, {
+        method: 'POST',
+        headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
+      });
+      const data = await res.json().catch(() => ({})) as { message?: string };
+      if (!res.ok && res.status !== 401) throw new Error(data.message || 'Could not remove this account.');
+      await signOut();
+      router.replace('/(auth)/select-role');
+    } catch (e: any) {
+      Alert.alert('Something went wrong', e?.message || 'Try again in a moment.');
+    } finally {
+      setDiscarding(false);
+    }
+  };
+  const confirmWrongEmail = () => {
+    Alert.alert(
+      'Start over with a different email?',
+      `The account for ${email || 'this email'} will be removed so you can sign up again with the right school email.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Start over', style: 'destructive', onPress: () => void discardAndRestart() },
+      ],
+    );
+  };
+
   const resend = async () => {
     if (cooldown) return;
     try {
@@ -1032,8 +1082,8 @@ export function VerifyEmailScreen() {
 
       <View style={styles.verifyFooter}>
         <Text style={styles.footerPrompt}>Wrong email?</Text>
-        <TouchableOpacity onPress={async () => { await signOut(); router.replace('/(auth)/sign-in'); }} hitSlop={hitSlop}>
-          <Text style={styles.footerAction}>Start over.</Text>
+        <TouchableOpacity onPress={confirmWrongEmail} hitSlop={hitSlop} disabled={discarding}>
+          <Text style={styles.footerAction}>{discarding ? 'Removing…' : 'Fix it and start over.'}</Text>
         </TouchableOpacity>
       </View>
     </AuthShell>

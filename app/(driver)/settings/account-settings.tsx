@@ -19,8 +19,9 @@ import { Image } from 'expo-image';
 import { UniversitySearch } from '@/components/ui/UniversitySearch';
 import { router } from 'expo-router';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
-import { deleteUser, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
-import { deleteDoc, doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
+import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { deleteMyAccount } from '@/services/accountDeletion';
 import {
   sendPhoneOTP,
   verifyPhoneOTP,
@@ -182,12 +183,7 @@ export default function AccountSettingsScreen() {
         body: JSON.stringify({ email: user.email, name: fullName || 'there' }),
       }).catch(() => undefined);
 
-      await Promise.all([
-        deleteDoc(doc(firestore, 'drivers', user.uid)).catch(() => undefined),
-        deleteDoc(doc(firestore, 'riders', user.uid)).catch(() => undefined),
-        deleteDoc(doc(firestore, 'users', user.uid)).catch(() => undefined),
-      ]);
-      await deleteUser(user);
+      await deleteMyAccount();
       setDeleteOpen(false);
       router.replace('/(auth)/sign-in' as any);
     } catch (error: any) {

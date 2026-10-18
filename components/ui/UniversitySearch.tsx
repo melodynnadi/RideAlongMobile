@@ -20,6 +20,7 @@ interface University {
   state: string;
   displayName: string;
   custom?: boolean;
+  url?: string;
 }
 
 interface UniversitySearchProps {

@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { deleteUser, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
-import { deleteDoc, doc } from 'firebase/firestore';
+import { EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -10,7 +9,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { pickAndUploadAvatar } from '@/services/avatarUpload';
 import { loadRiderAccount, RiderAccountProfile, saveRiderAccount } from '@/services/riderAccount';
 import { useAuthStore } from '@/stores/authStore';
-import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
+import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
+import { deleteMyAccount } from '@/services/accountDeletion';
 import { hitSlop, layout } from '@/theme/designSystem';
 import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
 import { UniversitySearch } from '@/components/ui/UniversitySearch';
@@ -234,12 +234,7 @@ export default function RiderAccountScreen() {
         body: JSON.stringify({ email: user.email, name: user.displayName || profile?.firstName || 'there' }),
       }).catch(() => undefined);
 
-      await Promise.all([
-        deleteDoc(doc(firestore, 'riders', user.uid)).catch(() => undefined),
-        deleteDoc(doc(firestore, 'users', user.uid)).catch(() => undefined),
-        deleteDoc(doc(firestore, 'drivers', user.uid)).catch(() => undefined),
-      ]);
-      await deleteUser(user);
+      await deleteMyAccount();
       setDeleteOpen(false);
       router.replace('/(auth)/sign-in' as any);
     } catch (error: any) {

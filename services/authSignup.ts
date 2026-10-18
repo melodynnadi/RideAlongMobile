@@ -6,7 +6,32 @@ export type SignupUniversity = {
   city?: string | null;
   state?: string | null;
   custom?: boolean;
+  /** School website from the search results, used to sanity-check the email domain. */
+  url?: string | null;
 };
+
+/** Registrable part of a hostname, e.g. "www.uc.edu" → "uc.edu". */
+function baseDomain(host: string) {
+  return host.toLowerCase().replace(/^www\./, '').split('.').slice(-2).join('.');
+}
+
+/**
+ * Returns the school's domain when the email clearly doesn't belong to it
+ * (e.g. "name@uc.mail.edu" for uc.edu), otherwise null. Subdomains like
+ * "mail.uc.edu" count as a match. Unknown/custom schools are never flagged.
+ */
+export function emailDomainMismatch(email: string, university?: SignupUniversity | null): string | null {
+  const emailDomain = email.trim().toLowerCase().split('@')[1];
+  if (!emailDomain || !university?.url) return null;
+  let schoolDomain: string;
+  try {
+    schoolDomain = baseDomain(new URL(university.url).hostname);
+  } catch {
+    return null;
+  }
+  if (!schoolDomain.endsWith('.edu')) return null;
+  return emailDomain === schoolDomain || emailDomain.endsWith(`.${schoolDomain}`) ? null : schoolDomain;
+}
 
 export async function validateSignupUniversity(universityData: SignupUniversity): Promise<void> {
   const response = await fetch(`${getApiBaseUrl()}/api/validate-signup`, {
