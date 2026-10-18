@@ -16,6 +16,8 @@ import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { UniversitySearch } from '@/components/ui/UniversitySearch';
 import { DatePickerModal } from '@/components/DateTimePickerModals';
@@ -80,6 +82,46 @@ function fileField(asset: { uri: string; mimeType?: string }, name: string) {
     name,
     type: asset.mimeType ?? 'image/jpeg',
   };
+}
+
+// ─── Draft (resume an unfinished application) ─────────────────────────────────
+// Everything typed is saved on the device as the applicant goes, so leaving the app
+// mid-application doesn't wipe it. Picked photos are copied out of the picker's cache
+// (which the OS may clear) into the app's documents folder.
+
+const DRAFT_KEY = '@ridealong_driver_application_draft_v1';
+const DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const DRAFT_DIR = `${FileSystem.documentDirectory ?? ''}driver-application-draft/`;
+
+type DraftFile = { uri: string; mimeType?: string; name: string };
+
+async function persistDraftFile(uri: string, name: string): Promise<string> {
+  if (!FileSystem.documentDirectory) return uri;
+  try {
+    await FileSystem.makeDirectoryAsync(DRAFT_DIR, { intermediates: true }).catch(() => undefined);
+    const dest = `${DRAFT_DIR}${Date.now()}_${name.replace(/[^\w.-]/g, '_')}`;
+    await FileSystem.copyAsync({ from: uri, to: dest });
+    return dest;
+  } catch {
+    return uri;
+  }
+}
+
+async function draftFileStillThere(file: DraftFile | null): Promise<DraftFile | null> {
+  if (!file?.uri) return null;
+  try {
+    const info = await FileSystem.getInfoAsync(file.uri);
+    return info.exists ? file : null;
+  } catch {
+    return null;
+  }
+}
+
+async function clearDraft() {
+  await AsyncStorage.removeItem(DRAFT_KEY).catch(() => undefined);
+  if (FileSystem.documentDirectory) {
+    await FileSystem.deleteAsync(DRAFT_DIR, { idempotent: true }).catch(() => undefined);
+  }
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -260,6 +302,14 @@ function makeStyles(colors: AppColors) {
     },
     universityWrap: { borderRadius: 12, overflow: 'hidden' },
 
+    // Resumed draft
+    resumeBanner: {
+      flexDirection: 'row', alignItems: 'center', gap: 8,
+      borderRadius: 12, backgroundColor: colors.primaryDim, padding: 12, marginBottom: 16,
+    },
+    resumeText: { flex: 1, fontSize: 13, fontWeight: '600', color: colors.textPrimary },
+    resumeAction: { fontSize: 13, fontWeight: '700', color: colors.primary },
+
     // Email code
     codeCard: {
       borderRadius: 14, borderWidth: 1, borderColor: colors.primary,
@@ -416,6 +466,7 @@ export function DriverSignUpScreen() {
   const [codeBusy, setCodeBusy] = useState<'sending' | 'verifying' | null>(null);
   const [resendIn, setResendIn] = useState(0);
   const [emailToken, setEmailToken] = useState<string | null>(null);
+  const [emailTokenAt, setEmailTokenAt] = useState<number | null>(null);
   const [verifiedEmail, setVerifiedEmail] = useState<string | null>(null);
   const normalizedEmail = email.trim().toLowerCase();
   const emailConfirmed = isUpgrade || (!!emailToken && verifiedEmail === normalizedEmail);
@@ -491,6 +542,121 @@ export function DriverSignUpScreen() {
   const [agreedBackground, setAgreedBackground] = useState(false);
   const [confirmedStudent, setConfirmedStudent] = useState(false);
 
+  // ── Draft: restore once on open, then autosave as they type ──
+  const [draftReady, setDraftReady] = useState(false);
+  const [resumed, setResumed] = useState(false);
+
+  useEffect(() => {
+    if (checkingDriver || draftReady) return;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(DRAFT_KEY);
+        const d = raw ? JSON.parse(raw) : null;
+        const sameApplicant = d && (!isUpgrade || d.uid === firebaseAuth.currentUser?.uid);
+        if (!d || !sameApplicant || Date.now() - (d.savedAt || 0) > DRAFT_MAX_AGE_MS) return;
+
+        if (!isUpgrade) {
+          setFirstName(d.firstName || '');
+          setLastName(d.lastName || '');
+          setEmail(d.email || '');
+          setPhone(d.phone || '');
+          if (d.university) setUniversity(d.university);
+        }
+        setDob(d.dob || '');
+        setLicenseNumber(d.licenseNumber || '');
+        setLicenseState(d.licenseState || 'TX');
+        setLicenseExpiry(d.licenseExpiry || '');
+        setVehicleYear(d.vehicleYear || '');
+        setVehicleMake(d.vehicleMake || '');
+        setVehicleModel(d.vehicleModel || '');
+        setVehicleColor(d.vehicleColor || '');
+        setLicensePlate(d.licensePlate || '');
+        if (d.seats) setSeats(d.seats);
+        setInsuranceCompany(d.insuranceCompany || '');
+        setPolicyNumber(d.policyNumber || '');
+        setInsuranceExpiry(d.insuranceExpiry || '');
+
+        const [front, back, ins] = await Promise.all([
+          draftFileStillThere(d.licenseFront),
+          draftFileStillThere(d.licenseBack),
+          draftFileStillThere(d.insuranceDoc),
+        ]);
+        if (front) setLicenseFront({ uri: front.uri, mimeType: front.mimeType, fileName: front.name, width: 0, height: 0 } as ImagePicker.ImagePickerAsset);
+        if (back) setLicenseBack({ uri: back.uri, mimeType: back.mimeType, fileName: back.name, width: 0, height: 0 } as ImagePicker.ImagePickerAsset);
+        if (ins) setInsuranceDoc(ins);
+
+        // A confirmed email stays confirmed while the server-side token is still valid (2h).
+        const tokenFresh = d.emailToken && Date.now() - (d.emailTokenAt || 0) < 110 * 60 * 1000;
+        if (tokenFresh) {
+          setEmailToken(d.emailToken);
+          setEmailTokenAt(d.emailTokenAt);
+          setVerifiedEmail(d.verifiedEmail);
+        }
+        // Without a confirmed email they have to redo the code on step 1 before moving on.
+        setStep(isUpgrade || tokenFresh ? Math.min(Math.max(Number(d.step) || 1, 1), 5) : 1);
+        setResumed(true);
+      } catch {
+        // A broken draft just means starting fresh.
+      } finally {
+        setDraftReady(true);
+      }
+    })();
+  }, [checkingDriver, draftReady, isUpgrade]);
+
+  // Approved or sent to manual review: nothing left to resubmit, so remove the copied photos.
+  useEffect(() => {
+    if (processingStatus === 'done' && verificationResult && verificationResult.decision !== 'rejected') {
+      void clearDraft();
+    }
+  }, [processingStatus, verificationResult]);
+
+  const hasProgress = !!(firstName || lastName || (!isUpgrade && email) || licenseNumber || vehicleMake || insuranceCompany || licenseFront || insuranceDoc);
+  useEffect(() => {
+    if (!draftReady || !hasProgress || processingStatus !== 'idle') return;
+    const fileOf = (a: { uri: string; mimeType?: string | null; fileName?: string | null; name?: string } | null) =>
+      a ? { uri: a.uri, mimeType: a.mimeType ?? undefined, name: a.fileName ?? a.name ?? 'file' } : null;
+    const t = setTimeout(() => {
+      AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({
+        savedAt: Date.now(),
+        uid: firebaseAuth.currentUser?.uid ?? null,
+        step,
+        firstName, lastName, email, phone, university, dob,
+        licenseNumber, licenseState, licenseExpiry,
+        licenseFront: fileOf(licenseFront), licenseBack: fileOf(licenseBack),
+        vehicleYear, vehicleMake, vehicleModel, vehicleColor, licensePlate, seats,
+        insuranceCompany, policyNumber, insuranceExpiry, insuranceDoc: fileOf(insuranceDoc),
+        emailToken, verifiedEmail, emailTokenAt,
+      })).catch(() => undefined);
+    }, 600);
+    return () => clearTimeout(t);
+  }, [
+    draftReady, hasProgress, processingStatus, step, firstName, lastName, email, phone, university, dob,
+    licenseNumber, licenseState, licenseExpiry, licenseFront, licenseBack, vehicleYear, vehicleMake,
+    vehicleModel, vehicleColor, licensePlate, seats, insuranceCompany, policyNumber, insuranceExpiry,
+    insuranceDoc, emailToken, verifiedEmail, emailTokenAt,
+  ]);
+
+  const startOver = () => {
+    Alert.alert('Start over?', 'This clears everything you entered for your driver application on this phone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Start over',
+        style: 'destructive',
+        onPress: async () => {
+          await clearDraft();
+          setResumed(false);
+          if (!isUpgrade) { setFirstName(''); setLastName(''); setEmail(''); setPhone(''); setUniversity(null); }
+          setDob(''); setLicenseNumber(''); setLicenseState('TX'); setLicenseExpiry('');
+          setLicenseFront(null); setLicenseBack(null);
+          setVehicleYear(''); setVehicleMake(''); setVehicleModel(''); setVehicleColor(''); setLicensePlate(''); setSeats('4');
+          setInsuranceCompany(''); setPolicyNumber(''); setInsuranceExpiry(''); setInsuranceDoc(null);
+          setEmailToken(null); setEmailTokenAt(null); setVerifiedEmail(null); setCodeSent(false); setCode('');
+          setError(''); setStep(1);
+        },
+      },
+    ]);
+  };
+
   const pickImage = async (setter: (a: ImagePicker.ImagePickerAsset) => void) => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
@@ -509,9 +675,10 @@ export function DriverSignUpScreen() {
         [{ resize: { width: 1600 } }],
         { compress: 0.85, format: jpegFormat as any },
       );
-      setter({ ...asset, uri: converted.uri, mimeType: 'image/jpeg', fileName: 'license.jpg' } as ImagePicker.ImagePickerAsset);
+      const kept = await persistDraftFile(converted.uri, 'license.jpg');
+      setter({ ...asset, uri: kept, mimeType: 'image/jpeg', fileName: 'license.jpg' } as ImagePicker.ImagePickerAsset);
     } catch {
-      setter(asset);
+      setter({ ...asset, uri: await persistDraftFile(asset.uri, asset.fileName ?? 'license.jpg') });
     }
   };
 
@@ -522,7 +689,8 @@ export function DriverSignUpScreen() {
     });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
-      setter({ name: asset.name, uri: asset.uri, mimeType: asset.mimeType ?? undefined });
+      const kept = await persistDraftFile(asset.uri, asset.name);
+      setter({ name: asset.name, uri: kept, mimeType: asset.mimeType ?? undefined });
     }
   };
 
@@ -601,6 +769,7 @@ export function DriverSignUpScreen() {
     try {
       const data = await postEmailCode('verify', { code });
       setEmailToken(data.verificationToken ?? null);
+      setEmailTokenAt(Date.now());
       setVerifiedEmail(normalizedEmail);
       setStep(2);
     } catch (e: any) {
@@ -639,6 +808,8 @@ export function DriverSignUpScreen() {
       // Build multipart form — backend handles Storage upload via Admin SDK
       const form = new FormData();
       form.append('fullName', `${firstName.trim()} ${lastName.trim()}`);
+      form.append('firstName', firstName.trim());
+      form.append('lastName', lastName.trim());
       form.append('email', email.trim());
       form.append('phone', phone.trim());
       form.append('carMake', vehicleMake.trim());
@@ -695,6 +866,7 @@ export function DriverSignUpScreen() {
       if (submitRes.status === 403 && submitData.error === 'email_not_verified') {
         // Verification lasts 2 hours; if it lapsed, send them back to confirm the email again.
         setEmailToken(null);
+        setEmailTokenAt(null);
         setVerifiedEmail(null);
         setCodeSent(false);
         setProcessingStatus('idle');
@@ -706,6 +878,9 @@ export function DriverSignUpScreen() {
       }
 
       const applicationId = submitData.applicationId;
+      // Submitted — drop the saved draft. Its photos stay until we know the result,
+      // since "Fix & reapply" after a rejection reuses them.
+      void AsyncStorage.removeItem(DRAFT_KEY).catch(() => undefined);
 
       // Backend triggers verification async — poll for result
       setProcessingStatus('verifying');
@@ -963,6 +1138,16 @@ export function DriverSignUpScreen() {
           </Text>
           <Text style={s.headingSubtitle}>{subtitle}</Text>
         </View>
+
+        {resumed ? (
+          <View style={s.resumeBanner}>
+            <Ionicons name="bookmark-outline" size={17} color={colors.primary} />
+            <Text style={s.resumeText}>Picked up where you left off.</Text>
+            <TouchableOpacity onPress={startOver} hitSlop={hitSlop} accessibilityRole="button">
+              <Text style={s.resumeAction}>Start over</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         <ErrorBanner message={error} s={s} colors={colors} />
 
