@@ -37,6 +37,8 @@ import { RideFiltersModal } from '@/components/RideFiltersModal';
 import { getDefaultFilters, filterRides as applyRideFilters, hasActiveFilters, type RideFilterOptions } from '@/utils/rideFilters';
 import { useRideBrowseStore, type DriverRequestFilter } from '@/stores/rideBrowseStore';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { PriceOfferModal } from '@/components/PriceOfferModal';
+import { formatMoney, proposalLimits } from '@/services/offers';
 
 type InboxItem = {
   id: string;
@@ -352,10 +354,16 @@ async function getConfirmedRideRequestIdSet(requestIds: string[]): Promise<Set<s
   } catch { return new Set(); }
 }
 
+/** An offer that blocks sending another one: still open, or already accepted. */
+function isOpenOfferStatus(status?: string | null) {
+  return ['pending', 'countered', 'accepted'].includes(String(status || '').toLowerCase());
+}
+
 async function getOfferedRequestIdSet(driverId: string): Promise<Set<string>> {
   try {
     const out = new Set<string>();
-    const qy = query(collection(firestore, 'rideOffers'), where('driverId', '==', driverId), where('status', 'in', ['pending', 'accepted']));
+    // Open offers only: a rejected offer lets the driver send a new one.
+    const qy = query(collection(firestore, 'rideOffers'), where('driverId', '==', driverId), where('status', 'in', ['pending', 'countered', 'accepted']));
     const snap = await getDocs(qy);
     snap.forEach((d) => { const rid = (d.data() as any)?.rideRequestId; if (rid) out.add(String(rid)); });
     return out;
@@ -564,7 +572,9 @@ export default function RequestsInboxScreen() {
     const term = search.trim().toLowerCase();
     const base = allItems.filter((item) => {
       if (!isPendingFutureItem(item)) return false;
-      if (offeredByReqId[item.id]) return false;
+      // Hide requests the driver is waiting on; keep countered ones (they need an answer)
+      // and declined ones (the driver can send a new offer).
+      if (['pending', 'accepted'].includes(String(offeredByReqId[item.id]?.status || ''))) return false;
       if (filter === 'today' && !isSameDay(item.date, 0)) return false;
       if (filter === 'tomorrow' && !isSameDay(item.date, 1)) return false;
       if (filter === 'open' && !openItems.find((x) => x.id === item.id)) return false;
@@ -583,7 +593,10 @@ export default function RequestsInboxScreen() {
     return filteredItems;
   }, [filteredItems, filter, scoreRequest]);
 
-  const offerOnRequest = async (item: InboxItem) => {
+  // Step 1 (amount undefined): run the checks, then open the price picker.
+  // Step 2 (amount set): send the offer at the driver's chosen price.
+  const [offerItem, setOfferItem] = useState<InboxItem | null>(null);
+  const offerOnRequest = async (item: InboxItem, amount?: number) => {
     try {
       if (!uid) {
         Alert.alert('Sign in required', 'Please sign in to offer a ride.');
@@ -618,8 +631,13 @@ export default function RequestsInboxScreen() {
         return;
       }
 
-      if (offeredByReqId[item.id]) {
+      if (isOpenOfferStatus(offeredByReqId[item.id]?.status)) {
         Alert.alert('Already offered', 'You already sent an offer for this request.');
+        return;
+      }
+
+      if (amount == null) {
+        setOfferItem(item);
         return;
       }
 
@@ -639,7 +657,7 @@ export default function RequestsInboxScreen() {
         updatedAt: serverTimestamp(),
         offerDate: serverTimestamp(),
         emailSent: false,
-        offerPrice: item.price ?? null,
+        offerPrice: amount,
         distance: item.distanceMiles != null ? { miles: item.distanceMiles, text: item.distanceText ?? `${Math.round(item.distanceMiles)} mi` } : item.distanceText ? { text: item.distanceText } : null,
         duration: item.durationText ?? null,
         rideDetails: {
@@ -648,13 +666,14 @@ export default function RequestsInboxScreen() {
           date: item.date ?? null,
           time: item.time ?? null,
           passengers: item.seats ?? 1,
-          contributionAmount: typeof item.price === 'number' ? item.price.toFixed(2) : item.price || null,
+          contributionAmount: amount.toFixed(2),
         },
       };
 
       const offerRef = await addDoc(collection(firestore, 'rideOffers'), payload);
       setOfferedByReqId((prev) => ({ ...prev, [item.id]: { id: offerRef.id, status: 'pending' } }));
-      Alert.alert('Offer sent', 'Your offer was sent to the rider.');
+      setOfferItem(null);
+      Alert.alert('Offer sent', `You offered ${formatMoney(amount)}. The rider can accept, decline, or counter once.`);
     } catch (error) {
       console.warn('offerOnRequest failed', error);
       Alert.alert('Failed', 'Could not send your offer.');
@@ -806,7 +825,11 @@ export default function RequestsInboxScreen() {
           snap.forEach((d: any) => {
             const o = d.data() || {};
             const reqId = o.rideRequestId || o.requestId || o.rideRequest?.id;
-            if (reqId) map[String(reqId)] = { id: d.id, status: String(o.status || 'pending') };
+            if (!reqId) return;
+            const entry = { id: d.id, status: String(o.status || 'pending').toLowerCase() };
+            // A request can have an old rejected offer and a new open one — the open one wins.
+            const existing = map[String(reqId)];
+            if (!existing || !isOpenOfferStatus(existing.status)) map[String(reqId)] = entry;
           });
           setOfferedByReqId((prev) => ({ ...prev, ...map }));
         };
@@ -922,7 +945,7 @@ export default function RequestsInboxScreen() {
     })();
   }, [items, openItems, userDataByUserId]);
 
-  const visibleAllCount = allItems.filter((item) => isPendingFutureItem(item) && !offeredByReqId[item.id]).length;
+  const visibleAllCount = allItems.filter((item) => isPendingFutureItem(item) && !['pending', 'accepted'].includes(String(offeredByReqId[item.id]?.status || ''))).length;
 
   const chips: { key: RequestFilter; label: string }[] = [
     { key: 'all', label: `ALL\n${visibleAllCount}` },
@@ -945,8 +968,11 @@ export default function RequestsInboxScreen() {
   };
 
   const renderItem = ({ item }: { item: InboxItem }) => {
-    const isOffered = !!offeredByReqId[item.id];
-    const isConfirmed = offeredByReqId[item.id]?.status === 'accepted';
+    const offerStatus = offeredByReqId[item.id]?.status;
+    const isOffered = isOpenOfferStatus(offerStatus) && offerStatus !== 'countered';
+    const isCountered = offerStatus === 'countered';
+    const wasDeclined = offerStatus === 'rejected';
+    const isConfirmed = offerStatus === 'accepted';
     const dayLabel = relativeDayLabel(item.date);
     const profileKey = item.requesterId || item.requesterEmail || '';
     const userData = profileKey ? userDataByUserId[profileKey] : undefined;
@@ -974,9 +1000,9 @@ export default function RequestsInboxScreen() {
           <View style={s.riderCopy}>
             <View style={s.riderTitleRow}>
               <Text style={s.riderName} numberOfLines={1}>{displayName}</Text>
-              <View style={[s.statusBadge, isOffered && s.statusBadgeOffered]}>
-                <Text style={[s.statusBadgeText, isOffered && s.statusBadgeTextOffered]}>
-                  {isOffered ? 'Sent' : 'New'}
+              <View style={[s.statusBadge, (isOffered || isCountered || wasDeclined) && s.statusBadgeOffered]}>
+                <Text style={[s.statusBadgeText, (isOffered || isCountered || wasDeclined) && s.statusBadgeTextOffered]}>
+                  {isCountered ? 'Countered' : wasDeclined ? 'Declined' : isOffered ? 'Sent' : 'New'}
                 </Text>
               </View>
             </View>
@@ -1066,9 +1092,12 @@ export default function RequestsInboxScreen() {
             <TouchableOpacity
               style={[s.offerBtn, isOffered && s.disabled]}
               disabled={isOffered}
-              onPress={() => offerOnRequest(item)}
+              onPress={() => (isCountered
+                // The rider countered — answer it on the request screen.
+                ? router.push({ pathname: '/(driver)/request/[id]', params: { id: item.id, returnTo: '/(driver)/requests' } } as any)
+                : offerOnRequest(item))}
             >
-              <Text style={s.offerBtnText}>{isOffered ? 'Sent ✓' : 'Offer ride'}</Text>
+              <Text style={s.offerBtnText}>{isCountered ? 'Respond' : wasDeclined ? 'New offer' : isOffered ? 'Sent ✓' : 'Offer ride'}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -1169,6 +1198,23 @@ export default function RequestsInboxScreen() {
       </SafeAreaView>
 
       <DriverBottomNav activeTab="requests" />
+      {(() => {
+        const limits = proposalLimits(offerItem?.distanceMiles, offerItem?.seats, 'driver');
+        return (
+          <PriceOfferModal
+            visible={!!offerItem}
+            onClose={() => setOfferItem(null)}
+            title="Your offer"
+            subtitle="Offer the rider’s price or propose your own. They can accept, decline, or counter once."
+            referenceLabel="Rider's price"
+            referenceAmount={Number(offerItem?.price) || 0}
+            min={limits.min}
+            max={limits.max}
+            confirmLabel="Send offer of {amount}"
+            onSubmit={(amount) => (offerItem ? offerOnRequest(offerItem, amount) : undefined)}
+          />
+        );
+      })()}
       <RideFiltersModal
         visible={showFilterModal}
         onClose={() => setShowFilterModal(false)}

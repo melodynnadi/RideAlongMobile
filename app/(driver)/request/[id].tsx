@@ -13,13 +13,23 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { doc, getDoc, addDoc, deleteDoc, collection, serverTimestamp, query, where, getDocs, limit as fsLimit } from 'firebase/firestore';
+import { doc, getDoc, addDoc, deleteDoc, collection, serverTimestamp, query, where, getDocs, onSnapshot } from 'firebase/firestore';
 import { firestore, firebaseAuth } from '@/constants/services';
 import { Ionicons } from '@expo/vector-icons';
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { getOrCreateRideChat } from '@/src/services/chatAvailability';
 import { createRoleNotification } from '@/src/services/notificationRecords';
+import { PriceOfferModal } from '@/components/PriceOfferModal';
+import {
+  counterBookingRequest,
+  formatMoney,
+  proposalLimits,
+  respondToRideOffer,
+  type Negotiation,
+} from '@/services/offers';
+
+type MyOffer = { id: string; status: string; offerPrice: number | null; negotiation?: Negotiation | null };
 
 const PREF_ICONS: Record<string, string> = {
   musicPreference:       'musical-notes-outline',
@@ -193,6 +203,55 @@ export default function RequestDeepLinkScreen() {
     preferences?: Record<string, any> | null;
   } | null>(null);
 
+  // ── Price negotiation ──
+  // The driver's latest offer on this rider request (live, so a counter shows up immediately).
+  const [myOffer, setMyOffer] = useState<MyOffer | null>(null);
+  const [priceModal, setPriceModal] = useState<'offer' | 'counter' | null>(null);
+  const [postingSeats, setPostingSeats] = useState<number | null>(null);
+
+  useEffect(() => {
+    const uid = firebaseAuth.currentUser?.uid;
+    if (!requestId || !uid || isPostingRequest) return;
+    return onSnapshot(
+      query(collection(firestore, 'rideOffers'), where('rideRequestId', '==', requestId), where('driverId', '==', uid)),
+      (snap) => {
+        const offers = snap.docs
+          .map((d) => {
+            const data = d.data() as any;
+            const at = data.updatedAt?.toMillis?.() ?? data.createdAt?.toMillis?.() ?? 0;
+            return { id: d.id, at, status: String(data.status || 'pending').toLowerCase(), offerPrice: data.offerPrice ?? null, negotiation: data.negotiation ?? null };
+          })
+          .sort((a, b) => b.at - a.at);
+        const latest = offers[0] || null;
+        setMyOffer(latest);
+        // An open offer (pending or countered) blocks a new one; a rejected one doesn't.
+        const open = latest && ['pending', 'countered', 'accepted'].includes(latest.status);
+        setAlreadyOffered(!!open);
+        setOfferDocId(open ? latest!.id : null);
+      },
+      () => {},
+    );
+  }, [requestId, isPostingRequest]);
+
+  // Booking requests change when the rider answers a counter — keep the doc live.
+  useEffect(() => {
+    if (!requestId || !isPostingRequest) return;
+    const unsub = onSnapshot(doc(firestore, 'ridePostingRequests', requestId), (snap) => {
+      if (snap.exists()) setRequest((prev: any) => ({ ...(prev || {}), id: snap.id, ...snap.data() }));
+    }, () => {});
+    return unsub;
+  }, [requestId, isPostingRequest]);
+
+  useEffect(() => {
+    const postingId = request?.ridePostingId;
+    if (!isPostingRequest || !postingId) return;
+    getDoc(doc(firestore, 'ridePostings', postingId)).then((p) => {
+      const data = p.exists() ? (p.data() as any) : null;
+      const seats = Number(data?.availableSeats ?? data?.seatsAvailable ?? data?.totalSeats);
+      if (Number.isFinite(seats) && seats > 0) setPostingSeats(seats);
+    }).catch(() => {});
+  }, [isPostingRequest, request?.ridePostingId]);
+
   useEffect(() => {
     if (!requestId) { setNotFound(true); setLoading(false); return; }
     // Try rideRequests first, then ridePostingRequests (for rider-to-driver posting requests)
@@ -207,12 +266,7 @@ export default function RequestDeepLinkScreen() {
         if (rawSnap) {
           const data = rawSnap;
           setRequest(data);
-          const uid = firebaseAuth.currentUser?.uid;
-          if (uid) {
-            const q = query(collection(firestore, 'rideOffers'), where('rideRequestId', '==', requestId), where('driverId', '==', uid), fsLimit(1));
-            const existing = await getDocs(q);
-            if (!existing.empty) { setAlreadyOffered(true); setOfferDocId(existing.docs[0].id); }
-          }
+          // The driver's own offer on this request is tracked live (see the rideOffers listener).
           const rId = data.userId || data.riderId || data.requesterId;
           if (rId) {
             try {
@@ -312,7 +366,7 @@ export default function RequestDeepLinkScreen() {
     await Share.share({ message: `There's a ride request on RideAlong! ${url}`, url }).catch(() => {});
   };
 
-  const sendOffer = async () => {
+  const sendOffer = async (offerAmount: number) => {
     const user = firebaseAuth.currentUser;
     if (!user) {
       Alert.alert('Sign in required', 'Please sign in to make an offer.', [
@@ -329,7 +383,8 @@ export default function RequestDeepLinkScreen() {
     }
     setSubmitting(true);
     try {
-      const price       = request.contributionAmount ?? request.estimatedFare ?? request.price ?? null;
+      // The driver's proposed price (starts at the rider's price; can be changed within limits).
+      const price       = offerAmount;
       const driverEmail = user.email || null;
       const driverName  = user.displayName || (driverEmail ? driverEmail.split('@')[0] : null);
       const pickup  = request.pickupAddress  || request.pickup  || request.pickupLocation?.address  || request.from || null;
@@ -356,19 +411,65 @@ export default function RequestDeepLinkScreen() {
         recipientRole: 'rider',
         type: 'offer_received',
         title: 'You have a ride offer',
-        message: `${driverName || 'A driver'} sent an offer for your ride request.`,
+        message: `${driverName || 'A driver'} offered ${formatMoney(price)} for your ride request.`,
         driverId: user.uid,
         riderId,
         rideRequestId: requestId,
         dedupeId: `ride-offer-${offerRef.id}-rider`,
       }).catch(() => {});
       setAlreadyOffered(true);
-      Alert.alert('Offer sent! 🎉', "Your offer was sent to the rider. You'll be notified if they accept.");
+      setPriceModal(null);
+      Alert.alert('Offer sent! 🎉', `You offered ${formatMoney(price)}. The rider can accept, decline, or counter once.`);
     } catch (e) {
       console.warn('sendOffer error', e);
       Alert.alert('Failed', 'Could not send your offer. Please try again.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Driver counters a rider's booking request (once).
+  const sendCounter = async (amount: number) => {
+    if (!requestId) return;
+    try {
+      await counterBookingRequest(requestId, amount);
+      setPriceModal(null);
+      Alert.alert('Counter-offer sent', `The rider can accept ${formatMoney(amount)} or decline.`);
+    } catch (e: any) {
+      Alert.alert('Could not send counter', e?.message || 'Please try again.');
+    }
+  };
+
+  // Driver answers the rider's counter on the driver's offer.
+  const answerRiderCounter = (action: 'accept' | 'reject') => {
+    if (!myOffer) return;
+    const amount = myOffer.negotiation?.counterAmount;
+    const go = async () => {
+      setSubmitting(true);
+      try {
+        await respondToRideOffer(myOffer.id, action);
+        Alert.alert(
+          action === 'accept' ? 'Ride booked 🎉' : 'Counter declined',
+          action === 'accept'
+            ? `You accepted ${formatMoney(amount)}. The ride is confirmed.`
+            : 'The rider has been told. You can send a new offer.',
+        );
+      } catch (e: any) {
+        Alert.alert('Something went wrong', e?.message || 'Please try again.');
+      } finally {
+        setSubmitting(false);
+      }
+    };
+    if (action === 'accept') {
+      Alert.alert('Accept counter-offer?', `You'll drive this rider for ${formatMoney(amount)}.`, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Accept', onPress: () => void go() },
+      ]);
+    } else {
+      Alert.alert('Decline counter-offer?', 'This closes your offer. You can send a new one afterwards.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Decline', style: 'destructive', onPress: () => void go() },
+      ]);
     }
   };
 
@@ -451,6 +552,32 @@ export default function RequestDeepLinkScreen() {
   const distance = request.distance?.text || (typeof request.distance === 'string' ? request.distance : '');
   const isConfirmed = ['confirmed', 'completed', 'cancelled', 'canceled'].includes(String(request.status || '').toLowerCase());
   const riderId = request.userId || request.riderId || request.requesterId || null;
+
+  // ── Negotiation state ──
+  const distanceMiles: number | null = request.distance?.miles ?? null;
+  const limits = proposalLimits(distanceMiles, isPostingRequest ? postingSeats : seats, 'driver');
+  const listedPrice: number | null = isPostingRequest && request.postedPrice != null ? Number(request.postedPrice) : null;
+  const bookingNeg: Negotiation | null = isPostingRequest ? (request.negotiation ?? null) : null;
+  const bookingOpen = String(request.status || 'pending').toLowerCase() === 'pending';
+  const offerNeg = myOffer?.negotiation ?? null;
+  const negotiationLine = (() => {
+    if (isPostingRequest) {
+      if (bookingNeg?.status === 'countered') return { icon: 'time-outline', text: `You countered with ${formatMoney(bookingNeg.counterAmount)}. Waiting for the rider to accept or decline.` };
+      if (bookingNeg?.status === 'agreed') return { icon: 'checkmark-circle-outline', text: `The rider accepted your ${formatMoney(bookingNeg.counterAmount)} counter.` };
+      if (bookingNeg?.status === 'rejected') return { icon: 'close-circle-outline', text: `The rider declined your ${formatMoney(bookingNeg.counterAmount)} counter.` };
+      if (listedPrice != null && price != null && bookingOpen) return { icon: 'pricetag-outline', text: `The rider offered ${formatMoney(price)} — you listed ${formatMoney(listedPrice)}. Accept, decline, or counter once.` };
+      return null;
+    }
+    if (!myOffer) return null;
+    if (myOffer.status === 'countered' && offerNeg) return { icon: 'swap-horizontal-outline', text: `The rider countered your ${formatMoney(offerNeg.originalAmount)} offer with ${formatMoney(offerNeg.counterAmount)}.` };
+    if (myOffer.status === 'pending') return { icon: 'time-outline', text: `You offered ${formatMoney(myOffer.offerPrice)}. Waiting for the rider.` };
+    if (myOffer.status === 'rejected') {
+      return offerNeg?.counterAmount != null
+        ? { icon: 'close-circle-outline', text: `You declined the rider's ${formatMoney(offerNeg.counterAmount)} counter. You can send a new offer.` }
+        : { icon: 'close-circle-outline', text: `The rider declined your ${formatMoney(myOffer.offerPrice)} offer. You can send a new one.` };
+    }
+    return null;
+  })();
 
   const prefOrder = ['conversationLevel', 'musicPreference', 'passengerType', 'smokingPreference', 'soundEnvironment', 'allowPets', 'temperaturePreference'];
   const prefEntries: Array<[string, any]> = [];
@@ -538,8 +665,14 @@ export default function RequestDeepLinkScreen() {
             </View>
             {price != null && (
               <View style={s.infoRow}>
-                <Text style={s.infoLabel}>Budget</Text>
+                <Text style={s.infoLabel}>{listedPrice != null ? "Rider's offer" : 'Budget'}</Text>
                 <Text style={[s.infoValue, { color: colors.primary, fontWeight: '700' }]}>${typeof price === 'number' ? price.toFixed(2) : price}</Text>
+              </View>
+            )}
+            {listedPrice != null && (
+              <View style={s.infoRow}>
+                <Text style={s.infoLabel}>Your listed price</Text>
+                <Text style={s.infoValue}>{formatMoney(listedPrice)}</Text>
               </View>
             )}
             {Boolean(duration) && (
@@ -555,6 +688,14 @@ export default function RequestDeepLinkScreen() {
               </View>
             )}
           </View>
+
+          {/* ── Price negotiation ── */}
+          {negotiationLine ? (
+            <View style={[s.card, { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: colors.primaryDim, borderColor: colors.primary }]}>
+              <Ionicons name={negotiationLine.icon as any} size={18} color={colors.primary} style={{ marginTop: 1 }} />
+              <Text style={[s.notesText, { flex: 1, color: colors.textPrimary }]}>{negotiationLine.text}</Text>
+            </View>
+          ) : null}
 
           {/* ── Rider Preferences ── */}
           {prefEntries.length > 0 && (
@@ -605,11 +746,21 @@ export default function RequestDeepLinkScreen() {
               <TouchableOpacity style={[s.btn, { backgroundColor: colors.bgSecondary }]} disabled activeOpacity={1}>
                 <Text style={[s.btnText, { color: colors.textSecondary }]}>{String(request?.status || '').toUpperCase()}</Text>
               </TouchableOpacity>
+            ) : bookingNeg?.status === 'countered' ? (
+              // Driver already countered — only the rider can respond now.
+              <TouchableOpacity style={[s.btn, { backgroundColor: colors.bgSecondary }]} disabled activeOpacity={1}>
+                <Text style={[s.btnText, { color: colors.textSecondary }]}>Countered {formatMoney(bookingNeg.counterAmount)} · waiting for rider</Text>
+              </TouchableOpacity>
             ) : (
-              <View style={{ flexDirection: 'row', gap: 10 }}>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
                 <TouchableOpacity style={[s.btn, { flex: 1, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.bgCard, opacity: submitting ? 0.6 : 1 }]} onPress={rejectRequest} disabled={submitting} activeOpacity={0.8}>
                   <Text style={[s.btnText, { color: colors.textPrimary }]}>Decline</Text>
                 </TouchableOpacity>
+                {!bookingNeg ? (
+                  <TouchableOpacity style={[s.btn, { flex: 1, borderWidth: 1.5, borderColor: colors.primary, backgroundColor: colors.bgCard, opacity: submitting ? 0.6 : 1 }]} onPress={() => setPriceModal('counter')} disabled={submitting} activeOpacity={0.8}>
+                    <Text style={[s.btnText, { color: colors.primary }]}>Counter</Text>
+                  </TouchableOpacity>
+                ) : null}
                 <TouchableOpacity style={[s.btn, { flex: 1, backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]} onPress={acceptRequest} disabled={submitting} activeOpacity={0.85}>
                   <Text style={s.btnText}>{submitting ? 'Accepting…' : 'Accept'}</Text>
                 </TouchableOpacity>
@@ -652,6 +803,19 @@ export default function RequestDeepLinkScreen() {
                 </TouchableOpacity>
               );
             }
+            if (myOffer?.status === 'countered' && offerNeg) {
+              // The rider countered — the driver can only accept or decline (no further counters).
+              return (
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TouchableOpacity style={[s.btn, { flex: 1, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.bgCard, opacity: submitting ? 0.6 : 1 }]} onPress={() => answerRiderCounter('reject')} disabled={submitting} activeOpacity={0.8}>
+                    <Text style={[s.btnText, { color: colors.textPrimary }]}>Decline</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[s.btn, { flex: 1, backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]} onPress={() => answerRiderCounter('accept')} disabled={submitting} activeOpacity={0.85}>
+                    <Text style={s.btnText}>{submitting ? 'Working…' : `Accept ${formatMoney(offerNeg.counterAmount)}`}</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            }
             if (alreadyOffered) {
               return (
                 <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -665,12 +829,29 @@ export default function RequestDeepLinkScreen() {
               );
             }
             return (
-              <TouchableOpacity style={[s.btn, { backgroundColor: colors.primary, opacity: submitting ? 0.7 : 1 }]} onPress={sendOffer} disabled={submitting} activeOpacity={0.85}>
-                <Text style={s.btnText}>{submitting ? 'Sending…' : 'Send an Offer'}</Text>
+              <TouchableOpacity style={[s.btn, { backgroundColor: colors.primary, opacity: submitting ? 0.7 : 1 }]} onPress={() => setPriceModal('offer')} disabled={submitting} activeOpacity={0.85}>
+                <Text style={s.btnText}>{submitting ? 'Sending…' : myOffer?.status === 'rejected' ? 'Send a New Offer' : 'Send an Offer'}</Text>
               </TouchableOpacity>
             );
           })()}
         </View>
+
+        <PriceOfferModal
+          visible={priceModal !== null}
+          onClose={() => setPriceModal(null)}
+          title={priceModal === 'counter' ? 'Counter-offer' : 'Your offer'}
+          subtitle={priceModal === 'counter'
+            ? 'Suggest a different price per seat. The rider can accept or decline it.'
+            : 'Offer the rider’s price or propose your own. They can accept, decline, or counter once.'}
+          referenceLabel={priceModal === 'counter' ? "Rider's offer" : "Rider's price"}
+          referenceAmount={Number(price) || 0}
+          min={limits.min}
+          max={limits.max}
+          mustDiffer={priceModal === 'counter'}
+          note={priceModal === 'counter' ? 'You can counter once. After that, only the rider can accept or decline.' : undefined}
+          confirmLabel={priceModal === 'counter' ? 'Send counter of {amount}' : 'Send offer of {amount}'}
+          onSubmit={(amount) => (priceModal === 'counter' ? sendCounter(amount) : sendOffer(amount))}
+        />
       </SafeAreaView>
     </View>
   );

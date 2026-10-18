@@ -17,9 +17,18 @@ export type PaymentModalProps = {
   driverId: string | null;
   baseFare: number;
   onPaymentSuccess?: (paymentIntentId: string) => Promise<void>;
+  /** Button text before the total, e.g. "Send counter-offer". Defaults to "Confirm and request ride". */
+  confirmLabel?: string;
+  /** Booking a posting at a different price than listed: the listed price, saved on the request. */
+  postedPrice?: number | null;
+  /**
+   * Skip the "already requested this ride" check. Only for re-confirming payment on a
+   * booking the rider already has (e.g. accepting a driver's counter-offer).
+   */
+  skipDuplicateCheck?: boolean;
 };
 
-export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onPaymentSuccess }: PaymentModalProps) {
+export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onPaymentSuccess, confirmLabel, postedPrice, skipDuplicateCheck }: PaymentModalProps) {
   const { colors } = useAppTheme();
   const riderId = firebaseAuth.currentUser?.uid ?? null;
   const [creating, setCreating] = useState(false);
@@ -295,8 +304,9 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
         return;
       }
 
-      // Check for duplicate requests before proceeding
-      try {
+      // Check for duplicate booking requests before proceeding (skipped when re-confirming
+      // payment for a counter-offer on a request the rider already has).
+      if (!skipDuplicateCheck) try {
         const rprCol = collection(firestore, 'ridePostingRequests');
         const dupQuery = query(
           rprCol,
@@ -492,6 +502,8 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           time: ridePostingData.time || '',
           passengers: 1,
           contributionAmount: baseFare,
+          // When the rider offered their own price, keep the listed one for the driver to compare.
+          ...(postedPrice != null && Math.abs(postedPrice - baseFare) >= 0.01 ? { postedPrice } : {}),
           platformFee: totals.platformFee,
           paymentAmount: totals.total,
           paymentMethodId: selectedPaymentMethodId,
@@ -674,7 +686,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
               {confirming ? (
                 <ActivityIndicator color={colors.textInverse} />
               ) : (
-                <Text style={styles.confirmBtnText}>Confirm and request ride - ${totals.total.toFixed(2)}</Text>
+                <Text style={styles.confirmBtnText}>{confirmLabel || 'Confirm and request ride'} - ${totals.total.toFixed(2)}</Text>
               )}
             </TouchableOpacity>
           </View>

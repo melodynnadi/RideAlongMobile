@@ -7,6 +7,25 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { firebaseAuth, firestore, GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import { PaymentModal } from '@/components/PaymentModal';
+import { PriceOfferModal } from '@/components/PriceOfferModal';
+
+/** A driver's offer on one of the rider's requests, as shown on the rider's ride card. */
+type OfferInfo = {
+  offerId: string;
+  driverId?: string;
+  offerPrice?: number;
+  offerCount: number;
+  status?: string;
+  negotiation?: Negotiation | null;
+};
+import {
+  counterRideOffer,
+  formatMoney,
+  proposalLimits,
+  respondToBookingCounter,
+  respondToRideOffer,
+  type Negotiation,
+} from '@/services/offers';
 import { RideFiltersModal } from '@/components/RideFiltersModal';
 import { useProfileCompleteness, ProfileCompletionItem } from '@/hooks/useProfileCompleteness';
 import { applyFiltersToRide, getDefaultFilters, hasActiveFilters, type RideFilterOptions } from '@/utils/rideFilters';
@@ -479,7 +498,7 @@ export function RiderHomeReference() {
   const [profile, setProfile] = useState<RiderProfile | null>(null);
   const [confirmed, setConfirmed] = useState<MobileRidePosting[]>([]);
   const [activeRequests, setActiveRequests] = useState<any[]>([]);
-  const [requestsWithOffers, setRequestsWithOffers] = useState<Map<string, { offerId: string; driverId?: string; offerPrice?: number; offerCount: number }>>(new Map());
+  const [requestsWithOffers, setRequestsWithOffers] = useState<Map<string, OfferInfo>>(new Map());
   const [confirmedRideStatus, setConfirmedRideStatus] = useState<string | null>(null);
   const [confirmedRideId, setConfirmedRideId] = useState<string | null>(null);
   const [driverEnRoute, setDriverEnRoute] = useState(false);
@@ -664,25 +683,31 @@ export function RiderHomeReference() {
 
   useEffect(() => {
     if (!uid) return undefined;
-    const activeOfferStatuses = ['pending', 'sent', 'offer', 'offer_sent', 'offered'];
+    // 'countered' = the rider countered and is waiting on that driver.
+    const activeOfferStatuses = ['pending', 'sent', 'offer', 'offer_sent', 'offered', 'countered'];
     const q = query(
       collection(firestore, 'rideOffers'),
       where('riderId', '==', uid),
     );
     return onSnapshot(q, (snap) => {
-      const map = new Map<string, { offerId: string; driverId?: string; offerPrice?: number; offerCount: number }>();
+      const map = new Map<string, OfferInfo>();
       snap.docs.forEach((d) => {
         const data = d.data() as any;
         const status = String(data.status || '').toLowerCase();
         if (activeOfferStatuses.includes(status) && data.rideRequestId) {
           const key = String(data.rideRequestId);
           const existing = map.get(key);
-          map.set(key, {
+          const next: OfferInfo = {
             offerId: d.id,
             driverId: data.driverId,
             offerPrice: Number(data.offerPrice ?? data.price ?? data.amount ?? 0) || undefined,
             offerCount: (existing?.offerCount ?? 0) + 1,
-          });
+            status,
+            negotiation: data.negotiation ?? null,
+          };
+          // Show an offer the rider can act on (pending) ahead of one waiting on the driver.
+          const keepExisting = existing && existing.status !== 'countered' && status === 'countered';
+          map.set(key, keepExisting ? { ...existing!, offerCount: next.offerCount } : next);
         }
       });
       setRequestsWithOffers(map);
@@ -1248,7 +1273,7 @@ async function openRiderRatingIfNeeded(confirmedRideId: string) {
   }
 }
 
-function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedRideId, driverEnRoute, verificationCode }: { request: any; offerInfo?: { offerId: string; driverId?: string; offerPrice?: number; offerCount?: number } | null; confirmedRideStatus?: string | null; confirmedRideId?: string | null; driverEnRoute?: boolean; verificationCode?: string | null }) {
+function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedRideId, driverEnRoute, verificationCode }: { request: any; offerInfo?: (Omit<OfferInfo, 'offerCount'> & { offerCount?: number }) | null; confirmedRideStatus?: string | null; confirmedRideId?: string | null; driverEnRoute?: boolean; verificationCode?: string | null }) {
   const styles = useRiderStyles();
   const { colors } = useAppTheme();
   const pickup = request.pickupAddress || request.pickup || request.from || 'Pickup pending';
@@ -1375,6 +1400,9 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
     if (!uid || !offerInfo?.offerId) return;
     setActing(true);
 
+    // The hold placed when the request was posted — replaced by this one on success.
+    const previousPaymentIntentId: string | undefined = request.paymentIntentId || request.raw?.paymentIntentId;
+
     // Write paymentIntentId onto the rideRequests doc so the backend can read it
     // even if the request body field is ignored by older server versions
     try {
@@ -1399,6 +1427,11 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
         const body = await res.json().catch(() => ({}));
         throw new Error((body as any).error || `Server error ${res.status}`);
       }
+      if (previousPaymentIntentId && previousPaymentIntentId !== paymentIntentId) {
+        import('@/services/payments')
+          .then(({ cancelRidePayment }) => cancelRidePayment({ paymentIntentId: previousPaymentIntentId, rideId: request.id }))
+          .catch(() => {});
+      }
       router.push('/(rider)/requests' as any);
     } catch (e: any) {
       clearTimeout(timeout);
@@ -1411,6 +1444,75 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
         ? 'Request timed out. Your payment was not charged. Please try again.'
         : (e?.message || 'Could not accept the offer. Your payment was not charged.');
       Alert.alert('Failed', msg);
+    } finally {
+      setActing(false);
+    }
+  };
+
+  // ── Price negotiation ──
+  // 'counter'  = rider counters the driver's offer (card hold for the counter price)
+  // 'acceptCounter' = rider accepts the driver's counter on their booking (hold for the new price)
+  const [counterModalOpen, setCounterModalOpen] = useState(false);
+  const [negotiationPay, setNegotiationPay] = useState<{ mode: 'counter' | 'acceptCounter'; amount: number } | null>(null);
+  const bookingNeg: Negotiation | null = request._isPostingRequest ? (request.negotiation ?? request.raw?.negotiation ?? null) : null;
+  const offerNeg: Negotiation | null = offerInfo?.negotiation ?? null;
+  const offerIsCountered = offerInfo?.status === 'countered';
+  const counterLimits = proposalLimits(request.distance?.miles ?? request.raw?.distance?.miles, request.passengers ?? request.seats, 'rider');
+
+  const declineOffer = () => {
+    if (!offerInfo?.offerId) return;
+    Alert.alert('Decline this offer?', `The driver can send you a new offer afterwards.`, [
+      { text: 'Keep it', style: 'cancel' },
+      { text: 'Decline', style: 'destructive', onPress: async () => {
+        setActing(true);
+        try {
+          await respondToRideOffer(offerInfo.offerId, 'reject');
+        } catch (e: any) {
+          Alert.alert('Could not decline', e?.message || 'Please try again.');
+        } finally {
+          setActing(false);
+        }
+      } },
+    ]);
+  };
+
+  const declineBookingCounter = () => {
+    if (!bookingNeg) return;
+    Alert.alert('Decline counter-offer?', 'Your request will close and your card hold will be released. You can send a new request afterwards.', [
+      { text: 'Keep it', style: 'cancel' },
+      { text: 'Decline', style: 'destructive', onPress: async () => {
+        setActing(true);
+        try {
+          await respondToBookingCounter(request.id, 'reject');
+        } catch (e: any) {
+          Alert.alert('Could not decline', e?.message || 'Please try again.');
+        } finally {
+          setActing(false);
+        }
+      } },
+    ]);
+  };
+
+  const handleNegotiationPayment = async (paymentIntentId: string) => {
+    const pay = negotiationPay;
+    setNegotiationPay(null);
+    if (!pay) return;
+    setActing(true);
+    try {
+      if (pay.mode === 'counter' && offerInfo?.offerId) {
+        await counterRideOffer(offerInfo.offerId, pay.amount, paymentIntentId);
+        Alert.alert('Counter-offer sent', `The driver can accept ${formatMoney(pay.amount)} or decline. If they decline, your card hold is released.`);
+      } else if (pay.mode === 'acceptCounter') {
+        await respondToBookingCounter(request.id, 'accept', paymentIntentId);
+        Alert.alert('Ride booked 🎉', `You accepted ${formatMoney(pay.amount)}. Your seat is confirmed.`);
+      }
+    } catch (e: any) {
+      // Release the hold we just placed — nothing was agreed.
+      try {
+        const { cancelRidePayment } = await import('@/services/payments');
+        await cancelRidePayment({ paymentIntentId, rideId: offerInfo?.offerId || request.id });
+      } catch {}
+      Alert.alert('Not sent', `${e?.message || 'Something went wrong.'} Your card was not charged.`);
     } finally {
       setActing(false);
     }
@@ -1442,7 +1544,16 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
   const isEnRoute   = !!driverEnRoute && isConfirmed && !isInProgress && !isDriverCompleted;
   const statusColor = isDriverCompleted ? colors.primary : isInProgress ? colors.primary : isEnRoute ? colors.primary : isConfirmed ? colors.green : hasOffer ? colors.primary : colors.textSecondary;
   const statusBg    = isDriverCompleted ? colors.primaryDim : isInProgress ? colors.primaryDim : isEnRoute ? colors.primaryDim : isConfirmed ? colors.greenDim : hasOffer ? colors.primaryDim : colors.bgSecondary;
-  const statusLabel = isDriverCompleted ? 'CONFIRM ARRIVAL' : isInProgress ? 'IN PROGRESS' : isEnRoute ? 'DRIVER EN ROUTE' : isConfirmed ? 'CONFIRMED' : hasOffer ? 'OFFER RECEIVED' : 'PENDING';
+  const bookingCountered = !isConfirmed && bookingNeg?.status === 'countered';
+  const statusLabel = isDriverCompleted ? 'CONFIRM ARRIVAL' : isInProgress ? 'IN PROGRESS' : isEnRoute ? 'DRIVER EN ROUTE' : isConfirmed ? 'CONFIRMED'
+    : bookingCountered ? 'COUNTER-OFFER' : hasOffer ? (offerIsCountered ? 'COUNTER SENT' : 'OFFER RECEIVED') : 'PENDING';
+  // One line explaining where the price stands.
+  const negotiationText = isConfirmed ? null
+    : bookingCountered ? `The driver countered your ${formatMoney(bookingNeg!.originalAmount)} offer with ${formatMoney(bookingNeg!.counterAmount)}.`
+    : hasOffer && offerIsCountered && offerNeg ? `You countered with ${formatMoney(offerNeg.counterAmount)}. Waiting for the driver to accept or decline.`
+    : hasOffer && (offerInfo?.offerCount ?? 1) === 1 && offerInfo?.offerPrice ? `The driver offered ${formatMoney(offerInfo.offerPrice)}. Accept, decline, or counter once.`
+    : request._isPostingRequest && request.postedPrice != null ? `You offered ${formatMoney(request.contributionAmount ?? price)} (listed ${formatMoney(request.postedPrice)}). Waiting for the driver.`
+    : null;
   const showDriverInfo = (isConfirmed || isInProgress || isDriverCompleted) && !!driverName;
 
   return (
@@ -1475,6 +1586,13 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
           </View>
         </View>
       </TouchableOpacity>
+
+      {negotiationText ? (
+        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginTop: 12, padding: 10, borderRadius: 12, backgroundColor: colors.primaryDim }}>
+          <Ionicons name="pricetag-outline" size={15} color={colors.primary} style={{ marginTop: 1 }} />
+          <Text style={{ flex: 1, color: colors.textPrimary, fontSize: 12, lineHeight: 17 }}>{negotiationText}</Text>
+        </View>
+      ) : null}
 
       {/* Verification code — shown to rider when ride is CONFIRMED, before pickup */}
       {isConfirmed && !isInProgress && !isDriverCompleted && localCode && (
@@ -1627,6 +1745,43 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
               );
             })()}
           </>
+        ) : hasOffer && offerIsCountered ? (
+          // Rider already countered this offer — only the driver can answer now.
+          <>
+            <TouchableOpacity style={styles.actionBtnSecondary} onPress={() => router.push('/(rider)/requests' as any)} activeOpacity={0.75}>
+              <Text style={styles.actionBtnSecondaryText}>View Offers</Text>
+            </TouchableOpacity>
+            <View style={[styles.actionBtnSecondary, { flex: 1, opacity: 0.7 }]}>
+              <Text style={styles.actionBtnSecondaryText}>Waiting for driver</Text>
+            </View>
+          </>
+        ) : hasOffer && (offerInfo?.offerCount ?? 1) === 1 ? (
+          <>
+            <TouchableOpacity style={[styles.actionBtnSecondary, acting && { opacity: 0.6 }]} onPress={declineOffer} disabled={acting} activeOpacity={0.75}>
+              <Text style={styles.actionBtnSecondaryText}>Decline</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.actionBtnSecondary, { borderColor: colors.primary }, acting && { opacity: 0.6 }]} onPress={() => setCounterModalOpen(true)} disabled={acting} activeOpacity={0.75}>
+              <Text style={[styles.actionBtnSecondaryText, { color: colors.primary }]}>Counter</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.actionBtnPrimary, acting && { opacity: 0.6 }]} onPress={handleAccept} disabled={acting} activeOpacity={0.8}>
+              <Text style={styles.actionBtnPrimaryText}>{acting ? 'Working…' : 'Accept'}</Text>
+            </TouchableOpacity>
+          </>
+        ) : bookingCountered ? (
+          // Driver countered the rider's booking — accept (re-confirm payment) or decline.
+          <>
+            <TouchableOpacity style={[styles.actionBtnSecondary, acting && { opacity: 0.6 }]} onPress={declineBookingCounter} disabled={acting} activeOpacity={0.75}>
+              <Text style={styles.actionBtnSecondaryText}>Decline</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionBtnPrimary, acting && { opacity: 0.6 }]}
+              onPress={() => setNegotiationPay({ mode: 'acceptCounter', amount: bookingNeg!.counterAmount })}
+              disabled={acting}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.actionBtnPrimaryText}>{acting ? 'Working…' : `Accept ${formatMoney(bookingNeg!.counterAmount)}`}</Text>
+            </TouchableOpacity>
+          </>
         ) : hasOffer ? (
           <>
             <TouchableOpacity
@@ -1685,6 +1840,35 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
         driverId={offerInfo?.driverId || null}
         baseFare={offerInfo?.offerPrice ?? price}
         onPaymentSuccess={handleOfferPaymentSuccess}
+      />
+
+      {/* Counter-offer: pick a price, then hold that amount (the driver accepting finalizes it). */}
+      <PriceOfferModal
+        visible={counterModalOpen}
+        onClose={() => setCounterModalOpen(false)}
+        title="Counter-offer"
+        subtitle="Suggest a different price per seat. Your card is held for it (plus fees) and released if the driver declines."
+        referenceLabel="Driver's offer"
+        referenceAmount={offerInfo?.offerPrice ?? price}
+        min={counterLimits.min}
+        max={counterLimits.max}
+        mustDiffer
+        note="You can counter once. After that, the driver can only accept or decline."
+        confirmLabel="Continue with {amount}"
+        onSubmit={(amount) => {
+          setCounterModalOpen(false);
+          setNegotiationPay({ mode: 'counter', amount });
+        }}
+      />
+      <PaymentModal
+        visible={!!negotiationPay}
+        onClose={() => setNegotiationPay(null)}
+        rideId={offerInfo?.offerId || request.id}
+        driverId={offerInfo?.driverId || request.driverId || null}
+        baseFare={negotiationPay?.amount ?? 0}
+        skipDuplicateCheck
+        confirmLabel={negotiationPay?.mode === 'counter' ? 'Send counter-offer' : 'Accept and book'}
+        onPaymentSuccess={handleNegotiationPayment}
       />
     </View>
   );
@@ -2773,6 +2957,10 @@ export function RiderDetailReference() {
   const [loadingInstances, setLoadingInstances] = useState(false);
   const [myWaitlistEntry, setMyWaitlistEntry] = useState<import('@/src/services/waitlistService').WaitlistEntry | null>(null);
   const [joiningWaitlist, setJoiningWaitlist] = useState(false);
+  // Price the rider is booking at: null = the listed price, otherwise their own offer.
+  const [offeredPrice, setOfferedPrice] = useState<number | null>(null);
+  const [priceOfferOpen, setPriceOfferOpen] = useState(false);
+  const bookingPrice = offeredPrice ?? ride?.price ?? 0;
 
   const handleRequestSeat = async () => {
     const user = firebaseAuth.currentUser;
@@ -3498,9 +3686,20 @@ export function RiderDetailReference() {
               </TouchableOpacity>
             )
           ) : (
-            <TouchableOpacity style={[styles.primaryBtnFull, (checkingVerification || paymentVisible) && { opacity: 0.6 }]} onPress={handleRequestSeat} disabled={checkingVerification || paymentVisible}>
-              <Text style={styles.primaryText}>{checkingVerification ? 'Checking...' : `Request seat - $${ride.price.toFixed(2)}`}</Text>
-            </TouchableOpacity>
+            <View>
+              <TouchableOpacity style={[styles.primaryBtnFull, (checkingVerification || paymentVisible) && { opacity: 0.6 }]} onPress={() => { setOfferedPrice(null); void handleRequestSeat(); }} disabled={checkingVerification || paymentVisible}>
+                <Text style={styles.primaryText}>{checkingVerification ? 'Checking...' : `Request seat - $${ride.price.toFixed(2)}`}</Text>
+              </TouchableOpacity>
+              {/* Rider proposes their own price; the driver can accept, decline, or counter once. */}
+              <TouchableOpacity
+                onPress={() => setPriceOfferOpen(true)}
+                disabled={checkingVerification || paymentVisible}
+                style={{ alignItems: 'center', paddingVertical: 10 }}
+                accessibilityRole="button"
+              >
+                <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '700' }}>Offer a different price</Text>
+              </TouchableOpacity>
+            </View>
           )
         }
       >
@@ -3615,12 +3814,35 @@ export function RiderDetailReference() {
           <View style={styles.fareRow}><Text style={styles.fareLabel}>Payment</Text><Text style={styles.fareValue} numberOfLines={2}>Authorized now, captured after completion</Text></View>
         </View>
       </PhoneScreen>
+      {(() => {
+        const limits = proposalLimits(ride.raw?.distance?.miles, ride.raw?.availableSeats ?? ride.raw?.seatsAvailable, 'rider');
+        return (
+          <PriceOfferModal
+            visible={priceOfferOpen}
+            onClose={() => setPriceOfferOpen(false)}
+            title="Offer a price"
+            subtitle="Propose your own price per seat. The driver can accept, decline, or counter once. Your card is held for your offer, plus fees."
+            referenceLabel="Listed price"
+            referenceAmount={ride.price}
+            min={limits.min}
+            max={limits.max}
+            mustDiffer
+            confirmLabel="Continue with {amount}"
+            onSubmit={async (amount) => {
+              setPriceOfferOpen(false);
+              setOfferedPrice(amount);
+              await handleRequestSeat();
+            }}
+          />
+        );
+      })()}
       <PaymentModal
         visible={paymentVisible}
         onClose={() => setPaymentVisible(false)}
         rideId={ride.id}
         driverId={ride.driverId || null}
-        baseFare={ride.price}
+        baseFare={bookingPrice}
+        confirmLabel={offeredPrice != null ? 'Send price offer' : undefined}
         onPaymentSuccess={async (paymentIntentId: string) => {
           setPaymentVisible(false);
           const riderId = firebaseAuth.currentUser?.uid;
@@ -3682,8 +3904,10 @@ export function RiderDetailReference() {
               date,
               time,
               passengers: 1,
-              contributionAmount: ride.price,
-              price: ride.price,
+              contributionAmount: bookingPrice,
+              price: bookingPrice,
+              // A price offer: keep the listed price so the driver sees what they're comparing against.
+              ...(offeredPrice != null && Math.abs(offeredPrice - ride.price) >= 0.01 ? { postedPrice: ride.price } : {}),
               paymentIntentId,
               paymentStatus: 'authorized',
               status: 'pending',
@@ -3695,8 +3919,13 @@ export function RiderDetailReference() {
               _localCreatedMs: Date.now(),
             };
 
-            // Deterministic doc ID prevents duplicate requests from double-taps or retries
-            const reqDocId = `${riderId}_${targetPostingId}`;
+            // Deterministic doc ID prevents duplicate requests from double-taps or retries.
+            // If the rider's previous request for this ride was closed (e.g. a declined price
+            // offer), record the new one separately so the old one stays closed.
+            const baseDocId = `${riderId}_${targetPostingId}`;
+            const prevSnap = await getDoc(doc(firestore, 'ridePostingRequests', baseDocId)).catch(() => null);
+            const prevStatus = prevSnap?.exists() ? String((prevSnap.data() as any)?.status || '').toLowerCase() : null;
+            const reqDocId = prevStatus && prevStatus !== 'pending' ? `${baseDocId}_${Date.now()}` : baseDocId;
             const reqRef = doc(firestore, 'ridePostingRequests', reqDocId);
 
             // Cancel any stale pending docs for this (rider, posting) pair
