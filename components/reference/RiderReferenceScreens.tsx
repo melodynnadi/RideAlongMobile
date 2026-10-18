@@ -2243,8 +2243,8 @@ export function RiderRequestReference() {
       <View style={styles.pageIntro}>
         <Text style={[styles.pageTitle, { color: riderPageTitleColor }]}>Request a ride</Text>
       </View>
-      <Text style={styles.eyebrow}>WHERE & WHEN</Text>
-      <View style={[styles.searchCard, styles.autocompleteSearchCard]}>
+      <Text style={[styles.eyebrow, styles.requestFirstLabel]}>WHERE & WHEN</Text>
+      <View style={[styles.searchCard, styles.autocompleteSearchCard, styles.requestSection]}>
         <View style={styles.routeRow}>
           <RouteDots />
           <View style={styles.routeInputs}>
@@ -2281,8 +2281,8 @@ export function RiderRequestReference() {
           <TimePickerModal visible={timeModalOpen} selectedTime={time} onClose={() => setTimeModalOpen(false)} onSelect={setTime} />
         </View>
       </View>
-      <Text style={styles.eyebrow}>CONTRIBUTION AMOUNT</Text>
-      <View style={styles.priceBox}>
+      <Text style={[styles.eyebrow, styles.requestLabel]}>CONTRIBUTION AMOUNT</Text>
+      <View style={[styles.priceBox, styles.requestSection]}>
         <View style={styles.priceInputGroup}>
           <Text style={styles.bigPrice}>$</Text>
           <TextInput
@@ -2302,7 +2302,7 @@ export function RiderRequestReference() {
           <Text style={styles.requestSuggestedText}>{suggestedText}</Text>
         </View>
       </View>
-      <Text style={styles.eyebrow}>EVENT (OPTIONAL)</Text>
+      <Text style={[styles.eyebrow, styles.requestLabel]}>EVENT (OPTIONAL)</Text>
       <TextInput
         style={styles.inputPill}
         value={eventName}
@@ -2310,7 +2310,7 @@ export function RiderRequestReference() {
         placeholder="Concert, game day, move-in weekend..."
         placeholderTextColor={colors.textSecondary}
       />
-      <Text style={styles.eyebrow}>NOTE</Text>
+      <Text style={[styles.eyebrow, styles.requestLabel]}>NOTE</Text>
       <TextInput
         style={styles.noteBox}
         multiline
@@ -4019,7 +4019,11 @@ function makeStyles(colors: AppColors) {
   primaryBtn: { height: 54, borderRadius: 27, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 34 },
   searchPrimaryBtn: { height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
   primaryBtnFull: { height: 56, borderRadius: 28, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  requestSubmitButton: { marginTop: 22, marginBottom: 0 },
+  requestSubmitButton: { marginTop: 24, marginBottom: 0 },
+  // Request-a-ride form rhythm (same as Post a ride): 20 between sections, 8 from a label to its field.
+  requestFirstLabel: { marginTop: 0 },
+  requestLabel: { marginTop: 20 },
+  requestSection: { marginBottom: 0 },
   primaryText: { fontFamily: FONT_SANS, color: colors.textInverse, fontSize: 17, fontWeight: '700' },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   sectionTitle: { fontFamily: FONT_SANS, flex: 1, color: colors.textPrimary, fontSize: 17, fontWeight: '700' },

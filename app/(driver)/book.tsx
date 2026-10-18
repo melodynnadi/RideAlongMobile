@@ -540,7 +540,8 @@ export default function BookScreen() {
   stopPlus: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
   routeFields: { flex: 1 },
   addStopText: { color: colors.textSecondary, fontSize: 11, fontWeight: '700', marginTop: -2, marginBottom: 6, marginLeft: 12 },
-  fieldGroupLabel: { marginHorizontal: 20, marginTop: 16, marginBottom: 8, color: colors.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 1.3 },
+  // Same rhythm as Request a ride: 20 between sections, 8 from a label to its field.
+  fieldGroupLabel: { marginHorizontal: 20, marginTop: 20, marginBottom: 8, color: colors.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 1.3 },
   whenRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 20 },
   timeBtn: { flex: 0.7 },
   seatPillRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 20 },
@@ -551,7 +552,7 @@ export default function BookScreen() {
   suggestedLabel: { color: colors.textSecondary, fontSize: 8, fontWeight: '800', letterSpacing: 0.8 },
   capMiniBanner: { marginHorizontal: 20, marginTop: 8, borderRadius: 14, backgroundColor: colors.bgSecondary, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: colors.border },
   capMiniText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
-  continueBtn: { marginHorizontal: 20, marginTop: 16, height: 54, borderRadius: 27, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  continueBtn: { marginHorizontal: 20, marginTop: 24, height: 54, borderRadius: 27, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   continueText: { color: colors.textInverse, fontSize: 16, fontWeight: '800' },
   // ── Header ────────────────────────────────────────────────────────────────
   hdr:            { flexDirection:'row', alignItems:'center', paddingHorizontal:16, paddingTop:8, paddingBottom:14 },
@@ -1496,7 +1497,7 @@ export default function BookScreen() {
 
                 {/* ── Recurring ride ── */}
                 <Text style={styles.fieldGroupLabel}>REPEAT WEEKLY</Text>
-                <View style={{ marginHorizontal: 20, borderRadius: 18, borderWidth: 1, borderColor: isRecurring ? colors.primary : colors.border, backgroundColor: colors.bgCard, overflow: 'hidden', marginBottom: 4 }}>
+                <View style={{ marginHorizontal: 20, borderRadius: 18, borderWidth: 1, borderColor: isRecurring ? colors.primary : colors.border, backgroundColor: colors.bgCard, overflow: 'hidden' }}>
                   {/* Toggle row */}
                   <TouchableOpacity
                     activeOpacity={0.75}
