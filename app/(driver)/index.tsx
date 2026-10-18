@@ -350,7 +350,8 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
   React.useEffect(() => {
     if ((ride.raw as any)?.driverEnRoute) setEnRouteSent(true);
   }, [(ride.raw as any)?.driverEnRoute]);
-  const [requesterInfo, setRequesterInfo]  = React.useState<{ riderId: string; name: string; photo: string | null; rating: number | null } | null>(null);
+  // offeredPrice/listedPrice: set when the rider offered their own price instead of the listed one.
+  const [requesterInfo, setRequesterInfo]  = React.useState<{ riderId: string; name: string; photo: string | null; rating: number | null; offeredPrice: number | null; listedPrice: number | null } | null>(null);
   // Fetch the requesting rider's profile when a booking request is pending
   React.useEffect(() => {
     if (!pendingRequestId || !hasOfferReceived) { setRequesterInfo(null); return; }
@@ -371,7 +372,14 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
           : userData.fullName || userData.displayName || reqData.riderName || 'Rider';
         const photo = riderData.avatarUrl || riderData.photoURL || userData.avatarUrl || userData.photoURL || null;
         const rating = typeof riderData.rating === 'number' ? riderData.rating : null;
-        if (!cancelled) setRequesterInfo({ riderId, name: name || 'Rider', photo, rating });
+        const offered = Number(reqData.contributionAmount ?? reqData.price);
+        const listed = Number(reqData.postedPrice);
+        const isPriceOffer = Number.isFinite(offered) && Number.isFinite(listed) && Math.abs(offered - listed) >= 0.01;
+        if (!cancelled) setRequesterInfo({
+          riderId, name: name || 'Rider', photo, rating,
+          offeredPrice: isPriceOffer ? offered : null,
+          listedPrice: isPriceOffer ? listed : null,
+        });
       } catch {}
     })();
     return () => { cancelled = true; };
@@ -401,7 +409,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
     : isInProgress ? 'IN PROGRESS'
     : isConfirmedOnly ? 'CONFIRMED'
     : isWaitingForSeats ? 'WAITING FOR PASSENGERS'
-    : (isPosting && hasOfferReceived) ? 'REQUEST RECEIVED'
+    : (isPosting && hasOfferReceived) ? (requesterInfo?.offeredPrice != null ? 'PRICE OFFER' : 'REQUEST RECEIVED')
     : isOfferSent ? 'OFFER SENT'
     : prettyStatus(rawStatus).toUpperCase();
   const statusColor = isInProgress ? colors.primary
@@ -601,6 +609,16 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
           </View>
           <Ionicons name="chevron-forward" size={14} color={colors.textSecondary} />
         </TouchableOpacity>
+      )}
+      {/* The rider offered their own price — the driver accepts or declines it below. */}
+      {hasOfferReceived && !isConfirmed && !isInProgress && requesterInfo?.offeredPrice != null && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, padding: 10, borderRadius: 12, backgroundColor: colors.primaryDim }}>
+          <Ionicons name="pricetag-outline" size={15} color={colors.primary} />
+          <Text style={{ flex: 1, color: colors.textPrimary, fontSize: 13 }}>
+            Offered <Text style={{ fontWeight: '800' }}>${requesterInfo.offeredPrice.toFixed(2)}</Text>
+            <Text style={{ color: colors.textSecondary }}> · you listed ${requesterInfo.listedPrice!.toFixed(2)}</Text>
+          </Text>
+        </View>
       )}
 
       {/* Rider info — shown when ride is confirmed or in progress; tappable → rider profile */}
