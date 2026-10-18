@@ -41,7 +41,7 @@ import {
 import { showErrorToast, showSuccessToast } from '@/src/utils/showToast';
 import { chatBelongsToRole, legacyUnreadField, roleKey, roleUnreadField } from '@/src/utils/roleIdentity';
 import { useAppTheme } from '@/hooks/ThemeContext';
-import { resolveChatAvailability, type ChatAvailability } from '@/src/services/chatAvailability';
+import { isChatHidden, resolveChatAvailability, type ChatAvailability } from '@/src/services/chatAvailability';
 
 interface Chat {
   id: string;
@@ -324,7 +324,7 @@ export default function MessagesScreen() {
                 id: d.id,
                 data: d.data() as Record<string, any>,
               }))
-              .filter(({ id, data }) => !hiddenThreadIdsRef.current.has(id) && chatBelongsToRole(data, currentUser.uid, 'driver'));
+              .filter(({ id, data }) => !hiddenThreadIdsRef.current.has(id) && !isChatHidden(data) && chatBelongsToRole(data, currentUser.uid, 'driver'));
 
             chatDocs.forEach(({ data }) => {
               const riderId = data.riderId || data.riderUID || data.riderUid || data.userId;

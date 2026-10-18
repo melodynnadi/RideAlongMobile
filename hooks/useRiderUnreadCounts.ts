@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { firebaseAuth, firestore } from '@/constants/services';
 import { subscribeRiderConversations, subscribeRiderNotifications } from '@/src/services/riderData';
+import { isChatHidden } from '@/src/services/chatAvailability';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
   chatBelongsToRole,
@@ -105,7 +106,7 @@ export function useDriverUnreadCounts(): UnreadCounts {
       (snapshot) => {
         const messageCount = snapshot.docs.reduce((total, item) => {
           const data = item.data();
-          if (!chatBelongsToRole(data, uid, 'driver')) return total;
+          if (!chatBelongsToRole(data, uid, 'driver') || isChatHidden(data)) return total;
           const unreadCounts = data.unreadCounts || {};
           return total + Number(
             data[roleUnreadField('driver', uid)]

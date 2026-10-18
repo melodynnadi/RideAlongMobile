@@ -156,6 +156,14 @@ export async function resolveChatAvailability(chatData: Record<string, any>): Pr
   };
 }
 
+/**
+ * Closed chats are hidden from both inboxes 7 days after the ride ends (set by the
+ * daily chatRetentionDaily Cloud Function, which deletes them after 90 days).
+ */
+export function isChatHidden(chatData: Record<string, any> | undefined | null): boolean {
+  return !!chatData?.hiddenAt;
+}
+
 const safeId = (value: string) => value.replace(/[^A-Za-z0-9_-]/g, '_');
 
 type RideChatInput = {

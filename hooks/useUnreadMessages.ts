@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { firestore, firebaseAuth } from '@/constants/services';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { isChatHidden } from '@/src/services/chatAvailability';
 
 export function useUnreadMessages() {
   const [totalUnread, setTotalUnread] = useState(0);
@@ -24,6 +25,7 @@ export function useUnreadMessages() {
         let total = 0;
         snapshot.forEach((doc) => {
           const chatData = doc.data();
+          if (isChatHidden(chatData)) return;
           const unreadField = `unreadCount_${currentUser.uid}`;
           const unreadCount = chatData[unreadField] || 0;
           total += unreadCount;
