@@ -3038,11 +3038,6 @@ export default function HomeScreen() {
       const d = await getDoc(doc(firestore, 'ridePostingRequests', requestId));
       if (!d.exists()) return;
       const r: any = d.data() || {};
-      // Price negotiation: after the driver counters, only the rider can respond.
-      if (r.negotiation?.status === 'countered') {
-        Alert.alert('Waiting for the rider', `You countered with $${Number(r.negotiation.counterAmount).toFixed(2)}. The rider can accept or decline it.`);
-        return;
-      }
       // Resolve posting to enrich route/time if needed
       let post: any = undefined;
       const postingId: string | undefined = r.ridePostingId || r.ridePostId || r.postingId || r.posting?.id;

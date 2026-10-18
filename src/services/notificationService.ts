@@ -342,15 +342,9 @@ class NotificationService {
           router.replace(isDriver ? '/(driver)' : '/(rider)');
           break;
 
-        // Price negotiation (server/offers). Drivers land on the request they need to answer;
-        // riders on their requests list, where offers and counters are shown.
-        case 'offer_countered':
-        case 'offer_rejected':
-        case 'booking_countered':
-        case 'counter_accepted':
-        case 'counter_rejected': {
-          const d = data as any;
-          const requestId = d.rideRequestId || d.ridePostingRequestId;
+        // The rider declined the driver's price offer — open the request so they can send a new one.
+        case 'offer_rejected': {
+          const requestId = (data as any).rideRequestId;
           if (isDriver && requestId) {
             router.push({ pathname: '/(driver)/request/[id]', params: { id: String(requestId), returnTo: '/(driver)' } } as any);
           } else {

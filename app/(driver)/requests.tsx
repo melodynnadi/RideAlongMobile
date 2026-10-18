@@ -356,14 +356,14 @@ async function getConfirmedRideRequestIdSet(requestIds: string[]): Promise<Set<s
 
 /** An offer that blocks sending another one: still open, or already accepted. */
 function isOpenOfferStatus(status?: string | null) {
-  return ['pending', 'countered', 'accepted'].includes(String(status || '').toLowerCase());
+  return ['pending', 'accepted'].includes(String(status || '').toLowerCase());
 }
 
 async function getOfferedRequestIdSet(driverId: string): Promise<Set<string>> {
   try {
     const out = new Set<string>();
     // Open offers only: a rejected offer lets the driver send a new one.
-    const qy = query(collection(firestore, 'rideOffers'), where('driverId', '==', driverId), where('status', 'in', ['pending', 'countered', 'accepted']));
+    const qy = query(collection(firestore, 'rideOffers'), where('driverId', '==', driverId), where('status', 'in', ['pending', 'accepted']));
     const snap = await getDocs(qy);
     snap.forEach((d) => { const rid = (d.data() as any)?.rideRequestId; if (rid) out.add(String(rid)); });
     return out;
@@ -572,8 +572,7 @@ export default function RequestsInboxScreen() {
     const term = search.trim().toLowerCase();
     const base = allItems.filter((item) => {
       if (!isPendingFutureItem(item)) return false;
-      // Hide requests the driver is waiting on; keep countered ones (they need an answer)
-      // and declined ones (the driver can send a new offer).
+      // Hide requests the driver is waiting on; keep declined ones (the driver can send a new offer).
       if (['pending', 'accepted'].includes(String(offeredByReqId[item.id]?.status || ''))) return false;
       if (filter === 'today' && !isSameDay(item.date, 0)) return false;
       if (filter === 'tomorrow' && !isSameDay(item.date, 1)) return false;
@@ -673,7 +672,7 @@ export default function RequestsInboxScreen() {
       const offerRef = await addDoc(collection(firestore, 'rideOffers'), payload);
       setOfferedByReqId((prev) => ({ ...prev, [item.id]: { id: offerRef.id, status: 'pending' } }));
       setOfferItem(null);
-      Alert.alert('Offer sent', `You offered ${formatMoney(amount)}. The rider can accept, decline, or counter once.`);
+      Alert.alert('Offer sent', `You offered ${formatMoney(amount)}. The rider can accept or decline it.`);
     } catch (error) {
       console.warn('offerOnRequest failed', error);
       Alert.alert('Failed', 'Could not send your offer.');
@@ -969,8 +968,7 @@ export default function RequestsInboxScreen() {
 
   const renderItem = ({ item }: { item: InboxItem }) => {
     const offerStatus = offeredByReqId[item.id]?.status;
-    const isOffered = isOpenOfferStatus(offerStatus) && offerStatus !== 'countered';
-    const isCountered = offerStatus === 'countered';
+    const isOffered = isOpenOfferStatus(offerStatus);
     const wasDeclined = offerStatus === 'rejected';
     const isConfirmed = offerStatus === 'accepted';
     const dayLabel = relativeDayLabel(item.date);
@@ -1000,9 +998,9 @@ export default function RequestsInboxScreen() {
           <View style={s.riderCopy}>
             <View style={s.riderTitleRow}>
               <Text style={s.riderName} numberOfLines={1}>{displayName}</Text>
-              <View style={[s.statusBadge, (isOffered || isCountered || wasDeclined) && s.statusBadgeOffered]}>
-                <Text style={[s.statusBadgeText, (isOffered || isCountered || wasDeclined) && s.statusBadgeTextOffered]}>
-                  {isCountered ? 'Countered' : wasDeclined ? 'Declined' : isOffered ? 'Sent' : 'New'}
+              <View style={[s.statusBadge, (isOffered || wasDeclined) && s.statusBadgeOffered]}>
+                <Text style={[s.statusBadgeText, (isOffered || wasDeclined) && s.statusBadgeTextOffered]}>
+                  {wasDeclined ? 'Declined' : isOffered ? 'Sent' : 'New'}
                 </Text>
               </View>
             </View>
@@ -1092,12 +1090,9 @@ export default function RequestsInboxScreen() {
             <TouchableOpacity
               style={[s.offerBtn, isOffered && s.disabled]}
               disabled={isOffered}
-              onPress={() => (isCountered
-                // The rider countered — answer it on the request screen.
-                ? router.push({ pathname: '/(driver)/request/[id]', params: { id: item.id, returnTo: '/(driver)/requests' } } as any)
-                : offerOnRequest(item))}
+              onPress={() => offerOnRequest(item)}
             >
-              <Text style={s.offerBtnText}>{isCountered ? 'Respond' : wasDeclined ? 'New offer' : isOffered ? 'Sent ✓' : 'Offer ride'}</Text>
+              <Text style={s.offerBtnText}>{wasDeclined ? 'New offer' : isOffered ? 'Sent ✓' : 'Offer ride'}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -1205,7 +1200,7 @@ export default function RequestsInboxScreen() {
             visible={!!offerItem}
             onClose={() => setOfferItem(null)}
             title="Your offer"
-            subtitle="Offer the rider’s price or propose your own. They can accept, decline, or counter once."
+            subtitle="Offer the rider’s price, or counter once with your own. The rider then accepts or declines."
             referenceLabel="Rider's price"
             referenceAmount={Number(offerItem?.price) || 0}
             min={limits.min}

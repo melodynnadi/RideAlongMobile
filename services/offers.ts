@@ -1,49 +1,24 @@
-// Price offers & negotiation (server: RideAlongWebApp server/offers/negotiation.js).
-// A price is proposed (driver offer on a request / rider booking on a posting); the
-// recipient accepts, rejects, or counters once; a counter can only be accepted or rejected.
+// Ride price offers — one-time negotiation (server: RideAlongWebApp server/offers/negotiation.js).
+// Whoever posts sets the price; the other side accepts it or proposes their own price once;
+// the poster accepts or declines. No counter to a counter.
+//   - Driver's posting: a rider books at the listed price or offers their own.
+//   - Rider's request:  a driver offers at the rider's price or proposes their own.
 import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import { computeContributionRange } from '@/src/utils/pricing';
 
-export type NegotiationStatus = 'countered' | 'agreed' | 'rejected' | 'closed' | 'unavailable';
-
-export type Negotiation = {
-  status: NegotiationStatus;
-  counteredBy: 'rider' | 'driver';
-  counterAmount: number;
-  originalAmount: number;
-  counterPaymentIntentId?: string;
-};
-
-async function post<T = any>(path: string, body: Record<string, unknown>): Promise<T> {
+/** The rider declines a driver's offer; the driver is notified and can send a new one. */
+export async function declineRideOffer(offerId: string): Promise<void> {
   const token = await firebaseAuth.currentUser?.getIdToken();
-  const res = await fetch(`${getApiBaseUrl()}${path}`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/offers/ride-offers/${encodeURIComponent(offerId)}/decline`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: JSON.stringify(body),
   });
   const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
   if (!res.ok) throw new Error(data.message || data.error || 'Something went wrong. Try again.');
-  return data as T;
 }
 
-/** Rider counters a driver's offer. `paymentIntentId` must be a hold for the counter price. */
-export const counterRideOffer = (offerId: string, amount: number, paymentIntentId: string) =>
-  post(`/api/offers/ride-offers/${encodeURIComponent(offerId)}/counter`, { amount, paymentIntentId });
-
-/** Rider declines a driver's open offer, or the driver answers the rider's counter. */
-export const respondToRideOffer = (offerId: string, action: 'accept' | 'reject') =>
-  post<{ status: string; confirmedRideId?: string }>(`/api/offers/ride-offers/${encodeURIComponent(offerId)}/respond`, { action });
-
-/** Driver counters a rider's booking request on their posting. */
-export const counterBookingRequest = (requestId: string, amount: number) =>
-  post(`/api/offers/booking-requests/${encodeURIComponent(requestId)}/counter`, { amount });
-
-/** Rider answers the driver's counter. Accepting needs a hold for the counter price. */
-export const respondToBookingCounter = (requestId: string, action: 'accept' | 'reject', paymentIntentId?: string) =>
-  post<{ status: string; confirmedRideId?: string }>(`/api/offers/booking-requests/${encodeURIComponent(requestId)}/respond`, { action, paymentIntentId });
-
 /**
- * Allowed per-seat price for someone proposing a price on a route (same rules the server applies):
+ * Allowed per-seat price for someone proposing a price on a route:
  * riders can't go below the route minimum; nobody can go above the route maximum.
  */
 export function proposalLimits(distanceMiles: number | null | undefined, seats: number | null | undefined, proposer: 'rider' | 'driver') {
