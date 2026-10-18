@@ -559,7 +559,6 @@ export function DriverSignUpScreen() {
           setFirstName(d.firstName || '');
           setLastName(d.lastName || '');
           setEmail(d.email || '');
-          setPhone(d.phone || '');
           if (d.university) setUniversity(d.university);
         }
         setDob(d.dob || '');
@@ -620,7 +619,7 @@ export function DriverSignUpScreen() {
         savedAt: Date.now(),
         uid: firebaseAuth.currentUser?.uid ?? null,
         step,
-        firstName, lastName, email, phone, university, dob,
+        firstName, lastName, email, university, dob,
         licenseNumber, licenseState, licenseExpiry,
         licenseFront: fileOf(licenseFront), licenseBack: fileOf(licenseBack),
         vehicleYear, vehicleMake, vehicleModel, vehicleColor, licensePlate, seats,
@@ -630,7 +629,7 @@ export function DriverSignUpScreen() {
     }, 600);
     return () => clearTimeout(t);
   }, [
-    draftReady, hasProgress, processingStatus, step, firstName, lastName, email, phone, university, dob,
+    draftReady, hasProgress, processingStatus, step, firstName, lastName, email, university, dob,
     licenseNumber, licenseState, licenseExpiry, licenseFront, licenseBack, vehicleYear, vehicleMake,
     vehicleModel, vehicleColor, licensePlate, seats, insuranceCompany, policyNumber, insuranceExpiry,
     insuranceDoc, emailToken, verifiedEmail, emailTokenAt,
@@ -645,7 +644,7 @@ export function DriverSignUpScreen() {
         onPress: async () => {
           await clearDraft();
           setResumed(false);
-          if (!isUpgrade) { setFirstName(''); setLastName(''); setEmail(''); setPhone(''); setUniversity(null); }
+          if (!isUpgrade) { setFirstName(''); setLastName(''); setEmail(''); setUniversity(null); }
           setDob(''); setLicenseNumber(''); setLicenseState('TX'); setLicenseExpiry('');
           setLicenseFront(null); setLicenseBack(null);
           setVehicleYear(''); setVehicleMake(''); setVehicleModel(''); setVehicleColor(''); setLicensePlate(''); setSeats('4');
@@ -698,7 +697,6 @@ export function DriverSignUpScreen() {
     if (step === 1) {
       if (!firstName.trim() || !lastName.trim()) return 'Enter your first and last name.';
       if (!validateEduEmail(email)) return 'Use a valid .edu student email.';
-      if (!phone.trim()) return 'Enter your phone number.';
       if (!university?.name) return 'Select your university.';
       if (!dob) return 'Select your date of birth.';
       if (!isAdult(dob)) return 'You must be at least 18 years old to drive.';
@@ -811,7 +809,9 @@ export function DriverSignUpScreen() {
       form.append('firstName', firstName.trim());
       form.append('lastName', lastName.trim());
       form.append('email', email.trim());
-      form.append('phone', phone.trim());
+      // Phone isn't asked for here (it needs its own verification, done in settings);
+      // riders upgrading already have one on their profile, so pass that along.
+      if (phone.trim()) form.append('phone', phone.trim());
       form.append('carMake', vehicleMake.trim());
       form.append('carModel', vehicleModel.trim());
       form.append('carYear', vehicleYear.trim());
@@ -1163,7 +1163,6 @@ export function DriverSignUpScreen() {
               </View>
             </View>
             <Input label="SCHOOL EMAIL" value={email} onChangeText={isUpgrade ? undefined : setEmail} placeholder="yourname@school.edu" keyboardType="email-address" textContentType="emailAddress" autoCapitalize="none" editable={!isUpgrade} s={s} colors={colors} />
-            <Input label="PHONE NUMBER" value={phone} onChangeText={setPhone} placeholder="(000) 000-0000" keyboardType="phone-pad" textContentType="telephoneNumber" s={s} colors={colors} />
             <Field label="UNIVERSITY" s={s}>
               <View style={s.universityWrap}>
                 <UniversitySearch value={university?.name ?? ''} onSelect={setUniversity} placeholder="Search your university" allowCustom />
