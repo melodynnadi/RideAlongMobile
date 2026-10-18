@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,8 @@ import {
 import { Search, X, MapPin, Plus } from 'lucide-react-native';
 import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
+import { useAppTheme } from '@/hooks/ThemeContext';
+import type { AppColors } from '@/constants/theme';
 
 interface University {
   id: string;
@@ -72,6 +74,8 @@ export function UniversitySearch({
   placeholder = 'Search any U.S. university...',
   allowCustom = true,
 }: UniversitySearchProps) {
+  const { colors } = useAppTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [modalVisible, setModalVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [results, setResults] = useState<University[]>([]);
@@ -179,7 +183,7 @@ export function UniversitySearch({
       <View style={styles.resultContent}>
         <Text style={styles.universityName}>{item.name}</Text>
         <View style={styles.locationRow}>
-          <MapPin size={14} color="#6b7280" />
+          <MapPin size={14} color={colors.textSecondary} />
           <Text style={styles.universityLocation}>
             {item.city}, {item.state}
           </Text>
@@ -192,7 +196,7 @@ export function UniversitySearch({
     if (loading) {
       return (
         <View style={styles.emptyState}>
-          <ActivityIndicator size="large" color="#E05E1A" />
+          <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.emptyText}>Searching universities...</Text>
         </View>
       );
@@ -209,7 +213,7 @@ export function UniversitySearch({
     if (searchQuery.length >= 2 && results.length === 0) {
       return (
         <View style={styles.emptyState}>
-          <Search size={48} color="#9ca3af" />
+          <Search size={48} color={colors.textSecondary} />
           <Text style={styles.emptyText}>No universities found</Text>
           {allowCustom && (
             <Text style={styles.emptyHint}>
@@ -222,7 +226,7 @@ export function UniversitySearch({
 
     return (
       <View style={styles.emptyState}>
-        <Search size={48} color="#9ca3af" />
+        <Search size={48} color={colors.textSecondary} />
         <Text style={styles.emptyText}>Start typing to search</Text>
         <Text style={styles.emptyHint}>
           Search for any U.S. university or college
@@ -238,7 +242,7 @@ export function UniversitySearch({
         onPress={() => setModalVisible(true)}
         activeOpacity={0.7}
       >
-        <Search size={20} color="#6b7280" style={styles.searchIcon} />
+        <Search size={20} color={colors.textSecondary} style={styles.searchIcon} />
         <Text style={value ? styles.inputText : styles.inputPlaceholder}>
           {value || placeholder}
         </Text>
@@ -258,18 +262,19 @@ export function UniversitySearch({
               style={styles.closeButton}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
-              <X size={24} color="#111827" />
+              <X size={24} color={colors.textPrimary} />
             </TouchableOpacity>
           </View>
 
           <View style={styles.searchContainer}>
-            <Search size={20} color="#6b7280" style={styles.modalSearchIcon} />
+            <Search size={20} color={colors.textSecondary} style={styles.modalSearchIcon} />
             <TextInput
               style={styles.searchInput}
               value={searchQuery}
               onChangeText={handleSearchChange}
               placeholder={placeholder}
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={colors.textSecondary}
+              keyboardAppearance={colors.statusBar === 'light-content' ? 'dark' : 'light'}
               autoFocus
               autoCapitalize="words"
               autoCorrect={false}
@@ -282,7 +287,7 @@ export function UniversitySearch({
                 }}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
-                <X size={20} color="#6b7280" />
+                <X size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             )}
           </View>
@@ -301,7 +306,7 @@ export function UniversitySearch({
                   onPress={handleCustomEntry}
                   activeOpacity={0.7}
                 >
-                  <Plus size={20} color="#E05E1A" />
+                  <Plus size={20} color={colors.primary} />
                   <Text style={styles.customButtonText}>
                     {"My university isn't listed"}
                   </Text>
@@ -315,19 +320,21 @@ export function UniversitySearch({
   );
 }
 
-const styles = StyleSheet.create({
+// Built from the app theme so the field and the picker follow light/dark mode.
+const makeStyles = (colors: AppColors) => StyleSheet.create({
   container: {
     width: '100%',
   },
   inputTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.bgCard,
     borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    padding: 12,
-    minHeight: 48,
+    borderColor: colors.border,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    minHeight: 54,
   },
   searchIcon: {
     marginRight: 8,
@@ -335,16 +342,16 @@ const styles = StyleSheet.create({
   inputText: {
     flex: 1,
     fontSize: 16,
-    color: '#111827',
+    color: colors.textPrimary,
   },
   inputPlaceholder: {
     flex: 1,
     fontSize: 16,
-    color: '#9ca3af',
+    color: colors.textSecondary,
   },
   modal: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.bg,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -353,12 +360,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: colors.border,
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#111827',
+    color: colors.textPrimary,
   },
   closeButton: {
     padding: 4,
@@ -366,12 +373,12 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f9fafb',
-    borderRadius: 8,
+    backgroundColor: colors.bgCard,
+    borderRadius: 14,
     margin: 16,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: colors.border,
   },
   modalSearchIcon: {
     marginRight: 8,
@@ -379,20 +386,20 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 16,
-    paddingVertical: 12,
-    color: '#111827',
+    paddingVertical: 14,
+    color: colors.textPrimary,
   },
   resultsList: {
     padding: 16,
     flexGrow: 1,
   },
   resultItem: {
-    backgroundColor: '#ffffff',
-    borderRadius: 8,
+    backgroundColor: colors.bgCard,
+    borderRadius: 12,
     padding: 16,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
   },
   resultContent: {
     gap: 6,
@@ -400,7 +407,7 @@ const styles = StyleSheet.create({
   universityName: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#111827',
+    color: colors.textPrimary,
   },
   locationRow: {
     flexDirection: 'row',
@@ -409,7 +416,7 @@ const styles = StyleSheet.create({
   },
   universityLocation: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.textSecondary,
   },
   emptyState: {
     flex: 1,
@@ -421,27 +428,27 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#6b7280',
+    color: colors.textSecondary,
     marginTop: 16,
     textAlign: 'center',
   },
   emptyHint: {
     fontSize: 14,
-    color: '#9ca3af',
+    color: colors.textSecondary,
     marginTop: 8,
     textAlign: 'center',
   },
   errorText: {
     fontSize: 16,
-    color: '#dc2626',
+    color: colors.red,
     textAlign: 'center',
   },
   customButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fef3f2',
-    borderRadius: 8,
+    backgroundColor: colors.primaryDim,
+    borderRadius: 12,
     padding: 16,
     marginTop: 16,
     gap: 8,
@@ -449,6 +456,6 @@ const styles = StyleSheet.create({
   customButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#E05E1A',
+    color: colors.primary,
   },
 });
