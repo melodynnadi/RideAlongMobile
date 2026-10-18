@@ -903,7 +903,7 @@ const ROLE_OPTIONS: {
   recommended?: boolean;
 }[] = [
   { role: 'rider', title: 'I need a ride', subtitle: 'Find verified students heading your way.', icon: 'people-outline' },
-  { role: 'driver', title: "I'm driving", subtitle: 'Fill empty seats, split gas.', icon: 'car-outline' },
+  { role: 'driver', title: "I'm driving", subtitle: 'Fill empty seats, make money.', icon: 'car-outline' },
 ];
 
 export function SelectRoleScreen() {
