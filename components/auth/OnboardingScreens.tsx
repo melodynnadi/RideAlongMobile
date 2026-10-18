@@ -51,8 +51,8 @@ function useStyles(colors: AppColors) {
         // Welcome
         welcomeRoot: { flex: 1, backgroundColor: colors.bg },
         welcomeBody: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 24 },
-        welcomeTitle: { color: colors.textPrimary, fontSize: 40, lineHeight: 46, fontWeight: '800', letterSpacing: -1 },
-        welcomeAccent: { color: colors.primary, fontStyle: 'italic', fontWeight: '800' },
+        welcomeTitle: { color: colors.textPrimary, fontSize: 40, lineHeight: 46, fontWeight: '600', letterSpacing: -0.8 },
+        welcomeAccent: { color: colors.primary, fontStyle: 'italic', fontWeight: '600' },
         welcomeSubtitle: { color: colors.textSecondary, fontSize: 16, lineHeight: 23, marginTop: 12, marginBottom: 28 },
 
         // Shell
