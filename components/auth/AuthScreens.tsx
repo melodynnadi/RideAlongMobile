@@ -1011,6 +1011,30 @@ export function VerifyEmailScreen() {
       setDiscarding(false);
     }
   };
+  // Dev builds only: mark the test account verified via the local server
+  // (needs ALLOW_DEV_EMAIL_BYPASS=true there), then continue like a real verification.
+  const [skipping, setSkipping] = useState(false);
+  const devSkipVerification = async () => {
+    try {
+      setSkipping(true);
+      const idToken = await firebaseAuth.currentUser?.getIdToken();
+      const res = await fetch(`${getApiBaseUrl()}/api/dev/verify-email`, {
+        method: 'POST',
+        headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
+      });
+      if (!res.ok) {
+        throw new Error(res.status === 404
+          ? 'The local server has the bypass turned off. Set ALLOW_DEV_EMAIL_BYPASS=true in server/.env and restart it.'
+          : 'The server refused the request.');
+      }
+      await checkEmailVerification();
+    } catch (e: any) {
+      Alert.alert('Could not skip', e?.message || 'Try again.');
+    } finally {
+      setSkipping(false);
+    }
+  };
+
   const confirmWrongEmail = () => {
     Alert.alert(
       'Start over with a different email?',
@@ -1071,6 +1095,14 @@ export function VerifyEmailScreen() {
         loading={resending}
         disabled={cooldown > 0}
       />
+
+      {__DEV__ ? (
+        <SecondaryButton
+          label="Skip verification (dev only)"
+          onPress={() => void devSkipVerification()}
+          loading={skipping}
+        />
+      ) : null}
 
       <TouchableOpacity
         style={styles.openMailRow}
