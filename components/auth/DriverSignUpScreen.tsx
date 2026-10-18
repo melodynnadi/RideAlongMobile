@@ -259,6 +259,29 @@ function makeStyles(colors: AppColors) {
       fontSize: 15, color: colors.textPrimary,
     },
     universityWrap: { borderRadius: 12, overflow: 'hidden' },
+
+    // Email code
+    codeCard: {
+      borderRadius: 14, borderWidth: 1, borderColor: colors.primary,
+      backgroundColor: colors.primaryDim, padding: 16, marginBottom: 16, gap: 10,
+    },
+    codeCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    codeCardTitle: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
+    codeCardBody: { fontSize: 13, lineHeight: 19, color: colors.textSecondary },
+    codeCardEmail: { color: colors.textPrimary, fontWeight: '700' },
+    codeInput: {
+      height: 58, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+      backgroundColor: colors.bgCard, textAlign: 'center',
+      fontSize: 26, fontWeight: '700', letterSpacing: 10, color: colors.textPrimary,
+    },
+    codeActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    codeLink: { fontSize: 13, fontWeight: '700', color: colors.primary },
+    codeHint: { fontSize: 12, color: colors.textSecondary },
+    emailVerifiedRow: {
+      flexDirection: 'row', alignItems: 'center', gap: 8,
+      borderRadius: 12, backgroundColor: colors.greenDim, padding: 12, marginBottom: 16,
+    },
+    emailVerifiedText: { flex: 1, fontSize: 13, fontWeight: '600', color: colors.green },
     nameRow: { flexDirection: 'row', gap: 10 },
     nameField: { flex: 1 },
 
@@ -386,6 +409,29 @@ export function DriverSignUpScreen() {
   const [university, setUniversity] = useState<SignupUniversity | null>(null);
   const [dob, setDob] = useState('');
   const [dobPickerOpen, setDobPickerOpen] = useState(false);
+
+  // Step 1 – Email ownership (6-digit code). Riders upgrading already verified their email.
+  const [codeSent, setCodeSent] = useState(false);
+  const [code, setCode] = useState('');
+  const [codeBusy, setCodeBusy] = useState<'sending' | 'verifying' | null>(null);
+  const [resendIn, setResendIn] = useState(0);
+  const [emailToken, setEmailToken] = useState<string | null>(null);
+  const [verifiedEmail, setVerifiedEmail] = useState<string | null>(null);
+  const normalizedEmail = email.trim().toLowerCase();
+  const emailConfirmed = isUpgrade || (!!emailToken && verifiedEmail === normalizedEmail);
+
+  useEffect(() => {
+    if (!resendIn) return;
+    const t = setTimeout(() => setResendIn((n) => Math.max(0, n - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
+
+  // Editing the email after requesting a code starts the check over.
+  useEffect(() => {
+    if (isUpgrade) return;
+    setCodeSent(false);
+    setCode('');
+  }, [normalizedEmail, isUpgrade]);
 
   // Fix 1: Redirect guard — if this user already has a drivers doc, they should not
   // be in the signup flow at all. Check once on mount before rendering the form.
@@ -519,10 +565,59 @@ export function DriverSignUpScreen() {
     return '';
   };
 
+  const postEmailCode = async (path: 'send' | 'verify', body: Record<string, string>) => {
+    const res = await fetch(`${getApiBaseUrl()}/api/email-codes/${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ purpose: 'driver_application', email: normalizedEmail, ...body }),
+    });
+    const data = await res.json().catch(() => ({})) as { success?: boolean; message?: string; retryAfterSec?: number; verificationToken?: string; resendInSec?: number };
+    if (!res.ok || !data.success) {
+      if (data.retryAfterSec) setResendIn(data.retryAfterSec);
+      throw new Error(data.message || 'Something went wrong. Try again.');
+    }
+    return data;
+  };
+
+  const sendCode = async () => {
+    setCodeBusy('sending');
+    setError('');
+    try {
+      const data = await postEmailCode('send', {});
+      setCodeSent(true);
+      setCode('');
+      setResendIn(data.resendInSec ?? 45);
+    } catch (e: any) {
+      setError(e?.message || 'Could not send the code. Check your connection and try again.');
+    } finally {
+      setCodeBusy(null);
+    }
+  };
+
+  const verifyCode = async () => {
+    if (code.length !== 6) { setError('Enter the 6-digit code from your email.'); return; }
+    setCodeBusy('verifying');
+    setError('');
+    try {
+      const data = await postEmailCode('verify', { code });
+      setEmailToken(data.verificationToken ?? null);
+      setVerifiedEmail(normalizedEmail);
+      setStep(2);
+    } catch (e: any) {
+      setError(e?.message || 'Could not check the code. Try again.');
+    } finally {
+      setCodeBusy(null);
+    }
+  };
+
   const advance = () => {
     const err = validate();
     if (err) { setError(err); return; }
     setError('');
+    if (step === 1 && !emailConfirmed) {
+      void (codeSent ? verifyCode() : sendCode());
+      return;
+    }
     setStep((s) => s + 1);
   };
 
@@ -560,6 +655,7 @@ export function DriverSignUpScreen() {
       form.append('policyNumber', policyNumber.trim());
       form.append('insuranceExpiry', isoToMonthYear(insuranceExpiry));
       form.append('seats', seats);
+      if (emailToken) form.append('emailVerificationToken', emailToken);
       form.append('licenseFront', fileField(licenseFront!, `license_front.${(licenseFront!.mimeType ?? 'image/jpeg').split('/')[1]}`) as any);
       form.append('licenseBack', fileField(licenseBack!, `license_back.${(licenseBack!.mimeType ?? 'image/jpeg').split('/')[1]}`) as any);
       form.append('insurance', fileField(insuranceDoc!, `insurance.${(insuranceDoc!.mimeType ?? 'application/pdf').split('/')[1]}`) as any);
@@ -596,6 +692,15 @@ export function DriverSignUpScreen() {
       });
 
       const submitData = await submitRes.json() as { success?: boolean; applicationId?: string; error?: string };
+      if (submitRes.status === 403 && submitData.error === 'email_not_verified') {
+        // Verification lasts 2 hours; if it lapsed, send them back to confirm the email again.
+        setEmailToken(null);
+        setVerifiedEmail(null);
+        setCodeSent(false);
+        setProcessingStatus('idle');
+        setStep(1);
+        throw new Error('Your email confirmation expired. Tap Continue to get a new code — your other info is saved.');
+      }
       if (!submitRes.ok || !submitData.applicationId) {
         throw new Error(submitData.error ?? `Server error ${submitRes.status}`);
       }
@@ -880,6 +985,46 @@ export function DriverSignUpScreen() {
               </View>
             </Field>
             <DatePickerField label="DATE OF BIRTH" value={dob} onPress={() => setDobPickerOpen(true)} s={s} colors={colors} />
+
+            {!isUpgrade && emailConfirmed ? (
+              <View style={s.emailVerifiedRow}>
+                <Ionicons name="checkmark-circle" size={18} color={colors.green} />
+                <Text style={s.emailVerifiedText}>{normalizedEmail} confirmed</Text>
+              </View>
+            ) : null}
+
+            {!emailConfirmed && codeSent ? (
+              <View style={s.codeCard}>
+                <View style={s.codeCardHeader}>
+                  <Ionicons name="mail-unread-outline" size={20} color={colors.primary} />
+                  <Text style={s.codeCardTitle}>Check your school email</Text>
+                </View>
+                <Text style={s.codeCardBody}>
+                  We sent a 6-digit code to <Text style={s.codeCardEmail}>{normalizedEmail}</Text>. Enter it to continue.
+                </Text>
+                <TextInput
+                  style={s.codeInput}
+                  value={code}
+                  onChangeText={(t) => setCode(t.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="••••••"
+                  placeholderTextColor={colors.textSecondary}
+                  keyboardType="number-pad"
+                  textContentType="oneTimeCode"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  autoFocus
+                  accessibilityLabel="6-digit code"
+                />
+                <View style={s.codeActions}>
+                  <TouchableOpacity onPress={() => void sendCode()} disabled={resendIn > 0 || !!codeBusy} hitSlop={hitSlop}>
+                    <Text style={[s.codeLink, (resendIn > 0 || !!codeBusy) && { color: colors.textSecondary }]}>
+                      {resendIn > 0 ? `Resend code in ${resendIn}s` : 'Resend code'}
+                    </Text>
+                  </TouchableOpacity>
+                  <Text style={s.codeHint}>Check spam too</Text>
+                </View>
+              </View>
+            ) : null}
           </>
         )}
 
@@ -975,15 +1120,21 @@ export function DriverSignUpScreen() {
 
         {/* CTA */}
         <TouchableOpacity
-          style={[s.primaryBtn, loading && { opacity: 0.6 }]}
+          style={[s.primaryBtn, (loading || !!codeBusy) && { opacity: 0.6 }]}
           onPress={isLastStep ? () => void submit() : advance}
-          disabled={loading}
+          disabled={loading || !!codeBusy}
           accessibilityRole="button"
         >
-          {loading ? (
+          {loading || codeBusy ? (
             <ActivityIndicator color={colors.textInverse} />
           ) : (
-            <Text style={s.primaryBtnText}>{isLastStep ? 'Submit application →' : 'Continue →'}</Text>
+            <Text style={s.primaryBtnText}>
+              {isLastStep
+                ? 'Submit application →'
+                : step === 1 && !emailConfirmed
+                  ? codeSent ? 'Verify & continue →' : 'Send code →'
+                  : 'Continue →'}
+            </Text>
           )}
         </TouchableOpacity>
 
