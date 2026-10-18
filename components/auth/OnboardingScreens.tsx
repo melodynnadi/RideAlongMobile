@@ -532,7 +532,6 @@ export function CompleteProfileScreen() {
   const [classYear, setClassYear] = useState('');
   const [dob, setDob] = useState('');
   const [dobOpen, setDobOpen] = useState(false);
-  const [phone, setPhone] = useState('');
   const [pronouns, setPronouns] = useState('');
   const [savingAbout, setSavingAbout] = useState(false);
   const [aboutSaved, setAboutSaved] = useState(false);
@@ -576,7 +575,6 @@ export function CompleteProfileScreen() {
       if (!classYears.includes(y)) setOtherYearOpen(true);
     }
     if (p.dateOfBirth) setDob(String(p.dateOfBirth));
-    if (p.phone) setPhone(String(p.phone));
     if (p.pronouns) setPronouns(String(p.pronouns));
     const hasAbout = !!(p.major || p.classYear || p.dateOfBirth || p.pronouns);
     if (hasAbout) setAboutSaved(true);
@@ -639,7 +637,6 @@ export function CompleteProfileScreen() {
     if (major.trim()) update.major = major.trim();
     if (classYear) update.classYear = classYear;
     if (dob) update.dateOfBirth = dob;
-    if (phone.trim()) update.phone = phone.trim();
     if (pronouns) update.pronouns = pronouns;
 
     if (!uid || Object.keys(update).length === 0) {
@@ -875,22 +872,6 @@ export function CompleteProfileScreen() {
             <Text style={dob ? s.inputValue : s.inputPlaceholder}>{dob ? formatBirthday(dob) : 'Select your birthday'}</Text>
             <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
           </TouchableOpacity>
-        </View>
-
-        <View style={s.field}>
-          <Text style={s.fieldLabel}>PHONE</Text>
-          <View style={s.inputWrap}>
-            <Ionicons name="call-outline" size={19} color={colors.textSecondary} />
-            <TextInput
-              style={s.input}
-              value={phone}
-              onChangeText={setPhone}
-              placeholder="(512) 555-0123"
-              placeholderTextColor={colors.textSecondary}
-              keyboardType="phone-pad"
-              textContentType="telephoneNumber"
-            />
-          </View>
         </View>
 
         <View style={s.field}>
