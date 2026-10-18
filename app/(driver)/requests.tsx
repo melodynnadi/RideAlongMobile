@@ -92,17 +92,23 @@ function toDateField(v: any): Date | null {
   } catch { return null; }
 }
 
+/** Sets a "4:00 PM" / "16:00" style time on a date. 12-hour times need their AM/PM honored. */
+function applyTimeOfDay(dt: Date, time: string): void {
+  const m = time.trim().match(/^(\d{1,2}):(\d{2})\s*([ap]\.?m\.?)?/i);
+  if (!m) return;
+  let hours = parseInt(m[1], 10);
+  const minutes = parseInt(m[2], 10);
+  const meridiem = m[3]?.toLowerCase().replace(/\./g, '');
+  if (meridiem === 'pm' && hours < 12) hours += 12;
+  if (meridiem === 'am' && hours === 12) hours = 0;
+  dt.setHours(hours, minutes, 0, 0);
+}
+
 function getRideDateTime(r: any): Date | null {
   const raw = r?.requestedTime ?? r?.pickupTime ?? r?.date ?? (r?.dateString && `${r.dateString} ${r?.timeString || ''}`);
   const dt = toDateField(raw);
   if (dt && r?.time && typeof r.time === 'string') {
-    try {
-      const timeMatch = r.time.match(/^(\d{1,2}):(\d{2})/);
-      if (timeMatch) {
-        const [, hh, mm] = timeMatch;
-        dt.setHours(parseInt(hh, 10), parseInt(mm, 10), 0, 0);
-      }
-    } catch {}
+    try { applyTimeOfDay(dt, r.time); } catch {}
   }
   return dt;
 }
@@ -141,10 +147,11 @@ function isPendingFutureItem(item: InboxItem): boolean {
   if (INACTIVE_REQUEST_STATUSES.has(status)) return false;
   if (!ACTIVE_REQUEST_STATUSES.has(status)) return false;
 
-  const rideDate = item.date
-    ? parseLocalDateString(item.time ? `${item.date} ${item.time}` : item.date) || parseLocalDateString(item.date)
-    : null;
+  const rideDate = item.date ? parseLocalDateString(item.date) : null;
   if (!rideDate) return false;
+  if (item.time) {
+    try { applyTimeOfDay(rideDate, item.time); } catch {}
+  }
   return rideDate.getTime() >= Date.now() - 5 * 60 * 1000;
 }
 
