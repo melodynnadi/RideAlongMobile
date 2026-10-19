@@ -2,7 +2,7 @@ module.exports = ({ config }) => ({
   expo: {
     name: "RideAlong",
     slug: "RideAlongMobile",
-    version: "1.0.2",
+    version: "1.0.3",
     orientation: "portrait",
     icon: "./assets/ridealonglogo.png",
     scheme: "ridealong",

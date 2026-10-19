@@ -39,8 +39,8 @@ describe('loadEarningsData', () => {
       getAccountStatusFn: getAccountStatusFn as any,
     });
 
-    // The user doc is read by uid to discover the stored Stripe account.
-    expect(docCalls).toEqual([{ path: ['users', 'driver-1'] }]);
+    // The driver doc is read by uid to discover the stored Stripe account.
+    expect(docCalls).toEqual([{ path: ['drivers', 'driver-1'] }]);
     // Summary + status are fetched by uid.
     expect(summaryArgs).toEqual(['driver-1']);
     expect(statusArgs).toEqual(['driver-1']);
