@@ -20,6 +20,7 @@ import { firebaseAuth, firestore } from '@/constants/services';
 import { settingsService, type ThemeMode } from '@/src/services/settingsService';
 import { AppearanceSelector } from '@/components/ui/AppearanceSelector';
 import { notificationService } from '@/src/services/notificationService';
+import { ensurePushRegistered } from '@/utils/registerPushToken';
 import { useVerificationStore } from '@/stores/verificationStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useAppTheme } from '@/hooks/ThemeContext';
@@ -73,6 +74,9 @@ export default function SettingsScreen() {
         }, { merge: true });
       }
       await notificationService.updateNotificationHandler();
+      // Turning it on must also register this phone, or the switch shows
+      // "on" while nothing can reach the device.
+      if (value && currentUser) await ensurePushRegistered(currentUser.uid, 'driver');
     } catch {
       setPushEnabled(previous);
       Alert.alert('Settings not saved', 'We could not update your notification setting. Please try again.');

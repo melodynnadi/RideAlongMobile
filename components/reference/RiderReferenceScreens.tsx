@@ -9,6 +9,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { firebaseAuth, firestore, GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import { PaymentModal } from '@/components/PaymentModal';
 import { PriceOfferModal } from '@/components/PriceOfferModal';
+import type { CheckoutPricing } from '@/services/promoCheckout';
+import { declineRideOffer, formatMoney, postingOfferLimits } from '@/services/offers';
 
 /** A driver's offer on one of the rider's requests, as shown on the rider's ride card. */
 type OfferInfo = {
@@ -18,9 +20,9 @@ type OfferInfo = {
   offerCount: number;
   status?: string;
 };
-import { declineRideOffer, formatMoney, postingOfferLimits } from '@/services/offers';
 import { RideFiltersModal } from '@/components/RideFiltersModal';
 import { useProfileCompleteness, ProfileCompletionItem } from '@/hooks/useProfileCompleteness';
+import { useHomeOffers } from '@/hooks/useHomeOffers';
 import { applyFiltersToRide, getDefaultFilters, hasActiveFilters, type RideFilterOptions } from '@/utils/rideFilters';
 import { addDoc, collection, doc, getDoc, getDocs, limit as fsLimit, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
 import { StatusBar } from 'expo-status-bar';
@@ -504,6 +506,9 @@ export function RiderHomeReference() {
   const [promotionIndex, setPromotionIndex] = useState(0);
   const promotionScrollRef = useRef<ScrollView>(null);
   const { items: profileTasks, loading: profileTasksLoading } = useProfileCompleteness('rider');
+  // Checkout offers first, then profile to-dos, in one carousel.
+  const homeOffers = useHomeOffers();
+  const homeCards = useMemo(() => [...homeOffers, ...profileTasks], [homeOffers, profileTasks]);
   const promotionCardWidth = Math.min(windowWidth, 430) - 40;
   const promotionSnapInterval = promotionCardWidth;
   const [monthlyStats, setMonthlyStats] = useState<{ rides: number; spent: number; rating: number | null; loaded: boolean }>({ rides: 0, spent: 0, rating: null, loaded: false });
@@ -705,30 +710,16 @@ export function RiderHomeReference() {
     });
   }, [uid]);
   useEffect(() => {
-    if (profileTasks.length < 2) return;
+    if (homeCards.length < 2) return;
     const interval = setInterval(() => {
       setPromotionIndex((current) => {
-        const next = (current + 1) % profileTasks.length;
+        const next = (current + 1) % homeCards.length;
         promotionScrollRef.current?.scrollTo({ x: next * promotionSnapInterval, animated: true });
         return next;
       });
     }, 5000);
     return () => clearInterval(interval);
-  }, [profileTasks.length, promotionSnapInterval]);
-
-  useEffect(() => {
-    if (from.trim()) return;
-    let cancelled = false;
-
-    (async () => {
-      const current = await getCurrentLocationAddressAsync();
-      if (!cancelled && current) setFrom(current);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [from]);
+  }, [homeCards.length, promotionSnapInterval]);
 
   // The top card should always be whichever ride is happening soonest — an
   // in-progress ride still wins outright since it needs immediate attention —
@@ -948,9 +939,9 @@ export function RiderHomeReference() {
           </View>
         )}
 
-        {profileTasksLoading && profileTasks.length === 0 ? (
+        {profileTasksLoading && homeCards.length === 0 ? (
           <View style={styles.promotionLoading}><ActivityIndicator color={colors.primary} /></View>
-        ) : profileTasks.length > 0 ? (
+        ) : homeCards.length > 0 ? (
           <>
           <ScrollView
             ref={promotionScrollRef}
@@ -963,10 +954,10 @@ export function RiderHomeReference() {
             disableIntervalMomentum
             onMomentumScrollEnd={(event) => {
               const next = Math.round(event.nativeEvent.contentOffset.x / promotionSnapInterval);
-              setPromotionIndex(Math.max(0, Math.min(next, profileTasks.length - 1)));
+              setPromotionIndex(Math.max(0, Math.min(next, homeCards.length - 1)));
             }}
           >
-            {profileTasks.map((item, index) => (
+            {homeCards.map((item, index) => (
               <ProfileTaskCard
                 key={item.id}
                 item={item}
@@ -976,9 +967,9 @@ export function RiderHomeReference() {
               />
             ))}
           </ScrollView>
-          {profileTasks.length > 1 ? (
+          {homeCards.length > 1 ? (
             <View style={styles.promotionDots}>
-              {profileTasks.map((item, index) => (
+              {homeCards.map((item, index) => (
                 <View key={item.id} style={[styles.promotionDot, index === promotionIndex && styles.promotionDotActive]} />
               ))}
             </View>
@@ -1745,6 +1736,7 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
         rideId={offerInfo?.offerId || request.id}
         driverId={offerInfo?.driverId || null}
         baseFare={offerInfo?.offerPrice ?? price}
+        booking={offerInfo?.offerId ? { type: 'ride_offer', offerId: offerInfo.offerId } : undefined}
         onPaymentSuccess={handleOfferPaymentSuccess}
       />
 
@@ -2273,7 +2265,7 @@ export function RiderRequestReference() {
     }
   };
 
-  const handleRequestPaymentSuccess = async (paymentIntentId: string) => {
+  const handleRequestPaymentSuccess = async (paymentIntentId: string, pricing?: CheckoutPricing | null) => {
     setRequestPaymentVisible(false);
     const data = pendingRequestDataRef.current;
     if (!data) return;
@@ -2281,6 +2273,12 @@ export function RiderRequestReference() {
     try {
       await addDoc(collection(firestore, 'rideRequests'), {
         ...data,
+        // What was actually authorized (server pricing; includes any promo on the RideAlong fee)
+        ...(pricing && {
+          platformFee: pricing.platformFeeAfterDiscount,
+          paymentAmount: pricing.total,
+          ...(pricing.discountCents > 0 && { promoDiscount: pricing.discount, platformFeeBeforeDiscount: pricing.platformFee }),
+        }),
         paymentIntentId,
         paymentStatus: 'authorized',
         status: 'pending',
@@ -2389,6 +2387,7 @@ export function RiderRequestReference() {
         rideId={`req_${firebaseAuth.currentUser?.uid ?? 'anon'}_${Date.now()}`}
         driverId={null}
         baseFare={pendingRequestDataRef.current?.resolvedPrice ?? 0}
+        booking={pendingRequestDataRef.current?.resolvedPrice ? { type: 'new_request', fare: pendingRequestDataRef.current.resolvedPrice } : undefined}
         onPaymentSuccess={handleRequestPaymentSuccess}
       />
     </PhoneScreen>
@@ -3723,8 +3722,10 @@ export function RiderDetailReference() {
         rideId={ride.id}
         driverId={ride.driverId || null}
         baseFare={bookingPrice}
+        // A rider's own price offer is priced from offeredFare (the server checks it against the listing).
+        booking={{ type: 'ride_posting', ridePostingId: ride.id, ...(offeredPrice != null ? { offeredFare: offeredPrice } : {}) }}
         confirmLabel={offeredPrice != null ? 'Send price offer' : undefined}
-        onPaymentSuccess={async (paymentIntentId: string) => {
+        onPaymentSuccess={async (paymentIntentId: string, pricing) => {
           setPaymentVisible(false);
           const riderId = firebaseAuth.currentUser?.uid;
           const user = firebaseAuth.currentUser;
@@ -3785,10 +3786,16 @@ export function RiderDetailReference() {
               date,
               time,
               passengers: 1,
-              contributionAmount: bookingPrice,
-              price: bookingPrice,
+              contributionAmount: pricing ? pricing.baseFare : bookingPrice,
+              price: pricing ? pricing.baseFare : bookingPrice,
               // A price offer: keep the listed price so the driver sees what they're comparing against.
               ...(offeredPrice != null && Math.abs(offeredPrice - ride.price) >= 0.01 ? { postedPrice: ride.price } : {}),
+              // What was actually authorized (server pricing; includes any promo on the RideAlong fee)
+              ...(pricing && {
+                platformFee: pricing.platformFeeAfterDiscount,
+                paymentAmount: pricing.total,
+                ...(pricing.discountCents > 0 && { promoDiscount: pricing.discount, platformFeeBeforeDiscount: pricing.platformFee }),
+              }),
               paymentIntentId,
               paymentStatus: 'authorized',
               status: 'pending',

@@ -47,6 +47,7 @@ import { useAppTheme } from '@/hooks/ThemeContext';
 import type { AppColors } from '@/constants/theme';
 import { submitRating } from '@/src/services/functions';
 import { notificationService } from '@/src/services/notificationService';
+import { ensurePushRegistered } from '@/utils/registerPushToken';
 import { settingsService, type ThemeMode } from '@/src/services/settingsService';
 import { AppearanceSelector } from '@/components/ui/AppearanceSelector';
 import { hasUserRatedRide } from '@/src/services/ratings';
@@ -945,6 +946,7 @@ function RiderRequestsReferenceInner() {
           rideId={acceptingOffer.request.id}
           driverId={acceptingOffer.offer.driverId}
           baseFare={acceptingOffer.offer.offerPrice ?? acceptingOffer.request.price}
+          booking={{ type: 'ride_offer', offerId: acceptingOffer.offer.offerId }}
           skipDuplicateCheck
           confirmLabel="Accept offer"
           onPaymentSuccess={handleOfferPaymentSuccess}
@@ -2472,6 +2474,8 @@ function RiderSettingsReferenceInner() {
       const currentUser = firebaseAuth.currentUser;
       if (currentUser) await setDoc(doc(firestore, 'riders', currentUser.uid), { pushNotificationsEnabled: value, settings: { pushNotificationsEnabled: value }, updatedAt: serverTimestamp() }, { merge: true });
       await notificationService.updateNotificationHandler();
+      // Turning it on must also register this phone.
+      if (value && currentUser) await ensurePushRegistered(currentUser.uid, 'rider');
     } catch {
       setPushEnabled(previous);
       Alert.alert('Settings not saved', 'We could not update your notification setting. Please try again.');

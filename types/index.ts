@@ -146,7 +146,7 @@ export interface PromotionConditions {
 export type PromotionTarget = 'riders' | 'drivers' | 'both';
 export type PromotionPlatform = 'web' | 'mobile' | 'both';
 export type PromotionType = 'bonus' | 'referral' | 'discount' | 'reward' | 'informational';
-export type PromotionValueType = 'fixed_amount' | 'percentage' | 'multiplier';
+export type PromotionValueType = 'fixed_amount' | 'fixed' | 'percentage' | 'multiplier';
 export type PromotionStatus = 'active' | 'inactive' | 'expired' | 'scheduled';
 
 export interface Promotion {
@@ -168,6 +168,17 @@ export interface Promotion {
   usageLimit?: number; // Per user
   totalUsageLimit?: number; // Global
   currentUsageCount?: number;
+
+  // Checkout-redeemable discounts. `appliesTo` is the RideAlong platform fee
+  // only, or the whole ride (fare + fee, funded by RideAlong). The driver is
+  // always paid their full fare. Eligibility, limits and the discount amount
+  // are enforced by the server at checkout.
+  redeemable?: boolean;
+  appliesTo?: 'platform_fee' | 'ride' | null;
+  listed?: boolean; // false = code-only, not offered at checkout
+  firstPaidRideOnly?: boolean;
+  maxDiscount?: number | null; // dollars
+  minOrderValue?: number | null; // minimum base fare, dollars
   
   // Dates
   startDate: string; // ISO 8601 format
@@ -201,7 +212,9 @@ export interface Promotion {
   createdBy?: string;
 }
 
-// A promotion a user has claimed (mobile-side record in `claimedPromotions`)
+// A promotion a user has claimed (mobile-side record in `claimedPromotions`).
+// Claiming only saves an offer; using it at checkout is tracked server-side
+// in `promotionRedemptions`.
 export interface ClaimedPromotion {
   id: string;
   userId: string;

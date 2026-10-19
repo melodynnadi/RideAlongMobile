@@ -25,6 +25,7 @@ import { ReportIssueModal } from '@/components/ReportIssueModal';
 import { Button } from '@/components/ui/Button';
 import { computeFilteredAverageRating, hasUserRatedRide } from '@/src/services/ratings';
 import { useProfileCompleteness, ProfileCompletionItem } from '@/hooks/useProfileCompleteness';
+import { useDriverBonuses, DriverBonus } from '@/hooks/useDriverBonuses';
 import { StudentVerificationBanner } from '@/components/StudentVerificationBanner';
 import { useVerificationStore } from '@/stores/verificationStore';
 import { AddressLink } from '@/components/AddressLink';
@@ -253,6 +254,65 @@ function DriverProfileTaskCard({
         </View>
         <View style={s.promoIconSmall}>
           <Ionicons name="arrow-forward" size={22} color={secondary ? colors.textPrimary : colors.primary} />
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function bonusCopy(b: DriverBonus) {
+  const reward = `$${b.rewardAmount.toFixed(b.rewardAmount % 1 ? 2 : 0)}`;
+  const when = b.window === 'weekly' ? ' this week' : b.window === 'rolling' ? '' : '';
+  const ends = b.periodEndsAt
+    ? ` · ends ${new Date(b.periodEndsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+    : '';
+  switch (b.status) {
+    case 'not_joined':
+      return { description: `Complete ${b.rideTarget} rides${when} to earn ${reward}. Join to start counting.`, cta: 'Join' };
+    case 'earned':
+      return { description: `You earned ${reward}! It's paid after a short review.`, cta: 'View earnings' };
+    case 'budget_reached':
+      return { description: 'This bonus has been fully claimed — thanks for driving!', cta: 'Find riders' };
+    default:
+      return { description: `${b.count} of ${b.rideTarget} rides done · earn ${reward}${b.rollingNotStarted ? '' : ends}`, cta: 'Find riders' };
+  }
+}
+
+function DriverBonusCard({ bonus, onPress, busy, width }: { bonus: DriverBonus; onPress: () => void; busy: boolean; width: number }) {
+  const { colors } = useAppTheme();
+  const s = useDriverHomeStyles();
+  const { description, cta } = bonusCopy(bonus);
+  const pct = bonus.status === 'earned' ? 1 : Math.min(1, bonus.count / Math.max(1, bonus.rideTarget));
+
+  return (
+    <TouchableOpacity
+      style={[s.uberPromoCard, { width }]}
+      onPress={onPress}
+      disabled={busy}
+      activeOpacity={0.88}
+      accessibilityRole="button"
+      accessibilityLabel={`${bonus.title}. ${description} ${cta}`}
+    >
+      <View style={s.uberPromoCopy}>
+        <Text style={s.uberPromoTitle} numberOfLines={2}>{bonus.title}</Text>
+        <Text style={s.uberPromoDescription} numberOfLines={2}>{description}</Text>
+        {bonus.status !== 'not_joined' ? (
+          <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.border, marginTop: 8, overflow: 'hidden' }}>
+            <View style={{ width: `${pct * 100}%`, height: '100%', backgroundColor: bonus.status === 'earned' ? colors.green : colors.primary }} />
+          </View>
+        ) : null}
+        <View style={s.uberPromoCta}>
+          {busy ? <ActivityIndicator size="small" color={colors.textInverse} /> : <Text style={s.uberPromoCtaText}>{cta}</Text>}
+        </View>
+      </View>
+      <View style={s.uberPromoVisual}>
+        <View style={[s.promoBubble, s.promoBubbleTop]} />
+        <View style={[s.promoBubble, s.promoBubbleBottom]} />
+        <View style={s.promoIconLarge}>
+          <Ionicons name={bonus.status === 'earned' ? 'trophy-outline' : 'cash-outline'} size={40} color="#FFFFFF" />
+        </View>
+        <View style={s.promoIconSmall}>
+          <Ionicons name="arrow-forward" size={22} color={colors.primary} />
         </View>
       </View>
     </TouchableOpacity>
@@ -1035,6 +1095,20 @@ export default function HomeScreen() {
 
   // Profile completeness state (replaces backend-driven promotions)
   const { items: profileTasks, loading: profileTasksLoading } = useProfileCompleteness('driver');
+  // Driver bonus campaigns come first in the same carousel.
+  const { bonuses: driverBonuses, join: joinBonus, joining: joiningBonus } = useDriverBonuses();
+  const homeCardCount = driverBonuses.length + profileTasks.length;
+  const onBonusPress = useCallback(async (b: DriverBonus) => {
+    if (b.status === 'not_joined') {
+      try {
+        await joinBonus(b.id);
+      } catch (e: any) {
+        Alert.alert('Couldn’t join', e?.message || 'Please try again.');
+      }
+      return;
+    }
+    router.push((b.status === 'earned' ? '/(driver)/earnings' : '/(driver)/requests') as any);
+  }, [joinBonus]);
   // Guard to auto-capture payments once per posting when all riders are completed
   const captureSentRef = useRef<Record<string, boolean>>({});
 
@@ -3540,13 +3614,13 @@ export default function HomeScreen() {
     return () => { cancelled = true; };
   }, [modalVisible, selectedRide]);
 
-  // Auto-scroll profile tasks every 5 seconds
+  // Auto-scroll bonus + profile task cards every 5 seconds
   useEffect(() => {
-    if (!profileTasks || profileTasks.length <= 1) return;
+    if (homeCardCount <= 1) return;
 
     const interval = setInterval(() => {
       setCurrentPromotionIndex((prevIndex) => {
-        const nextIndex = (prevIndex + 1) % profileTasks.length;
+        const nextIndex = (prevIndex + 1) % homeCardCount;
         const cardWidth = Math.min(Dimensions.get('window').width, 430) - 32;
         const scrollPosition = nextIndex * cardWidth;
 
@@ -3563,7 +3637,7 @@ export default function HomeScreen() {
     }, 5000); // 5 seconds
 
     return () => clearInterval(interval);
-  }, [profileTasks]);
+  }, [homeCardCount]);
 
   // ── Pulse animations ────────────────────────────────────────────────────
   const pulse1 = useRef(new Animated.Value(0)).current;
@@ -3932,9 +4006,9 @@ export default function HomeScreen() {
           {/* ══════════════════════════════════════════════════════════
               PROFILE COMPLETENESS
           ══════════════════════════════════════════════════════════ */}
-          {(profileTasksLoading || profileTasks.length > 0) && (
+          {(profileTasksLoading || homeCardCount > 0) && (
             <View style={s.section}>
-              {profileTasksLoading && profileTasks.length === 0 ? (
+              {profileTasksLoading && homeCardCount === 0 ? (
                 <View style={s.promotionLoading}><ActivityIndicator color={colors.primary} /></View>
               ) : (
                 <>
@@ -3948,10 +4022,19 @@ export default function HomeScreen() {
                     disableIntervalMomentum
                     onScroll={(e) => {
                       const idx = Math.round(e.nativeEvent.contentOffset.x / promotionSnapInterval);
-                      setCurrentPromotionIndex(Math.max(0, Math.min(idx, profileTasks.length - 1)));
+                      setCurrentPromotionIndex(Math.max(0, Math.min(idx, homeCardCount - 1)));
                     }}
                     scrollEventThrottle={16}
                   >
+                    {driverBonuses.map((bonus) => (
+                      <DriverBonusCard
+                        key={`bonus-${bonus.id}`}
+                        bonus={bonus}
+                        busy={joiningBonus === bonus.id}
+                        onPress={() => void onBonusPress(bonus)}
+                        width={promotionCardWidth}
+                      />
+                    ))}
                     {profileTasks.map((item, index) => (
                       <DriverProfileTaskCard
                         key={item.id}
@@ -3962,9 +4045,9 @@ export default function HomeScreen() {
                       />
                     ))}
                   </ScrollView>
-                  {profileTasks.length > 1 && (
+                  {homeCardCount > 1 && (
                     <View style={s.dotsRow}>
-                      {profileTasks.map((_, i) => (
+                      {Array.from({ length: homeCardCount }).map((_, i) => (
                         <View key={i} style={[s.dot, i === currentPromotionIndex && s.dotActive]} />
                       ))}
                     </View>

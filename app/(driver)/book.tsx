@@ -1214,8 +1214,19 @@ export default function BookScreen() {
       const results = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
   const r = results?.[0];
   const address = r ? [r.name, r.street, r.city, r.region].filter(Boolean).join(', ') : 'Current location';
-  setPickupLocation(address);
-  setPickupCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+  const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+  if (silent) {
+    // Automatic prefill: don't overwrite anything the driver typed while
+    // the location lookup was running.
+    setPickupLocation((prev) => {
+      if (prev.trim()) return prev;
+      setPickupCoords(coords);
+      return address;
+    });
+  } else {
+    setPickupLocation(address);
+    setPickupCoords(coords);
+  }
     } catch (e) {
       if (!silent) {
         Alert.alert('Location error', 'Could not get your location. Please try again.');
@@ -1225,10 +1236,17 @@ export default function BookScreen() {
     }
   };
 
+  // Prefill the pickup with the current location once, when the screen opens.
+  // Running on every change refilled it whenever the driver cleared the field
+  // to type a different pickup.
+  const triedAutoLocationRef = useRef(false);
   useEffect(() => {
+    if (triedAutoLocationRef.current) return;
+    triedAutoLocationRef.current = true;
     if (pickupLocation.trim()) return;
     applyCurrentLocation({ silent: true });
-  }, [pickupLocation]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

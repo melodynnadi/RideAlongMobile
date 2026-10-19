@@ -85,7 +85,9 @@ export const PromotionDetailsModal: React.FC<PromotionDetailsModalProps> = ({
     try {
       const message = promotion.type === 'informational'
         ? `${promotion.title}\n\n${promotion.description}\n\nCheck out RideAlong for more info!`
-        : `Check out this offer on RideAlong: ${promotion.title}\n\nGet ${displayValue} off your next ride!\n\n${promotion.description}`;
+        : promotion.redeemable
+          ? `Check out this offer on RideAlong: ${promotion.title}\n\n${displayValue} on your next ride.\n\n${promotion.description}`
+          : `Check out this offer on RideAlong: ${promotion.title}\n\nGet ${displayValue} off your next ride!\n\n${promotion.description}`;
       await Share.share({ message, title: promotion.title });
     } catch (error) {
       console.error('Error sharing promotion:', error);
@@ -153,9 +155,11 @@ export const PromotionDetailsModal: React.FC<PromotionDetailsModalProps> = ({
         {promotion.type !== 'informational' && (
           <View style={styles.valueBadge}>
             <Text style={styles.valueBadgeText}>
-              {promotion.valueType === 'percentage'
-                ? `+${promotion.value}% BONUS`
-                : `+${getDisplayValueOnly()} BONUS`}
+              {promotion.redeemable
+                ? (promotion.appliesTo === 'ride' ? 'OFF YOUR RIDE' : 'OFF YOUR RIDEALONG FEE')
+                : promotion.valueType === 'percentage'
+                  ? `+${promotion.value}% BONUS`
+                  : `+${getDisplayValueOnly()} BONUS`}
             </Text>
           </View>
         )}
@@ -185,6 +189,15 @@ export const PromotionDetailsModal: React.FC<PromotionDetailsModalProps> = ({
         <View style={styles.aboutSection}>
           <Text style={styles.sectionTitle}>About this offer</Text>
           <Text style={styles.descriptionText}>{promotion.description}</Text>
+          {promotion.redeemable && (
+            <Text style={[styles.descriptionText, { marginTop: 10 }]}>
+              {promotion.appliesTo === 'ride'
+                ? 'Applies to your ride at checkout — your driver still receives their full fare.'
+                : 'Applies to the RideAlong platform fee at checkout — your driver still receives their full fare.'}
+              {' Select it when you pay. One offer per booking.'}
+              {promotion.firstPaidRideOnly ? ' Valid on your first paid ride only.' : ''}
+            </Text>
+          )}
         </View>
 
         {promotion.type !== 'informational' && (
@@ -201,7 +214,7 @@ export const PromotionDetailsModal: React.FC<PromotionDetailsModalProps> = ({
           </View>
         )}
 
-        {(p.minOrderAmount || p.maxDiscount || p.code) && (
+        {(p.minOrderAmount || p.minOrderValue || p.maxDiscount || p.code) && (
           <View style={styles.additionalDetails}>
             {p.code && (
               <View style={styles.detailItem}>
@@ -209,10 +222,10 @@ export const PromotionDetailsModal: React.FC<PromotionDetailsModalProps> = ({
                 <Text style={styles.detailValue}>{p.code}</Text>
               </View>
             )}
-            {p.minOrderAmount && (
+            {(p.minOrderAmount || p.minOrderValue) && (
               <View style={styles.detailItem}>
-                <Text style={styles.detailLabel}>Minimum Order</Text>
-                <Text style={styles.detailValue}>${p.minOrderAmount}</Text>
+                <Text style={styles.detailLabel}>{promotion.redeemable ? 'Minimum Fare' : 'Minimum Order'}</Text>
+                <Text style={styles.detailValue}>${p.minOrderValue || p.minOrderAmount}</Text>
               </View>
             )}
             {p.maxDiscount && (
@@ -231,7 +244,7 @@ export const PromotionDetailsModal: React.FC<PromotionDetailsModalProps> = ({
           isClaimed ? (
             <View style={styles.claimedContainer}>
               <Ionicons name="checkmark-circle" size={24} color="#10B981" />
-              <Text style={styles.claimedText}>Already Claimed</Text>
+              <Text style={styles.claimedText}>{promotion.redeemable ? 'Saved — select it at checkout' : 'Already Claimed'}</Text>
             </View>
           ) : (
             <TouchableOpacity

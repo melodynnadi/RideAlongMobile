@@ -1,12 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Modal, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform } from 'react-native';
-import { Check, CreditCard, Plus, ShieldCheck, Smartphone, X } from 'lucide-react-native';
+import { View, Text, Modal, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform, TextInput } from 'react-native';
+import { Check, CreditCard, Plus, ShieldCheck, Smartphone, Tag, X } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { computeTotals } from '@/utils/fees';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs, addDoc, Timestamp } from 'firebase/firestore';
 import { useStripe, isPlatformPaySupported, PlatformPay } from '@/components/platform/stripe';
 import { listPaymentMethods } from '@/services/payments';
+import { promotionService } from '@/services/promotions';
+import {
+  CheckoutBooking, CheckoutPricing, CheckoutQuote, PromoSelection,
+  PromoCheckoutUnavailableError, loadOffersForRider, newCheckoutId, quoteCheckout,
+} from '@/services/promoCheckout';
+import { Promotion } from '@/types';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { AddCardModal } from '@/components/AddCardModal';
 
@@ -16,19 +22,26 @@ export type PaymentModalProps = {
   rideId: string;
   driverId: string | null;
   baseFare: number;
-  onPaymentSuccess?: (paymentIntentId: string) => Promise<void>;
-  /** Button text before the total, e.g. "Send counter-offer". Defaults to "Confirm and request ride". */
+  /**
+   * What is being booked. When set, the server prices the booking from its
+   * own records and the rider can apply one promotion. Without it the modal
+   * keeps the legacy client-priced flow.
+   */
+  booking?: CheckoutBooking;
+  /** `pricing` is the server's breakdown of what was actually authorized (null on the legacy flow). */
+  onPaymentSuccess?: (paymentIntentId: string, pricing?: CheckoutPricing | null) => Promise<void>;
+  /** Button text before the total, e.g. "Send price offer". Defaults to "Confirm and request ride". */
   confirmLabel?: string;
   /** Booking a posting at a different price than listed: the listed price, saved on the request. */
   postedPrice?: number | null;
   /**
    * Skip the "already requested this ride" check. Only for re-confirming payment on a
-   * booking the rider already has (e.g. accepting a driver's counter-offer).
+   * booking the rider already has.
    */
   skipDuplicateCheck?: boolean;
 };
 
-export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onPaymentSuccess, confirmLabel, postedPrice, skipDuplicateCheck }: PaymentModalProps) {
+export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, booking, onPaymentSuccess, confirmLabel, postedPrice, skipDuplicateCheck }: PaymentModalProps) {
   const { colors } = useAppTheme();
   const riderId = firebaseAuth.currentUser?.uid ?? null;
   const [creating, setCreating] = useState(false);
@@ -42,6 +55,15 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
   const [showAddCard, setShowAddCard] = useState(false);
   const { confirmPayment, confirmPlatformPayPayment } = useStripe();
   const loadKeyRef = useRef<string | null>(null);
+
+  // Server pricing + promotions (only when a booking is provided)
+  const [quote, setQuote] = useState<CheckoutQuote | null>(null);
+  const [quoteUnavailable, setQuoteUnavailable] = useState(false);
+  const [quoting, setQuoting] = useState(false);
+  const [promoInput, setPromoInput] = useState('');
+  const [promoSelection, setPromoSelection] = useState<PromoSelection | null>(null);
+  const [promoMessage, setPromoMessage] = useState<string | null>(null);
+  const [savedOffers, setSavedOffers] = useState<Promotion[]>([]);
 
   const styles = useMemo(() => StyleSheet.create({
     modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.48)', justifyContent: 'flex-end' },
@@ -95,6 +117,20 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
     addCardRowText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
     securityNote: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 14 },
     securityText: { color: colors.green, fontSize: 12, fontWeight: '600' },
+    discountValue: { color: colors.green, fontSize: 13, fontWeight: '700' },
+    promoCaption: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, fontWeight: '500', marginBottom: 10 },
+    promoInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    promoInput: { flex: 1, minHeight: 44, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, color: colors.textPrimary, fontSize: 14, fontWeight: '600', backgroundColor: colors.bg },
+    promoApplyBtn: { minHeight: 44, borderRadius: 12, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary },
+    promoApplyText: { color: colors.textInverse, fontSize: 13, fontWeight: '700' },
+    promoChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 10 },
+    promoChip: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 7, backgroundColor: colors.bg },
+    promoChipText: { color: colors.textPrimary, fontSize: 12, fontWeight: '600' },
+    promoApplied: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: colors.green, backgroundColor: colors.greenDim, borderRadius: 12, padding: 11 },
+    promoAppliedText: { flex: 1, color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
+    promoAppliedMeta: { color: colors.textSecondary, fontSize: 11, fontWeight: '500', marginTop: 1 },
+    promoRemove: { color: colors.primary, fontSize: 13, fontWeight: '700' },
+    promoMessage: { color: colors.red, fontSize: 12, lineHeight: 17, fontWeight: '600', marginTop: 8 },
     errorBanner: { backgroundColor: colors.redDim, borderWidth: 1, borderColor: colors.redBorder, borderRadius: 14, padding: 12 },
     errorBannerText: { color: colors.red, fontSize: 12, lineHeight: 18, fontWeight: '600' },
     formActions: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: Platform.OS === 'ios' ? 30 : 20, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.bg },
@@ -114,7 +150,85 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
     }
   }, [visible]);
 
-  const totals = useMemo(() => computeTotals(baseFare), [baseFare]);
+  // What the rider sees and pays. With a booking, the server's quote is the
+  // source of truth; local math is only the legacy path and a fallback while
+  // the quote loads or when the server doesn't support quotes yet.
+  const localTotals = useMemo(() => computeTotals(baseFare), [baseFare]);
+  const usePricedCheckout = !!booking && !quoteUnavailable;
+  const serverPricing = usePricedCheckout && quote ? quote.pricing : null;
+  const totals = serverPricing
+    ? {
+        rideFee: serverPricing.baseFare,
+        platformFee: serverPricing.platformFee,
+        discount: serverPricing.discount,
+        stripeFee: serverPricing.processingFee,
+        total: serverPricing.total,
+        totalInCents: serverPricing.totalCents,
+      }
+    : { rideFee: localTotals.rideFee, platformFee: localTotals.platformFee, discount: 0, stripeFee: localTotals.stripeFee, total: localTotals.total, totalInCents: localTotals.totalInCents };
+  // Scope of the applied discount, from the server's own price breakdown.
+  const discountIsRide = (serverPricing?.discountAppliesTo ?? quote?.promotion?.appliesTo) === 'ride';
+  const bookingKey = booking ? JSON.stringify(booking) : null;
+
+  // Load the server quote and the available checkout offers each time the modal opens.
+  useEffect(() => {
+    setQuote(null);
+    setPromoSelection(null);
+    setPromoInput('');
+    setPromoMessage(null);
+    setQuoteUnavailable(false);
+    setSavedOffers([]);
+    if (!visible || !booking) return;
+    let cancelled = false;
+    setQuoting(true);
+    quoteCheckout(booking)
+      .then((q) => { if (!cancelled) setQuote(q); })
+      .catch((err) => {
+        if (cancelled) return;
+        // Only a server without priced checkout falls back to local pricing.
+        // Any other failure (ride no longer available, offline…) blocks
+        // confirmation instead of charging a price the server didn't approve.
+        if (err instanceof PromoCheckoutUnavailableError) setQuoteUnavailable(true);
+        else setPromoMessage(err?.message ? `${err.message}. Close and try again.` : 'Couldn’t load the price for this ride. Close and try again.');
+      })
+      .finally(() => { if (!cancelled) setQuoting(false); });
+    // Offers this rider can still use (code-only and used-up ones are left
+    // out). The server re-checks eligibility when one is applied.
+    loadOffersForRider()
+      .then((offers) => { if (!cancelled) setSavedOffers(offers); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, bookingKey, riderId]);
+
+  const applyPromo = async (selection: PromoSelection) => {
+    if (!booking || quoting) return;
+    setQuoting(true);
+    setPromoMessage(null);
+    try {
+      const q = await quoteCheckout(booking, selection);
+      setQuote(q);
+      if (q.promotionError) {
+        setPromoSelection(null);
+        setPromoMessage(q.promotionError.message);
+      } else {
+        setPromoSelection(selection);
+      }
+    } catch (err: any) {
+      setPromoMessage(err?.message || 'Could not apply this promo.');
+    } finally {
+      setQuoting(false);
+    }
+  };
+
+  const removePromo = async () => {
+    setPromoSelection(null);
+    setPromoInput('');
+    setPromoMessage(null);
+    if (!booking) return;
+    try { setQuote(await quoteCheckout(booking)); } catch {}
+  };
+
   const baseUrl = getApiBaseUrl();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const log = (..._args: any[]) => {};
@@ -369,9 +483,12 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       // 1) Create PaymentIntent on server (manual capture) and attach customer
       const createUrl = `${baseUrl}/api/payments/create-intent`;
       log('Create intent', { createUrl, riderId, driverId, totals, baseFare, customerId, paymentMethodId: selectedPaymentMethodId });
+      // Priced checkout: the server prices `booking` itself and ignores the
+      // client amounts below (they're kept for servers without priced checkout).
+      // A fresh checkoutId per attempt keeps server-side retries idempotent.
       const createResp = await fetch(createUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: usePricedCheckout ? authHeaders : { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           totalInCents: totals.totalInCents,
           currency: 'usd',
@@ -382,6 +499,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           platformFee: totals.platformFee,
           customerId,
           paymentMethodId: selectedPaymentMethodId, // Add the selected payment method ID
+          ...(usePricedCheckout && { booking, checkoutId: newCheckoutId(), ...(promoSelection || {}) }),
         }),
       });
       if (!createResp.ok) {
@@ -406,10 +524,32 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           if (t) userMessage = t;
         }
 
+        // The promo stopped being valid between quote and payment (e.g. its
+        // limit was just reached): drop it and show the undiscounted price.
+        if (errorData?.reason && promoSelection) void removePromo();
         throw new Error(userMessage);
       }
-      const { clientSecret, id } = (await createResp.json()) as { clientSecret: string; id: string; stripeStatus?: string };
+      const { clientSecret, id, pricing: chargedPricing } = (await createResp.json()) as {
+        clientSecret: string; id: string; stripeStatus?: string; pricing?: CheckoutPricing;
+      };
       setPendingIntentId(id);
+      const charged: CheckoutPricing | null = usePricedCheckout ? chargedPricing ?? null : null;
+
+      // Never authorize an amount the rider wasn't shown (e.g. the driver
+      // changed the price after the quote). Void it and show the new total.
+      if (charged && charged.totalCents !== totals.totalInCents) {
+        await fetch(`${baseUrl}/api/payments/cancel-intent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paymentIntentId: id }),
+        }).then(() => setPendingIntentId(null)).catch(() => {});
+        if (booking) {
+          try { setQuote(await quoteCheckout(booking, promoSelection)); } catch {}
+        }
+        throw new Error(`The price for this ride changed to $${charged.total.toFixed(2)}. Please review and confirm again.`);
+      }
+      const chargedTotal = charged ? charged.total : totals.total;
+      const chargedPlatformFee = charged ? charged.platformFeeAfterDiscount : totals.platformFee;
 
       // 2) Confirm payment with Apple Pay or saved card
       if (selectedMethod === 'apple') {
@@ -420,7 +560,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
             cartItems: [
               {
                 label: 'RideAlong Total',
-                amount: (totals.rideFee + totals.platformFee + totals.stripeFee).toFixed(2),
+                amount: chargedTotal.toFixed(2),
                 paymentType: PlatformPay.PaymentType.Immediate,
               },
             ],
@@ -456,7 +596,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
       // 3) Create ridePostingRequest document in Firestore directly (like web app)
       if (onPaymentSuccess) {
         // Custom flow - let caller handle the ride creation
-        await onPaymentSuccess(id);
+        await onPaymentSuccess(id, charged);
       } else {
         // Direct Firestore creation (matching web app implementation)
         log('Creating ridePostingRequest document', { rideId, paymentIntentId: id });
@@ -501,11 +641,16 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
           date: ridePostingData.date || '',
           time: ridePostingData.time || '',
           passengers: 1,
-          contributionAmount: baseFare,
+          contributionAmount: charged ? charged.baseFare : baseFare,
           // When the rider offered their own price, keep the listed one for the driver to compare.
-          ...(postedPrice != null && Math.abs(postedPrice - baseFare) >= 0.01 ? { postedPrice } : {}),
-          platformFee: totals.platformFee,
-          paymentAmount: totals.total,
+          ...(postedPrice != null && Math.abs(postedPrice - (charged ? charged.baseFare : baseFare)) >= 0.01 ? { postedPrice } : {}),
+          platformFee: chargedPlatformFee,
+          paymentAmount: chargedTotal,
+          ...(charged && charged.discountCents > 0 && {
+            promoDiscount: charged.discount,
+            platformFeeBeforeDiscount: charged.platformFee,
+            promotionId: quote?.promotion?.id ?? null,
+          }),
           paymentMethodId: selectedPaymentMethodId,
           paymentIntentId: id,
           paymentStatus: 'authorized',
@@ -546,7 +691,9 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
     }
   };
 
-  const canConfirm = selectedMethod === 'apple' || (selectedMethod === 'card' && !!selectedPaymentMethodId);
+  // Wait for the server quote so the rider confirms the amount that will be charged.
+  const quotePending = usePricedCheckout && (quoting || !quote);
+  const canConfirm = !quotePending && (selectedMethod === 'apple' || (selectedMethod === 'card' && !!selectedPaymentMethodId));
 
   return (
     <>
@@ -587,9 +734,15 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
                 <Text style={styles.lineValue}>${totals.rideFee.toFixed(2)}</Text>
               </View>
               <View style={styles.rowBetween}>
-                <Text style={styles.lineLabel}>Platform fee</Text>
+                <Text style={styles.lineLabel}>RideAlong platform fee</Text>
                 <Text style={styles.lineValue}>${totals.platformFee.toFixed(2)}</Text>
               </View>
+              {totals.discount > 0 ? (
+                <View style={styles.rowBetween}>
+                  <Text style={styles.lineLabel}>{discountIsRide ? 'Promo (ride)' : 'Promo (RideAlong fee)'}</Text>
+                  <Text style={styles.discountValue}>−${totals.discount.toFixed(2)}</Text>
+                </View>
+              ) : null}
               <View style={styles.rowBetween}>
                 <Text style={styles.lineLabel}>Processing fee</Text>
                 <Text style={styles.lineValue}>${totals.stripeFee.toFixed(2)}</Text>
@@ -599,6 +752,71 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, onP
                 <Text style={styles.totalValue}>${totals.total.toFixed(2)}</Text>
               </View>
             </View>
+
+            {usePricedCheckout ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Promo</Text>
+                <Text style={styles.promoCaption}>
+                  Your driver always gets their full fare. One promo per ride.
+                </Text>
+                {promoSelection && quote?.promotion ? (
+                  <View style={styles.promoApplied}>
+                    <Check size={16} color={colors.green} strokeWidth={3} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.promoAppliedText}>{quote.promotion.title}</Text>
+                      <Text style={styles.promoAppliedMeta}>
+                        −${totals.discount.toFixed(2)} {discountIsRide ? 'off your ride' : 'off the RideAlong fee'}
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={() => void removePromo()} disabled={quoting || confirming} accessibilityRole="button" accessibilityLabel="Remove promo">
+                      <Text style={styles.promoRemove}>Remove</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <>
+                    {savedOffers.length ? (
+                      <View style={styles.promoChips}>
+                        {savedOffers.map((offer) => (
+                          <TouchableOpacity
+                            key={offer.id}
+                            style={styles.promoChip}
+                            onPress={() => void applyPromo({ promotionId: offer.id })}
+                            disabled={quoting || confirming}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Apply offer ${offer.title}`}
+                          >
+                            <Tag size={13} color={colors.primary} />
+                            <Text style={styles.promoChipText}>{promotionService.getPromotionDisplayValue(offer)}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    ) : null}
+                    <View style={styles.promoInputRow}>
+                      <TextInput
+                        style={styles.promoInput}
+                        value={promoInput}
+                        onChangeText={(v) => { setPromoInput(v); setPromoMessage(null); }}
+                        placeholder="Promo code"
+                        placeholderTextColor={colors.textSecondary}
+                        autoCapitalize="characters"
+                        autoCorrect={false}
+                        returnKeyType="done"
+                        onSubmitEditing={() => { if (promoInput.trim()) void applyPromo({ promoCode: promoInput.trim() }); }}
+                      />
+                      <TouchableOpacity
+                        style={[styles.promoApplyBtn, (!promoInput.trim() || quoting) && styles.confirmBtnDisabled]}
+                        onPress={() => void applyPromo({ promoCode: promoInput.trim() })}
+                        disabled={!promoInput.trim() || quoting || confirming}
+                        accessibilityRole="button"
+                      >
+                        {quoting ? <ActivityIndicator color={colors.textInverse} size="small" /> : <Text style={styles.promoApplyText}>Apply</Text>}
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+                {promoMessage ? <Text style={styles.promoMessage}>{promoMessage}</Text> : null}
+              </View>
+            ) : null}
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Payment method</Text>

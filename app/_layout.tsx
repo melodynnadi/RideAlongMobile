@@ -53,6 +53,10 @@ function AuthGate() {
   useEffect(() => {
     if (isLoading) return;
 
+    // Links from emails (https://ridealongapp.com/open/...) route themselves
+    // once auth has loaded — see app/open/[...slug].tsx.
+    if ((segments[0] as string) === 'open') return;
+
     const inAuth = segments[0] === '(auth)';
     const inRider = segments[0] === '(rider)';
     const inDriver = segments[0] === '(driver)';
