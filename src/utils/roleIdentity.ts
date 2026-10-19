@@ -124,6 +124,7 @@ const knownDriverNotificationTypes = new Set([
   'ride_request_received', 'ride_request_canceled', 'two_passenger_mode_reminder',
   'ride_fully_booked', 'ride_seats_filled_driver', 'ride_posting_expired',
   'waitlist_joined',
+  'nearby_request',
 ]);
 
 // Notification types that exclusively target riders
@@ -137,6 +138,7 @@ const knownRiderNotificationTypes = new Set([
   'preferred_route_match', 'ride_offer', 'driver_on_the_way', 'driver_arrived',
   'ride_updated',
   'waitlist_seat_available', 'waitlist_ride_unavailable',
+  'nearby_ride',
 ]);
 
 export function notificationTypeIsRiderOnly(data: Record<string, any>): boolean {

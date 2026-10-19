@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { AppState, StyleSheet, View } from 'react-native';
 import * as Sentry from '@sentry/react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -19,6 +19,7 @@ import SplashScreen from '@/components/SplashScreen';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { notificationService } from '@/src/services/notificationService';
 import { setupChatNotificationListeners } from '@/src/services/notificationListeners';
+import { resetRideAlertSync, syncRideAlertLocation } from '@/src/services/rideAlerts';
 import { firebaseAuth } from '@/constants/services';
 
 // Crash reporting — set EXPO_PUBLIC_SENTRY_DSN in .env to enable
@@ -163,6 +164,22 @@ export default function RootLayout() {
       console.warn('[RootLayout] Failed to register push token:', error);
     });
   }, [isAuthenticated, activeRole]);
+
+  // Keep the approximate location used for "ride near you" alerts fresh:
+  // on sign-in / role switch and whenever the app returns to the foreground.
+  // Silent — never prompts for permission (see src/services/rideAlerts.ts).
+  useEffect(() => {
+    if (!isAuthenticated || !activeRole) return;
+    syncRideAlertLocation(activeRole).catch(() => undefined);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') syncRideAlertLocation(activeRole).catch(() => undefined);
+    });
+    return () => sub.remove();
+  }, [isAuthenticated, activeRole]);
+
+  useEffect(() => {
+    if (!isAuthenticated) resetRideAlertSync();
+  }, [isAuthenticated]);
 
   // Watch for new chat messages so at least a local (in-process) notification
   // fires while the app is backgrounded, independent of any server-sent push.

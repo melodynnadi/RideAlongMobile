@@ -50,6 +50,7 @@ import { notificationService } from '@/src/services/notificationService';
 import { ensurePushRegistered } from '@/utils/registerPushToken';
 import { settingsService, type ThemeMode } from '@/src/services/settingsService';
 import { AppearanceSelector } from '@/components/ui/AppearanceSelector';
+import { NearbyAlertsSetting } from '@/components/NearbyAlertsSetting';
 import { hasUserRatedRide } from '@/src/services/ratings';
 const FONT_SANS = Platform.OS === 'web' ? '"Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, sans-serif' : undefined;
 const FONT_MONO = Platform.OS === 'web' ? '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace' : undefined;
@@ -2507,6 +2508,7 @@ function RiderSettingsReferenceInner() {
       <Text style={s.settingsSectionLabel}>APP PREFERENCES</Text>
       <View style={[s.menuCard, s.settingsMenuCard]}>
         <SettingsToggleRow icon="notifications" title="Push notifications" sub="Ride offers and account alerts" value={pushEnabled} onChange={(value) => void togglePush(value)} />
+        {pushEnabled ? <NearbyAlertsSetting role="rider" /> : null}
         <AppearanceSelector onChange={saveThemeMode} />
       </View>
       <Text style={s.settingsSectionLabel}>HELP & LEGAL</Text>

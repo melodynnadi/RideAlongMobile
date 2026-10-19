@@ -19,6 +19,7 @@ import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { firebaseAuth, firestore } from '@/constants/services';
 import { settingsService, type ThemeMode } from '@/src/services/settingsService';
 import { AppearanceSelector } from '@/components/ui/AppearanceSelector';
+import { NearbyAlertsSetting } from '@/components/NearbyAlertsSetting';
 import { notificationService } from '@/src/services/notificationService';
 import { ensurePushRegistered } from '@/utils/registerPushToken';
 import { useVerificationStore } from '@/stores/verificationStore';
@@ -183,6 +184,7 @@ export default function SettingsScreen() {
               value={pushEnabled}
               onToggle={togglePush}
             />
+            {pushEnabled ? <NearbyAlertsSetting role="driver" /> : null}
             <AppearanceSelector onChange={saveThemeMode} />
           </View>
 

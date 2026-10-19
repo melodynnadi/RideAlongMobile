@@ -327,6 +327,23 @@ class NotificationService {
           break;
         }
 
+        // "Ride available near you" / saved-route match on a driver's ride → open that ride.
+        // "Ride request near you" / saved-route match on a rider's request → open that request.
+        case 'nearby_ride':
+        case 'nearby_request':
+        case 'preferred_route_match': {
+          const requestId = (data as any).requestId || (data as any).rideRequestId;
+          const rideId = (data as any).rideId;
+          if (isDriver && requestId) {
+            router.push({ pathname: '/(driver)/request/[id]', params: { id: String(requestId), returnTo: '/(driver)' } } as any);
+          } else if (!isDriver && rideId) {
+            router.push({ pathname: '/(rider)/ride/[id]', params: { id: String(rideId), returnTo: '/(rider)' } } as any);
+          } else {
+            router.replace(isDriver ? '/(driver)' : '/(rider)');
+          }
+          break;
+        }
+
         case 'driver_on_the_way': {
           if (!isDriver) {
             const trackingKey = (data as any).postingId || (data as any).rideId;
