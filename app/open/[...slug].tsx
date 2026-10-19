@@ -9,6 +9,7 @@
  * Supported paths (keep in sync with server/emails/template.js openInApp):
  *   driver, driver/requests, driver/messages, driver/earnings, driver/settings
  *   rider, rider/requests, rider/messages, rider/settings, rider/payment-methods
+ *   rider/ride/<postingId>, driver/request/<requestId>   (daily ride summary email)
  *   messages, driver-signup, sign-in
  */
 import { useEffect, useRef } from 'react';
@@ -40,7 +41,8 @@ export default function OpenLink() {
   const { colors } = useAppTheme();
   const { slug } = useLocalSearchParams<{ slug?: string | string[] }>();
   const { isLoading, isAuthenticated, isEmailVerified, activeRole, role, switchRole } = useAuthStore();
-  const parts = (Array.isArray(slug) ? slug : slug ? [slug] : []).map((s) => String(s).toLowerCase());
+  const rawParts = (Array.isArray(slug) ? slug : slug ? [slug] : []).map((s) => String(s));
+  const parts = rawParts.map((s) => s.toLowerCase());
 
   const handled = useRef(false);
 
@@ -78,6 +80,17 @@ export default function OpenLink() {
           await switchRole(linkRole);
           targetRole = linkRole;
         }
+      }
+      // A specific ride (riders) or request (drivers). The id keeps its case —
+      // Firestore ids are case-sensitive.
+      const itemId = (first === 'driver' || first === 'rider') ? rawParts[2] : undefined;
+      if (itemId && targetRole === 'rider' && screenKey === 'ride') {
+        router.replace({ pathname: '/(rider)/ride/[id]', params: { id: itemId, returnTo: '/(rider)' } } as any);
+        return;
+      }
+      if (itemId && targetRole === 'driver' && screenKey === 'request') {
+        router.replace({ pathname: '/(driver)/request/[id]', params: { id: itemId, returnTo: '/(driver)' } } as any);
+        return;
       }
       const screens = ROLE_SCREENS[targetRole];
       router.replace((screens[screenKey] ?? screens['']) as any);
