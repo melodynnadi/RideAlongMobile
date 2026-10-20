@@ -35,6 +35,8 @@ import { hitSlop } from '@/theme/designSystem';
 type IconName = keyof typeof Ionicons.glyphMap;
 
 const WELCOME_IMAGE = require('@/assets/images/onboarding-welcome.jpg');
+// Orange mark + white "RideAlong" — already bundled for the dark-mode splash.
+const WELCOME_LOGO = require('@/assets/RideAlongSplashDarkMode - Edited.png');
 
 function tapFeedback() {
   Haptics.selectionAsync().catch(() => {});
@@ -50,11 +52,26 @@ function useStyles(colors: AppColors) {
         safe: { flex: 1, backgroundColor: colors.bg },
 
         // Welcome
-        welcomeRoot: { flex: 1, backgroundColor: colors.bg },
+        // Welcome — white type on a darkened full-bleed photo (same in light and dark mode).
+        welcomeRoot: { flex: 1, backgroundColor: '#0B111C' },
+        welcomeLogoRow: { paddingHorizontal: 24, paddingTop: 10 },
+        welcomeLogo: { width: 128, height: 27 },
         welcomeBody: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 24 },
-        welcomeTitle: { color: colors.textPrimary, fontSize: 40, lineHeight: 46, fontWeight: '600', letterSpacing: -0.8 },
-        welcomeAccent: { color: colors.primary, fontStyle: 'italic', fontWeight: '600' },
-        welcomeSubtitle: { color: colors.textSecondary, fontSize: 16, lineHeight: 23, marginTop: 12, marginBottom: 28 },
+        welcomeTitle: { color: '#FFFFFF', fontSize: 40, lineHeight: 46, fontWeight: '700', letterSpacing: -0.8 },
+        welcomeTitleCompact: { fontSize: 34, lineHeight: 40 },
+        welcomeAccent: { color: colors.primary, fontStyle: 'italic', fontWeight: '700' },
+        welcomeSubtitle: { color: 'rgba(255,255,255,0.86)', fontSize: 16, lineHeight: 23, marginTop: 12, marginBottom: 28 },
+        welcomeSecondary: {
+          minHeight: 54,
+          borderRadius: 27,
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.55)',
+          backgroundColor: 'rgba(255,255,255,0.10)',
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginTop: 12,
+        },
+        welcomeSecondaryText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
 
         // Shell
         content: {
@@ -385,34 +402,60 @@ export function WelcomeScreen() {
   const { colors } = useAppTheme();
   const s = useStyles(colors);
   const { height } = useWindowDimensions();
-  // Photo fills the top ~70% and melts into the background behind the headline.
-  const photoHeight = Math.round(height * 0.7);
-  // Fade to the page colour itself (not 'transparent', which is black at 0 alpha and leaves a grey band).
-  const fadeFrom = colors.bg.length === 7 ? `${colors.bg}00` : 'transparent';
-  const fadeMid = colors.bg.length === 7 ? `${colors.bg}B3` : colors.bg;
+  // Short phones (SE/mini) get a slightly smaller headline so the photo still shows.
+  const compact = height < 720;
 
   return (
     <View style={s.welcomeRoot}>
-      <StatusBar style={colors.statusBar === 'light-content' ? 'light' : 'dark'} />
-      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: photoHeight }}>
-        <Image source={WELCOME_IMAGE} style={StyleSheet.absoluteFill} contentFit="cover" contentPosition="top" transition={250} />
-        <LinearGradient
-          colors={[fadeFrom, fadeMid, colors.bg]}
-          locations={[0, 0.55, 1]}
-          style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: photoHeight * 0.42 }}
-        />
-      </View>
+      {/* The screen is always a dark photo, so the status bar is always light. */}
+      <StatusBar style="light" />
+      {/* Full-bleed photo. Cropped from the sides (never squashed); weighted a
+          little right so the driver's face stays in frame on narrow phones. */}
+      <Image
+        source={WELCOME_IMAGE}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        contentPosition={{ top: '0%', left: '58%' }}
+        transition={250}
+        accessibilityIgnoresInvertColors
+      />
+      {/* Soft shade under the status bar + logo. */}
+      <LinearGradient
+        colors={['rgba(8,12,20,0.45)', 'rgba(8,12,20,0)']}
+        style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 150 }}
+      />
+      {/* Dark fade behind the text and buttons so they read on any part of the photo. */}
+      <LinearGradient
+        colors={['rgba(8,12,20,0)', 'rgba(8,12,20,0.55)', 'rgba(8,12,20,0.86)', 'rgba(8,12,20,0.94)']}
+        locations={[0, 0.35, 0.7, 1]}
+        style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: Math.round(height * 0.62) }}
+      />
 
       <SafeAreaView style={s.flex} edges={['top', 'bottom', 'left', 'right']}>
+        <View style={s.welcomeLogoRow}>
+          <Image
+            source={WELCOME_LOGO}
+            style={s.welcomeLogo}
+            contentFit="contain"
+            accessibilityLabel="RideAlong"
+          />
+        </View>
         <View style={[s.welcomeBody, { paddingBottom: 8 }]}>
-          <Text style={s.welcomeTitle}>
-            Share the ride,{'\n'}
-            <Text style={s.welcomeAccent}>split the cost.</Text>
+          <Text style={[s.welcomeTitle, compact && s.welcomeTitleCompact]} accessibilityRole="header">
+            Built for students,{'\n'}
+            <Text style={s.welcomeAccent}>by students.</Text>
           </Text>
           <Text style={s.welcomeSubtitle}>Ride safely. Save money. Make friends.</Text>
 
           <PrimaryButton label="Get started →" onPress={() => router.push('/(auth)/select-role')} />
-          <SecondaryButton label="I already have an account" onPress={() => router.push('/(auth)/sign-in')} />
+          <TouchableOpacity
+            style={s.welcomeSecondary}
+            onPress={() => router.push('/(auth)/sign-in')}
+            accessibilityRole="button"
+            activeOpacity={0.8}
+          >
+            <Text style={s.welcomeSecondaryText}>I already have an account</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     </View>
