@@ -557,6 +557,19 @@ const PREF_QUESTIONS: PrefQuestion[] = [
   },
 ];
 
+// Drivers aren't asked who they'd like to be driven by.
+const DRIVER_PREF_QUESTIONS = PREF_QUESTIONS.filter((q) => q.key !== 'driverGender');
+
+// Drivers store preferences in the shape Settings → Ride preferences (driverService) uses.
+const DRIVER_TALK: Record<string, string> = { Chatty: 'Talkative', Moderate: 'Moderate', Quiet: 'Quiet' };
+const DRIVER_SOUND: Record<string, string> = { Music: 'Music', Conversation: 'Social', Silent: 'Quiet' };
+const DRIVER_SMOKING: Record<string, string> = { 'No Smoking': 'No Smoking', 'Smoking OK': 'Smoking' };
+const invert = (m: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(Object.entries(m).map(([k, v]) => [v, k]));
+const FROM_DRIVER_TALK: Record<string, string> = { ...invert(DRIVER_TALK), Light: 'Moderate' };
+const FROM_DRIVER_SOUND: Record<string, string> = { ...invert(DRIVER_SOUND), 'Podcast/Radio': 'Music' };
+const FROM_DRIVER_SMOKING = invert(DRIVER_SMOKING);
+
 type PrefAnswers = { musicPreference: string[] } & Record<Exclude<PrefKey, 'musicPreference'>, string>;
 const EMPTY_ANSWERS: PrefAnswers = {
   musicPreference: [],
@@ -584,6 +597,10 @@ export function CompleteProfileScreen() {
   const { finishOnboarding, refreshProfiles } = useAuthStore();
   const [finishing, setFinishing] = useState(false);
   const savePreferences = usePreferencesStore((st) => st.savePreferences);
+  // Riders and drivers have separate profiles; set up the one for the role they're in.
+  const isDriver = useAuthStore((st) => st.activeRole) === 'driver';
+  const roleCollection = isDriver ? 'drivers' : 'riders';
+  const questions = isDriver ? DRIVER_PREF_QUESTIONS : PREF_QUESTIONS;
 
   const [stage, setStage] = useState<Stage>('photo');
   const scrollRef = useRef<ScrollView>(null);
@@ -624,12 +641,12 @@ export function CompleteProfileScreen() {
 
   // Coming back after leaving partway: show what's already saved on their profile and
   // start at the first step they haven't done, instead of a blank Profile 1.
-  const riderProfile = useAuthStore((st) => st.riderProfile);
+  const profile = useAuthStore((st) => (isDriver ? st.driverProfile : st.riderProfile));
   const prefilled = useRef(false);
   useEffect(() => {
-    if (prefilled.current || !riderProfile) return;
+    if (prefilled.current || !profile) return;
     prefilled.current = true;
-    const p = riderProfile;
+    const p = profile;
 
     const photo = p.avatarUrl || p.photoURL || null;
     if (photo) setAvatarUrl(photo);
@@ -642,23 +659,34 @@ export function CompleteProfileScreen() {
     }
     if (p.dateOfBirth) setDob(String(p.dateOfBirth));
     if (p.pronouns) setPronouns(String(p.pronouns));
-    const hasAbout = !!(p.major || p.classYear || p.dateOfBirth || p.pronouns);
+    // A driver's birthday comes from their application, so it doesn't mean they did this step.
+    const hasAbout = !!(p.major || p.classYear || p.pronouns || (!isDriver && p.dateOfBirth));
     if (hasAbout) setAboutSaved(true);
 
-    const music = Array.isArray(p.musicPreference) ? p.musicPreference.map(String) : [];
-    setAnswers({
-      musicPreference: music,
-      conversationLevel: p.conversationLevel || '',
-      soundEnvironment: p.soundEnvironment || '',
-      smokingPreference: p.smokingPreference || '',
-      driverGender: p.driverGender || '',
-    });
+    if (isDriver) {
+      setAnswers({
+        musicPreference: Array.isArray(p.musicPreferences) ? p.musicPreferences.map(String) : [],
+        conversationLevel: FROM_DRIVER_TALK[p.talkativeness] || '',
+        soundEnvironment: FROM_DRIVER_SOUND[p.personality] || '',
+        smokingPreference: FROM_DRIVER_SMOKING[p.smokingPreference] || '',
+        driverGender: '',
+      });
+    } else {
+      const music = Array.isArray(p.musicPreference) ? p.musicPreference.map(String) : [];
+      setAnswers({
+        musicPreference: music,
+        conversationLevel: p.conversationLevel || '',
+        soundEnvironment: p.soundEnvironment || '',
+        smokingPreference: p.smokingPreference || '',
+        driverGender: p.driverGender || '',
+      });
+    }
     if (p.preferencesUpdatedAt) setPrefsSaved(true);
 
     if (p.preferencesUpdatedAt) setStage('done');
     else if (hasAbout) setStage('prefs');
     else if (photo) setStage('about');
-  }, [riderProfile, classYears]);
+  }, [profile, isDriver, classYears]);
 
   const majorSuggestions = useMemo(() => {
     const q = major.trim().toLowerCase();
@@ -672,7 +700,7 @@ export function CompleteProfileScreen() {
   const uploadPhoto = async (source: 'library' | 'camera') => {
     try {
       setUploading(true);
-      const result = await pickAndUploadAvatar(source);
+      const result = await pickAndUploadAvatar(source, isDriver ? 'driver' : 'rider');
       if (!result.canceled) {
         setAvatarUrl(result.avatarUrl);
         refreshProfiles().catch(() => {});
@@ -711,7 +739,7 @@ export function CompleteProfileScreen() {
     }
     try {
       setSavingAbout(true);
-      await setDoc(doc(firestore, 'riders', uid), { ...update, updatedAt: serverTimestamp() }, { merge: true });
+      await setDoc(doc(firestore, roleCollection, uid), { ...update, updatedAt: serverTimestamp() }, { merge: true });
       setAboutSaved(true);
       refreshProfiles().catch(() => {});
       setStage('prefs');
@@ -722,7 +750,7 @@ export function CompleteProfileScreen() {
     }
   };
 
-  const answeredCount = PREF_QUESTIONS.filter((q) =>
+  const answeredCount = questions.filter((q) =>
     q.multi ? answers.musicPreference.length > 0 : !!answers[q.key as Exclude<PrefKey, 'musicPreference'>],
   ).length;
 
@@ -733,7 +761,22 @@ export function CompleteProfileScreen() {
     }
     try {
       setSavingPrefs(true);
-      await savePreferences({ ...answers, passengerType: '' });
+      const uid = firebaseAuth.currentUser?.uid;
+      if (isDriver && uid) {
+        // Only answered questions, so the driver's existing defaults stay as they are.
+        const update: Record<string, unknown> = {};
+        if (answers.musicPreference.length) update.musicPreferences = answers.musicPreference;
+        if (DRIVER_TALK[answers.conversationLevel]) update.talkativeness = DRIVER_TALK[answers.conversationLevel];
+        if (DRIVER_SOUND[answers.soundEnvironment]) update.personality = DRIVER_SOUND[answers.soundEnvironment];
+        if (DRIVER_SMOKING[answers.smokingPreference]) update.smokingPreference = DRIVER_SMOKING[answers.smokingPreference];
+        await setDoc(
+          doc(firestore, 'drivers', uid),
+          { ...update, preferencesUpdatedAt: new Date().toISOString(), updatedAt: serverTimestamp() },
+          { merge: true },
+        );
+      } else {
+        await savePreferences({ ...answers, passengerType: '' });
+      }
       setPrefsSaved(true);
       setStage('done');
     } catch {
@@ -971,8 +1014,8 @@ export function CompleteProfileScreen() {
       </>
     );
   } else if (stage === 'prefs') {
-    const q = PREF_QUESTIONS[question];
-    const isLast = question === PREF_QUESTIONS.length - 1;
+    const q = questions[question];
+    const isLast = question === questions.length - 1;
     const isSelected = (value: string) =>
       q.multi ? answers.musicPreference.includes(value) : answers[q.key as Exclude<PrefKey, 'musicPreference'>] === value;
 
@@ -980,10 +1023,10 @@ export function CompleteProfileScreen() {
       <>
         {question === 0 ? <Heading title="Ride" accent="your way." /> : null}
         <Text style={s.questionMeta}>
-          QUESTION {question + 1} OF {PREF_QUESTIONS.length} · {q.multi ? 'PICK ANY' : 'PICK ONE'}
+          QUESTION {question + 1} OF {questions.length} · {q.multi ? 'PICK ANY' : 'PICK ONE'}
         </Text>
         <View style={s.segments}>
-          {PREF_QUESTIONS.map((_, i) => (
+          {questions.map((_, i) => (
             <View key={i} style={[s.segment, i <= question && s.segmentActive]} />
           ))}
         </View>
@@ -1068,7 +1111,7 @@ export function CompleteProfileScreen() {
       },
       {
         title: 'Ride preferences',
-        detail: prefsSaved ? `${answeredCount} of ${PREF_QUESTIONS.length} answered` : 'Not set yet',
+        detail: prefsSaved ? `${answeredCount} of ${questions.length} answered` : 'Not set yet',
         done: prefsSaved,
         thumb: <Ionicons name="options-outline" size={20} color={prefsSaved ? colors.primary : colors.textSecondary} />,
         onEdit: () => { setQuestion(0); setStage('prefs'); },
@@ -1109,7 +1152,7 @@ export function CompleteProfileScreen() {
         </View>
 
         <PrimaryButton
-          label="Find a ride →"
+          label={isDriver ? 'Start driving →' : 'Find a ride →'}
           loading={finishing}
           onPress={() => {
             setFinishing(true);

@@ -221,15 +221,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   driverProfile: null,
 
   finishOnboarding: async () => {
-    const { uid } = get();
+    const { uid, activeRole } = get();
     if (!uid) return;
-    await updateDoc(doc(firestore, 'riders', uid), {
+    const isDriver = activeRole === 'driver';
+    await updateDoc(doc(firestore, isDriver ? 'drivers' : 'riders', uid), {
       profileOnboardingPending: false,
       profileOnboardingCompletedAt: serverTimestamp(),
     }).catch((err) => console.warn('[authStore] finishOnboarding write failed:', err));
     // Clear locally after the write so a slower in-flight refreshProfiles can't flip it back.
-    const latest = get().riderProfile;
-    if (latest) set({ riderProfile: { ...latest, profileOnboardingPending: false } });
+    if (isDriver) {
+      const latest = get().driverProfile;
+      if (latest) set({ driverProfile: { ...latest, profileOnboardingPending: false } });
+    } else {
+      const latest = get().riderProfile;
+      if (latest) set({ riderProfile: { ...latest, profileOnboardingPending: false } });
+    }
   },
 
   initializeAuth: () => {
@@ -461,6 +467,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             applicationStatus: 'pending',
             verificationStatus: 'pending',
             driverStatus: 'pending',
+            profileOnboardingPending: true,
           });
         }
 

@@ -5,7 +5,11 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export type AvatarUploadResult = { canceled: true } | { canceled: false; avatarUrl: string; photoPath: string };
 
-export async function pickAndUploadAvatar(source: 'library' | 'camera' = 'library'): Promise<AvatarUploadResult> {
+export async function pickAndUploadAvatar(
+  source: 'library' | 'camera' = 'library',
+  role: 'rider' | 'driver' = 'rider',
+): Promise<AvatarUploadResult> {
+  const collection = role === 'driver' ? 'drivers' : 'riders';
   const perm = source === 'camera'
     ? await ImagePicker.requestCameraPermissionsAsync()
     : await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -29,7 +33,7 @@ export async function pickAndUploadAvatar(source: 'library' | 'camera' = 'librar
   const user = firebaseAuth.currentUser;
   if (!user) throw new Error('Must be signed in');
 
-  const userRef = doc(firestore, 'riders', user.uid);
+  const userRef = doc(firestore, collection, user.uid);
   const snap = await getDoc(userRef);
   const data = snap.exists() ? (snap.data() as any) : null;
   const oldAvatarUrl = data?.avatarUrl || data?.photoURL || null;
@@ -51,14 +55,14 @@ export async function pickAndUploadAvatar(source: 'library' | 'camera' = 'librar
       'Content-Type': 'application/json',
       Authorization: `Bearer ${idToken}`,
     },
-    body: JSON.stringify({ base64: manipulated.base64, oldPhotoPath, role: 'rider' }),
+    body: JSON.stringify({ base64: manipulated.base64, oldPhotoPath, role }),
   });
   const json = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(json.error || `Upload failed: ${resp.status}`);
   if (!json.success) throw new Error(json.error || 'Upload failed');
 
-  // Only write to riders/{uid} — do NOT write to users/{uid} or call updateProfile,
-  // which would bleed the rider photo into the driver account via auth.currentUser.photoURL.
+  // Only write to the role's own doc — do NOT write to users/{uid} or call updateProfile,
+  // which would bleed one role's photo into the other via auth.currentUser.photoURL.
   const avatarUpdate = { avatarUrl: json.photoURL, photoURL: json.photoURL, photoPath: json.photoPath, updatedAt: serverTimestamp() };
   await setDoc(userRef, avatarUpdate, { merge: true });
 

@@ -48,8 +48,9 @@ let splashAlreadyShown = false;
 function AuthGate() {
   const router = useRouter();
   const segments = useSegments();
-  const { isAuthenticated, isLoading, isEmailVerified, activeRole, riderProfile } = useAuthStore();
+  const { isAuthenticated, isLoading, isEmailVerified, activeRole, riderProfile, driverProfile } = useAuthStore();
   const riderOnboardingPending = riderProfile?.profileOnboardingPending === true;
+  const driverOnboardingPending = driverProfile?.profileOnboardingPending === true;
 
   useEffect(() => {
     if (isLoading) return;
@@ -80,14 +81,19 @@ function AuthGate() {
     // Only allow driver-signup for riders upgrading — already-registered drivers go to /(driver).
     if (inAuth && segments[1] === 'driver-signup' && activeRole !== 'driver') return;
 
+    // New accounts set up their profile (photo, about, preferences) once, right after verifying.
+    // The flag lives on the role's doc (set at sign-up, or by the server when a driver is approved),
+    // so it survives closing the app.
     if (activeRole === 'driver') {
+      if (driverOnboardingPending) {
+        if (segments[1] !== 'complete-profile') router.replace('/(auth)/complete-profile');
+        return;
+      }
       if (!inDriver) router.replace('/(driver)');
       return;
     }
 
     if (activeRole === 'rider') {
-      // New riders set up their profile (photo, about, preferences) once, right after verifying.
-      // The flag lives on the rider doc, so it survives closing the app to go check email.
       if (riderOnboardingPending) {
         if (segments[1] !== 'complete-profile') router.replace('/(auth)/complete-profile');
         return;
@@ -95,7 +101,7 @@ function AuthGate() {
       if (!inRider) router.replace('/(rider)');
       return;
     }
-  }, [isAuthenticated, isLoading, isEmailVerified, activeRole, riderOnboardingPending, segments, router]);
+  }, [isAuthenticated, isLoading, isEmailVerified, activeRole, riderOnboardingPending, driverOnboardingPending, segments, router]);
 
   return null;
 }
