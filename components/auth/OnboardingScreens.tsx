@@ -35,8 +35,10 @@ import { hitSlop } from '@/theme/designSystem';
 type IconName = keyof typeof Ionicons.glyphMap;
 
 const WELCOME_IMAGE = require('@/assets/images/onboarding-welcome.jpg');
-// Orange mark + white "RideAlong" — already bundled for the dark-mode splash.
-const WELCOME_LOGO = require('@/assets/RideAlongSplashDarkMode - Edited.png');
+const WELCOME_IMAGE_RATIO = 1935 / 1290; // height / width of onboarding-welcome.jpg
+// The welcome screen is a dark photo in every theme, so it uses fixed colours.
+const WELCOME_BG = '#0B111C';
+const BRAND_ORANGE = '#E05E1A';
 
 function tapFeedback() {
   Haptics.selectionAsync().catch(() => {});
@@ -53,14 +55,20 @@ function useStyles(colors: AppColors) {
 
         // Welcome
         // Welcome — white type on a darkened full-bleed photo (same in light and dark mode).
-        welcomeRoot: { flex: 1, backgroundColor: '#0B111C' },
-        welcomeLogoRow: { paddingHorizontal: 24, paddingTop: 10 },
-        welcomeLogo: { width: 128, height: 27 },
+        welcomeRoot: { flex: 1, backgroundColor: WELCOME_BG, overflow: 'hidden' },
         welcomeBody: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 24 },
         welcomeTitle: { color: '#FFFFFF', fontSize: 40, lineHeight: 46, fontWeight: '700', letterSpacing: -0.8 },
         welcomeTitleCompact: { fontSize: 34, lineHeight: 40 },
-        welcomeAccent: { color: colors.primary, fontStyle: 'italic', fontWeight: '700' },
+        welcomeAccent: { color: BRAND_ORANGE, fontStyle: 'italic', fontWeight: '700' },
         welcomeSubtitle: { color: 'rgba(255,255,255,0.86)', fontSize: 16, lineHeight: 23, marginTop: 12, marginBottom: 28 },
+        welcomePrimary: {
+          minHeight: 56,
+          borderRadius: 28,
+          backgroundColor: BRAND_ORANGE,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        welcomePrimaryText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
         welcomeSecondary: {
           minHeight: 54,
           borderRadius: 27,
@@ -401,28 +409,42 @@ function Heading({ title, accent, subtitle }: { title: string; accent: string; s
 export function WelcomeScreen() {
   const { colors } = useAppTheme();
   const s = useStyles(colors);
-  const { height } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   // Short phones (SE/mini) get a slightly smaller headline so the photo still shows.
   const compact = height < 720;
+
+  // Frame the photo so all three faces fit: show the 8%–98% horizontal slice
+  // of the image across the screen width (a plain "cover" crop cuts off the
+  // driver and the friend in the cap). If that makes the photo shorter than
+  // the screen, its bottom fades into the dark background under the buttons.
+  const VISIBLE_FROM = 0.08;
+  const VISIBLE_SPAN = 0.9;
+  const photoW = width / VISIBLE_SPAN;
+  const photoH = photoW * WELCOME_IMAGE_RATIO;
+  const photoLeft = -VISIBLE_FROM * photoW;
 
   return (
     <View style={s.welcomeRoot}>
       {/* The screen is always a dark photo, so the status bar is always light. */}
       <StatusBar style="light" />
-      {/* Full-bleed photo. Cropped from the sides (never squashed); weighted a
-          little right so the driver's face stays in frame on narrow phones. */}
       <Image
         source={WELCOME_IMAGE}
-        style={StyleSheet.absoluteFill}
+        style={{ position: 'absolute', top: 0, left: photoLeft, width: photoW, height: Math.max(photoH, 1) }}
         contentFit="cover"
-        contentPosition={{ top: '0%', left: '58%' }}
         transition={250}
         accessibilityIgnoresInvertColors
       />
-      {/* Soft shade under the status bar + logo. */}
+      {photoH < height ? (
+        // Blend the photo's bottom edge into the background.
+        <LinearGradient
+          colors={['rgba(11,17,28,0)', WELCOME_BG]}
+          style={{ position: 'absolute', left: 0, right: 0, top: photoH - 120, height: 121 }}
+        />
+      ) : null}
+      {/* Soft shade under the status bar. */}
       <LinearGradient
         colors={['rgba(8,12,20,0.45)', 'rgba(8,12,20,0)']}
-        style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 150 }}
+        style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 140 }}
       />
       {/* Dark fade behind the text and buttons so they read on any part of the photo. */}
       <LinearGradient
@@ -432,29 +454,29 @@ export function WelcomeScreen() {
       />
 
       <SafeAreaView style={s.flex} edges={['top', 'bottom', 'left', 'right']}>
-        <View style={s.welcomeLogoRow}>
-          <Image
-            source={WELCOME_LOGO}
-            style={s.welcomeLogo}
-            contentFit="contain"
-            accessibilityLabel="RideAlong"
-          />
-        </View>
         <View style={[s.welcomeBody, { paddingBottom: 8 }]}>
           <Text style={[s.welcomeTitle, compact && s.welcomeTitleCompact]} accessibilityRole="header">
             Built for students,{'\n'}
             <Text style={s.welcomeAccent}>by students.</Text>
           </Text>
-          <Text style={s.welcomeSubtitle}>Ride safely. Save money. Make friends.</Text>
+          <Text style={s.welcomeSubtitle}>Find rides, share trips, and connect with students heading your way.</Text>
 
-          <PrimaryButton label="Get started →" onPress={() => router.push('/(auth)/select-role')} />
+          {/* Brand orange + white text in both light and dark mode — this screen is always a dark photo. */}
+          <TouchableOpacity
+            style={s.welcomePrimary}
+            onPress={() => router.push('/(auth)/select-role')}
+            accessibilityRole="button"
+            activeOpacity={0.85}
+          >
+            <Text style={s.welcomePrimaryText}>Get started →</Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={s.welcomeSecondary}
             onPress={() => router.push('/(auth)/sign-in')}
             accessibilityRole="button"
             activeOpacity={0.8}
           >
-            <Text style={s.welcomeSecondaryText}>I already have an account</Text>
+            <Text style={s.welcomeSecondaryText}>Sign in</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
