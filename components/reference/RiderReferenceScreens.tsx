@@ -11,6 +11,7 @@ import { PaymentModal } from '@/components/PaymentModal';
 import { PriceOfferModal } from '@/components/PriceOfferModal';
 import type { CheckoutPricing } from '@/services/promoCheckout';
 import { declineRideOffer, formatMoney, postingOfferLimits } from '@/services/offers';
+import { openStudentVerification } from '@/src/utils/studentVerificationNav';
 
 /** A driver's offer on one of the rider's requests, as shown on the rider's ride card. */
 type OfferInfo = {
@@ -2126,15 +2127,7 @@ export function RiderRequestReference() {
           'Your verification deadline has passed. Please verify your student status to post ride requests.',
             [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Verify Now', onPress: async () => {
-                try {
-                  const token = await firebaseAuth.currentUser?.getIdToken();
-                  if (token) {
-                    const { Linking } = require('react-native');
-                    await Linking.openURL(`https://ridealongapp.com/pages/verify?token=${encodeURIComponent(token)}`);
-                  }
-                } catch {}
-              }},
+              { text: 'Verify Now', onPress: () => openStudentVerification('rider') },
             ]
           );
           return;
@@ -2868,15 +2861,7 @@ export function RiderDetailReference() {
           'Your verification deadline has passed. Please verify your student status to book rides.',
             [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Verify Now', onPress: async () => {
-                try {
-                  const token = await firebaseAuth.currentUser?.getIdToken();
-                  if (token) {
-                    const { Linking } = require('react-native');
-                    await Linking.openURL(`https://ridealongapp.com/pages/verify?token=${encodeURIComponent(token)}`);
-                  }
-                } catch {}
-              }},
+              { text: 'Verify Now', onPress: () => openStudentVerification('rider') },
             ]
           );
           return;

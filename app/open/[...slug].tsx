@@ -10,6 +10,7 @@
  *   driver, driver/requests, driver/messages, driver/earnings, driver/settings
  *   rider, rider/requests, rider/messages, rider/settings, rider/payment-methods
  *   rider/ride/<postingId>, driver/request/<requestId>   (daily ride summary email)
+ *   student-verification, rider/student-verification, driver/student-verification
  *   messages, driver-signup, sign-in
  */
 import { useEffect, useRef } from 'react';
@@ -27,6 +28,7 @@ const ROLE_SCREENS: Record<Role, Record<string, string>> = {
     messages: '/(driver)/messages',
     earnings: '/(driver)/earnings',
     settings: '/(driver)/settings',
+    'student-verification': '/(driver)/settings/driver-student-verification',
   },
   rider: {
     '': '/(rider)',
@@ -34,6 +36,7 @@ const ROLE_SCREENS: Record<Role, Record<string, string>> = {
     messages: '/(rider)/messages',
     settings: '/(rider)/settings',
     'payment-methods': '/(rider)/settings/payment-methods',
+    'student-verification': '/(rider)/settings/student-verification',
   },
 };
 

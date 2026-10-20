@@ -1,10 +1,11 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Linking, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { X } from 'lucide-react-native';
 import { useVerificationStore } from '@/stores/verificationStore';
 import { firebaseAuth } from '@/constants/services';
+import { openStudentVerification } from '@/src/utils/studentVerificationNav';
 
-export function StudentVerificationBanner() {
+export function StudentVerificationBanner({ role = 'driver' }: { role?: 'rider' | 'driver' }) {
   const {
     isVerified,
     verificationStatus,
@@ -25,29 +26,13 @@ export function StudentVerificationBanner() {
     return null;
   }
 
-  const openVerification = async () => {
-    try {
-      const user = firebaseAuth.currentUser;
-      if (!user) {
-        Alert.alert('Error', 'Please sign in to verify your student status');
-        return;
-      }
-
-      // Get fresh Firebase ID token
-      const token = await user.getIdToken(true);
-      const verificationUrl = `https://ridealongapp.com/pages/login?token=${token}`;
-      
-      // Open in device's default browser
-      const supported = await Linking.canOpenURL(verificationUrl);
-      if (supported) {
-        await Linking.openURL(verificationUrl);
-      } else {
-        Alert.alert('Error', 'Unable to open verification page');
-      }
-    } catch (error) {
-      console.error('Error opening verification URL:', error);
-      Alert.alert('Error', 'Failed to open verification page. Please try again.');
+  // Opens the in-app verification screen for the role the banner is shown in.
+  const openVerification = () => {
+    if (!firebaseAuth.currentUser) {
+      Alert.alert('Error', 'Please sign in to verify your student status');
+      return;
     }
+    openStudentVerification(role);
   };
 
   const handleDismiss = () => {
@@ -90,8 +75,10 @@ export function StudentVerificationBanner() {
 
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: 16,
-    marginTop: 8,
+    // Sits right under the home greeting (which has 18px bottom margin):
+    // pull up so the gap is ~10px, and align with the greeting's 20px inset.
+    paddingHorizontal: 20,
+    marginTop: -8,
     marginBottom: 12,
   },
   banner: {

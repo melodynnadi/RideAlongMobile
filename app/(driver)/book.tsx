@@ -1,5 +1,6 @@
 import 'react-native-get-random-values';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { openStudentVerification } from '@/src/utils/studentVerificationNav';
 import {
   View,
   ScrollView,
@@ -912,18 +913,7 @@ export default function BookScreen() {
                 { text: 'Cancel', style: 'cancel' },
                 { 
                   text: 'Verify Now', 
-                  onPress: async () => {
-                    try {
-                      const token = await firebaseAuth.currentUser?.getIdToken();
-                      if (token) {
-                        const url = `https://ridealongapp.com/pages/driver-login?token=${encodeURIComponent(token)}`;
-                        const { Linking } = require('react-native');
-                        await Linking.openURL(url);
-                      }
-                    } catch (e) {
-                      console.warn('handleVerifyStudent error', e);
-                    }
-                  },
+                  onPress: () => openStudentVerification('driver', '/(driver)/book'),
                   style: 'default'
                 },
               ]

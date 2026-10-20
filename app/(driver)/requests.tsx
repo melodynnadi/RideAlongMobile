@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { openStudentVerification } from '@/src/utils/studentVerificationNav';
 import {
   View,
   Text,
@@ -628,10 +629,7 @@ export default function RequestsInboxScreen() {
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Verify Now',
-            onPress: async () => {
-              const token = await firebaseAuth.currentUser?.getIdToken();
-              if (token) await Linking.openURL(`https://ridealongapp.com/pages/driver-login?token=${token}`);
-            },
+            onPress: () => openStudentVerification('driver', '/(driver)/requests'),
           },
         ]);
         return;

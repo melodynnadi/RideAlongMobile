@@ -27,6 +27,7 @@ import { computeFilteredAverageRating, hasUserRatedRide } from '@/src/services/r
 import { useProfileCompleteness, ProfileCompletionItem } from '@/hooks/useProfileCompleteness';
 import { useDriverBonuses, DriverBonus } from '@/hooks/useDriverBonuses';
 import { StudentVerificationBanner } from '@/components/StudentVerificationBanner';
+import { openStudentVerification } from '@/src/utils/studentVerificationNav';
 import { useVerificationStore } from '@/stores/verificationStore';
 import { AddressLink } from '@/components/AddressLink';
 import {
@@ -3270,24 +3271,12 @@ export default function HomeScreen() {
   };
 
   // Verification helpers
-  const handleVerifyStudent = async () => {
-    try {
-      const token = await firebaseAuth.currentUser?.getIdToken();
-      if (!token) {
-        Alert.alert('Error', 'Please sign in to verify your student status.');
-        return;
-      }
-      const url = `https://ridealongapp.com/pages/driver-login?token=${encodeURIComponent(token)}`;
-      const canOpen = await Linking.canOpenURL(url);
-      if (canOpen) {
-        await Linking.openURL(url);
-      } else {
-        Alert.alert('Error', 'Could not open verification page.');
-      }
-    } catch (e) {
-      console.warn('handleVerifyStudent error', e);
-      Alert.alert('Error', 'Failed to open verification page.');
+  const handleVerifyStudent = () => {
+    if (!firebaseAuth.currentUser) {
+      Alert.alert('Error', 'Please sign in to verify your student status.');
+      return;
     }
+    openStudentVerification('driver');
   };
 
   const checkVerificationAndBlock = (action: string): boolean => {
