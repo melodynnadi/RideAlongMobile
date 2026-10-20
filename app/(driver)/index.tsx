@@ -1373,13 +1373,17 @@ export default function HomeScreen() {
             headers: { Authorization: `Bearer ${token}` },
           });
           if (res.ok) {
-            const json = await res.json();
+            // The server nests the result under `user`.
+            const json = (await res.json())?.user;
             const vs = useVerificationStore.getState();
-            if (typeof json?.isVerified === 'boolean') {
-              vs.setIsVerified(json.isVerified);
-            }
-            if (json?.verificationStatus) {
-              vs.setVerificationStatus(json.verificationStatus);
+            // Never downgrade a verified state the Firestore listener already set.
+            if (json?.isVerified === true || !vs.isVerified) {
+              if (typeof json?.isVerified === 'boolean') {
+                vs.setIsVerified(json.isVerified);
+              }
+              if (json?.verificationStatus) {
+                vs.setVerificationStatus(json.verificationStatus);
+              }
             }
             if (json?.deadline) {
               vs.setVerificationDeadline(new Date(json.deadline));

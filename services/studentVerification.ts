@@ -61,7 +61,8 @@ export interface VerificationUploadFile {
 function normalizeStatus(value: unknown, isVerified = false): VerificationStatus {
   if (isVerified) return 'approved';
   const status = String(value || '').toLowerCase();
-  if (status === 'verified') return 'approved';
+  // 'verified' on a driver profile means their driver documents passed review, not that
+  // they're a verified student, so it falls through to 'none'.
   return ['none', 'submitted', 'pending', 'approved', 'auto-approved', 'manual-review', 'rejected'].includes(status)
     ? status as VerificationStatus
     : 'none';
@@ -82,7 +83,7 @@ async function getFirestoreVerificationUser() {
 
   const verifiedProfile = profiles.find((profile) =>
     profile.isVerified === true
-    || ['approved', 'auto-approved', 'verified'].includes(String(profile.verificationStatus || '').toLowerCase()),
+    || ['approved', 'auto-approved'].includes(String(profile.verificationStatus || '').toLowerCase()),
   );
   const profile = verifiedProfile || profiles.find((item) => item.verificationStatus) || profiles[0];
   const isVerified = Boolean(verifiedProfile);
