@@ -207,6 +207,7 @@ async function upsertUserDoc(params: {
 }
 
 let signUpInProgress = false;
+let inflightSignUp: Promise<string> | null = null;
 let preferredSignInRole: 'rider' | 'driver' | null = null;
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -398,7 +399,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  signUp: async ({ email, password, firstName, lastName, role, university, universityData, phone }) => {
+  signUp: (params) => {
+    // Repeated taps on "Create account" before the button disables used to start several
+    // sign-ups at once, each creating its own Auth account for the same email. Later calls
+    // now share the one already running.
+    if (inflightSignUp) return inflightSignUp;
+    inflightSignUp = (async () => {
+    const { email, password, firstName, lastName, role, university, universityData, phone } = params;
     set({ isLoading: true });
     signUpInProgress = true;
 
@@ -509,6 +516,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } finally {
       signUpInProgress = false;
     }
+    })().finally(() => { inflightSignUp = null; });
+    return inflightSignUp;
   },
 
   signOut: async () => {
