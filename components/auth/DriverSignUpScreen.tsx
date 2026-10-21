@@ -862,7 +862,7 @@ export function DriverSignUpScreen() {
         body: form,
       });
 
-      const submitData = await submitRes.json() as { success?: boolean; applicationId?: string; error?: string };
+      const submitData = await submitRes.json() as { success?: boolean; applicationId?: string; error?: string; message?: string };
       if (submitRes.status === 403 && submitData.error === 'email_not_verified') {
         // Verification lasts 2 hours; if it lapsed, send them back to confirm the email again.
         setEmailToken(null);
@@ -874,7 +874,8 @@ export function DriverSignUpScreen() {
         throw new Error('Your email confirmation expired. Tap Continue to get a new code — your other info is saved.');
       }
       if (!submitRes.ok || !submitData.applicationId) {
-        throw new Error(submitData.error ?? `Server error ${submitRes.status}`);
+        // `message` is the readable explanation; `error` is a short code like "Already a driver".
+        throw new Error(submitData.message ?? submitData.error ?? `Server error ${submitRes.status}`);
       }
 
       const applicationId = submitData.applicationId;
