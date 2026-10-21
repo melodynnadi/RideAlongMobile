@@ -624,8 +624,15 @@ export default function RequestsInboxScreen() {
         ['approved','auto-approved'].includes(String(dData?.verificationStatus||'').toLowerCase()) ||
         ['approved','auto-approved'].includes(String(rData?.verificationStatus||'').toLowerCase());
 
-      if (!isVerified) {
-        Alert.alert('Verification Required', 'You must verify your student status before sending ride offers.', [
+      // Same rule as riders: offers are allowed until the verification deadline passes.
+      const deadlineField = dData?.verificationDeadline ?? rData?.verificationDeadline;
+      const deadline = deadlineField
+        ? (typeof deadlineField?.toDate === 'function' ? deadlineField.toDate() : new Date(deadlineField))
+        : null;
+      const isPastDeadline = deadline ? Date.now() > deadline.getTime() : false;
+
+      if (!isVerified && isPastDeadline) {
+        Alert.alert('Verification Deadline Passed', 'Your verification deadline has passed. Please verify your student status to send ride offers.', [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Verify Now',

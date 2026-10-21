@@ -26,7 +26,6 @@ import { Button } from '@/components/ui/Button';
 import { computeFilteredAverageRating, hasUserRatedRide } from '@/src/services/ratings';
 import { useProfileCompleteness, ProfileCompletionItem } from '@/hooks/useProfileCompleteness';
 import { useDriverBonuses, DriverBonus } from '@/hooks/useDriverBonuses';
-import { StudentVerificationBanner } from '@/components/StudentVerificationBanner';
 import { openStudentVerification } from '@/src/utils/studentVerificationNav';
 import { useVerificationStore } from '@/stores/verificationStore';
 import { AddressLink } from '@/components/AddressLink';
@@ -3824,9 +3823,6 @@ export default function HomeScreen() {
               Hey {firstName} - <Text style={s.heroAccent}>{driverHeroPrompt}</Text>
             </Text>
           </View>
-
-          {/* Verification Banner */}
-          <StudentVerificationBanner />
 
           <View style={[s.section, s.homePrimaryBlock]}>
             {loading ? (
