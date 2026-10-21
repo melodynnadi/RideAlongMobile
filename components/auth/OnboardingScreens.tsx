@@ -72,8 +72,6 @@ function useStyles(colors: AppColors) {
         welcomeSecondary: {
           minHeight: 54,
           borderRadius: 27,
-          borderWidth: 1,
-          borderColor: 'rgba(255,255,255,0.55)',
           backgroundColor: 'rgba(255,255,255,0.10)',
           alignItems: 'center',
           justifyContent: 'center',
