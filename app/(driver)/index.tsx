@@ -425,12 +425,10 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
         if (!riderId) return;
         const riderSnap = await getDoc(doc(firestore, 'riders', riderId));
         const riderData = riderSnap.exists() ? riderSnap.data() : {};
-        const userSnap = await getDoc(doc(firestore, 'users', riderId));
-        const userData = userSnap.exists() ? userSnap.data() : {};
         const name = riderData.fullName || riderData.firstName
           ? [riderData.firstName, riderData.lastName].filter(Boolean).join(' ') || riderData.fullName
-          : userData.fullName || userData.displayName || reqData.riderName || 'Rider';
-        const photo = riderData.avatarUrl || riderData.photoURL || userData.avatarUrl || userData.photoURL || null;
+          : reqData.riderName || 'Rider';
+        const photo = riderData.avatarUrl || riderData.photoURL || null;
         const rating = typeof riderData.rating === 'number' ? riderData.rating : null;
         const offered = Number(reqData.contributionAmount ?? reqData.price);
         const listed = Number(reqData.postedPrice);

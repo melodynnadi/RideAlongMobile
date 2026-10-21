@@ -866,8 +866,7 @@ export default function RequestsInboxScreen() {
       for (const id of missing) {
         try {
           avatarLookupAttemptsRef.current.add(`id:${id}`);
-          let userSnap = await getDoc(doc(firestore, 'riders', id));
-          if (!userSnap.exists()) userSnap = await getDoc(doc(firestore, 'users', id));
+          const userSnap = await getDoc(doc(firestore, 'riders', id));
           if (!userSnap.exists()) continue;
           const data: any = userSnap.data();
           const personal = data.personalInfo || data.profile || {};
@@ -895,16 +894,11 @@ export default function RequestsInboxScreen() {
           const riderByNestedEmail = riderByEmail.empty
             ? await getDocs(query(collection(firestore, 'riders'), where('personalInfo.email', '==', emailValue))).catch(() => null)
             : null;
-          const userByEmail = riderByEmail.empty && (!riderByNestedEmail || riderByNestedEmail.empty)
-            ? await getDocs(query(collection(firestore, 'users'), where('email', '==', emailValue))).catch(() => null)
-            : null;
           const snap = !riderByEmail.empty
             ? riderByEmail.docs[0]
             : riderByNestedEmail && !riderByNestedEmail.empty
               ? riderByNestedEmail.docs[0]
-              : userByEmail && !userByEmail.empty
-                ? userByEmail.docs[0]
-                : null;
+              : null;
           if (!snap) continue;
           const data: any = snap.data();
           const name = data.fullName || [data.firstName, data.lastName].filter(Boolean).join(' ') || data.name || data.displayName || item.requesterName || '';

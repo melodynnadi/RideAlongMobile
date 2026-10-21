@@ -339,7 +339,6 @@ export default function MessagesScreen() {
                   try {
                     let userDoc = await getDoc(doc(firestore, 'riders', userId));
                     if (!userDoc.exists()) userDoc = await getDoc(doc(firestore, 'drivers', userId));
-                    if (!userDoc.exists()) userDoc = await getDoc(doc(firestore, 'users', userId));
                     userCache.set(userId, userDoc.exists() ? userDoc.data() : null);
                   } catch (error) {
                     if (!warnedUserIds.has(userId)) {

@@ -20,6 +20,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { notificationService } from '@/src/services/notificationService';
 import { setupChatNotificationListeners } from '@/src/services/notificationListeners';
 import { resetRideAlertSync, syncRideAlertLocation } from '@/src/services/rideAlerts';
+import { readEmergencyContacts } from '@/src/services/privateProfile';
 import { firebaseAuth } from '@/constants/services';
 
 // Crash reporting — set EXPO_PUBLIC_SENTRY_DSN in .env to enable
@@ -170,6 +171,13 @@ export default function RootLayout() {
       console.warn('[RootLayout] Failed to register push token:', error);
     });
   }, [isAuthenticated, activeRole]);
+
+  // Move emergency contacts off the publicly readable users/{uid} doc (a no-op once moved).
+  useEffect(() => {
+    const uid = firebaseAuth.currentUser?.uid;
+    if (!isAuthenticated || !uid) return;
+    readEmergencyContacts(uid).catch(() => undefined);
+  }, [isAuthenticated]);
 
   // Keep the approximate location used for "ride near you" alerts fresh:
   // on sign-in / role switch and whenever the app returns to the foreground.

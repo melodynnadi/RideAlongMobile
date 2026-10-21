@@ -182,9 +182,6 @@ export default function RideHistoryScreen() {
                   let profileSnap = it.riderId
                     ? await getDoc(doc(firestore, 'riders', String(it.riderId))).catch(() => null)
                     : null;
-                  if ((!profileSnap || !profileSnap.exists()) && it.riderId) {
-                    profileSnap = await getDoc(doc(firestore, 'users', String(it.riderId))).catch(() => null);
-                  }
                   if ((!profileSnap || !profileSnap.exists()) && it.riderEmail) {
                     const emailSnap = await getDocs(query(
                       collection(firestore, 'riders'),

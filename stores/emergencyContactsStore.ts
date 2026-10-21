@@ -1,12 +1,7 @@
 import { create } from 'zustand';
-import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { firestore, firebaseAuth } from '@/constants/services';
+import { firebaseAuth } from '@/constants/services';
 import { EmergencyContact } from '@/types';
-
-// Emergency contacts are stored on users/{uid} so they're shared across rider and driver roles.
-function usersDoc(uid: string) {
-  return doc(firestore, 'users', uid);
-}
+import { readEmergencyContacts, writeEmergencyContacts } from '@/src/services/privateProfile';
 
 interface EmergencyContactsState {
   contacts: EmergencyContact[];
@@ -36,8 +31,7 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
 
     try {
       set({ isLoading: true });
-      const snap = await getDoc(usersDoc(uid));
-      const contacts = Array.isArray(snap.data()?.emergencyContacts) ? snap.data()!.emergencyContacts as EmergencyContact[] : [];
+      const contacts = await readEmergencyContacts(uid);
       set({ contacts });
       return contacts;
     } catch (error) {
@@ -56,7 +50,7 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
       set({ isLoading: true });
       const contactWithId: EmergencyContact = { id: Date.now().toString(), ...newContact };
       const updatedContacts = [...get().contacts, contactWithId];
-      await updateDoc(usersDoc(uid), { emergencyContacts: updatedContacts, updatedAt: serverTimestamp() });
+      await writeEmergencyContacts(uid, updatedContacts);
       set({ contacts: updatedContacts });
     } catch (error) {
       console.error('Error adding emergency contact:', error);
@@ -76,7 +70,7 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
       if (index < 0 || index >= contacts.length) throw new Error('Invalid contact index');
       const updatedContacts = [...contacts];
       updatedContacts[index] = { ...updatedContact, id: contacts[index].id };
-      await updateDoc(usersDoc(uid), { emergencyContacts: updatedContacts, updatedAt: serverTimestamp() });
+      await writeEmergencyContacts(uid, updatedContacts);
       set({ contacts: updatedContacts });
     } catch (error) {
       console.error('Error updating emergency contact:', error);
@@ -95,7 +89,7 @@ export const useEmergencyContactsStore = create<EmergencyContactsState>((set, ge
       const { contacts } = get();
       if (index < 0 || index >= contacts.length) throw new Error('Invalid contact index');
       const updatedContacts = contacts.filter((_, i) => i !== index);
-      await updateDoc(usersDoc(uid), { emergencyContacts: updatedContacts, updatedAt: serverTimestamp() });
+      await writeEmergencyContacts(uid, updatedContacts);
       set({ contacts: updatedContacts });
     } catch (error) {
       console.error('Error deleting emergency contact:', error);

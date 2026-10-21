@@ -1,14 +1,8 @@
-import { 
-  doc, 
-  getDoc, 
-  updateDoc, 
-  setDoc,
-  serverTimestamp,
-  arrayUnion
-} from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { firestore, firebaseAuth } from '@/constants/services';
 import { logActivity } from '@/src/services/activity';
 import { EmergencyContact } from '@/types';
+import { readEmergencyContacts, writeEmergencyContacts } from '@/src/services/privateProfile';
 
 // Re-export the type for convenience
 export type { EmergencyContact };
@@ -44,11 +38,7 @@ export async function debugFirebaseConnection(): Promise<{ user: any; canAccessF
 /**
  * Get emergency contacts for the current driver
  */
-// Emergency contacts are stored on users/{uid} so they're shared across rider and driver roles.
-function getUserRef(uid: string) {
-  return doc(firestore, 'users', uid);
-}
-
+// Emergency contacts live in privateProfiles/{uid} (see privateProfile.ts), shared by both roles.
 export async function getEmergencyContacts(): Promise<EmergencyContact[]> {
   const user = firebaseAuth.currentUser;
   if (!user) {
@@ -56,10 +46,7 @@ export async function getEmergencyContacts(): Promise<EmergencyContact[]> {
   }
 
   try {
-    const snap = await getDoc(getUserRef(user.uid));
-    if (!snap.exists()) return [];
-    const data = snap.data();
-    const contacts = Array.isArray(data.emergencyContacts) ? data.emergencyContacts : [];
+    const contacts = await readEmergencyContacts(user.uid);
     return contacts.map((contact: Partial<EmergencyContact>, index: number) => ({
       id: contact.id || `legacy-${index}`,
       name: String(contact.name || ''),
@@ -89,12 +76,8 @@ export async function addEmergencyContact(contact: Omit<EmergencyContact, 'id' |
       addedAt: new Date(), // Use regular Date instead of serverTimestamp() for arrayUnion
     };
 
-    const userRef = getUserRef(user.uid);
-    await setDoc(userRef, { updatedAt: serverTimestamp() }, { merge: true });
-    await updateDoc(userRef, {
-      emergencyContacts: arrayUnion(newContact),
-      updatedAt: serverTimestamp(),
-    });
+    const existing = await readEmergencyContacts(user.uid);
+    await writeEmergencyContacts(user.uid, [...existing, newContact]);
 
     console.log('Emergency contact added successfully');
 
@@ -136,18 +119,13 @@ export async function updateEmergencyContact(contactId: string, updates: Partial
   }
 
   try {
-    const userRef = getUserRef(user.uid);
-    const snap = await getDoc(userRef);
-    const emergencyContacts = (snap.exists() ? snap.data()?.emergencyContacts : null) || [];
+    const emergencyContacts = await readEmergencyContacts(user.uid);
 
     const updatedContacts = emergencyContacts.map((contact: EmergencyContact, index: number) =>
       (contact.id || `legacy-${index}`) === contactId ? { ...contact, ...updates } : contact
     );
 
-    await updateDoc(userRef, {
-      emergencyContacts: updatedContacts,
-      updatedAt: serverTimestamp(),
-    });
+    await writeEmergencyContacts(user.uid, updatedContacts);
 
     try {
       await logActivity({
@@ -175,19 +153,14 @@ export async function removeEmergencyContact(contactId: string): Promise<void> {
   }
 
   try {
-    const userRef = getUserRef(user.uid);
-    const snap = await getDoc(userRef);
-    const emergencyContacts = (snap.exists() ? snap.data()?.emergencyContacts : null) || [];
+    const emergencyContacts = await readEmergencyContacts(user.uid);
 
     const contactToRemove = emergencyContacts.find((c: EmergencyContact, i: number) => (c.id || `legacy-${i}`) === contactId);
     if (!contactToRemove) throw new Error('Contact not found');
 
     const updatedContacts = emergencyContacts.filter((c: EmergencyContact, i: number) => (c.id || `legacy-${i}`) !== contactId);
 
-    await updateDoc(userRef, {
-      emergencyContacts: updatedContacts,
-      updatedAt: serverTimestamp(),
-    });
+    await writeEmergencyContacts(user.uid, updatedContacts);
 
     try {
       await logActivity({
