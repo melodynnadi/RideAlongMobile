@@ -2445,6 +2445,13 @@ function RiderSettingsReferenceInner() {
   const { riderProfile, signOut } = useAuthStore();
   const { isVerified, verificationStatus } = useVerificationStore();
   const [pushEnabled, setPushEnabled] = useState(true);
+  // Same store the Emergency contacts screen edits, so the count stays current.
+  const emergencyContacts = useEmergencyContactsStore((st) => st.contacts);
+  const loadEmergencyContacts = useEmergencyContactsStore((st) => st.loadContacts);
+  useEffect(() => { loadEmergencyContacts().catch(() => {}); }, [loadEmergencyContacts]);
+  const emergencySub = emergencyContacts.length === 0
+    ? 'Add someone you trust'
+    : `${emergencyContacts.length} trusted contact${emergencyContacts.length === 1 ? '' : 's'}`;
 
   const riderUniversity = riderProfile?.university || null;
   const isVerifiedFinal = isVerified || verificationStatus === 'approved' || verificationStatus === 'auto-approved';
@@ -2503,7 +2510,7 @@ function RiderSettingsReferenceInner() {
       </View>
       <Text style={s.settingsSectionLabel}>SAFETY</Text>
         <View style={[s.menuCard, s.settingsMenuCard]}>
-          <MenuRow icon="shield" title="Emergency contacts" sub="2 trusted contacts" href="/(rider)/settings/emergency-contacts" returnTo="/(rider)/settings" />
+          <MenuRow icon="shield" title="Emergency contacts" sub={emergencySub} href="/(rider)/settings/emergency-contacts" returnTo="/(rider)/settings" />
         </View>
       <Text style={s.settingsSectionLabel}>APP PREFERENCES</Text>
       <View style={[s.menuCard, s.settingsMenuCard]}>
