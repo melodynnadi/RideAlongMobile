@@ -28,7 +28,8 @@ export function DriverHomeUtilityBar({
   return (
     <View style={styles.homeUtilityBar}>
       <View style={styles.homeBrandMark}>
-        <Image source={require('../../assets/ridealonglogo.png')} style={styles.homeBrandLogo} resizeMode="contain" />
+        {/* 108px copy (3x the 36px box): the full 1254px logo was slow to decode here. */}
+        <Image source={require('../../assets/ridealonglogo-mark.png')} style={styles.homeBrandLogo} resizeMode="contain" fadeDuration={0} />
       </View>
       <View style={styles.campusChip}>
         <Ionicons name="school-outline" size={15} color={NAVY} />
