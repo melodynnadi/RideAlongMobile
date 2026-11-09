@@ -1,3 +1,4 @@
+import { StudentVerificationReminder } from '@/components/StudentVerificationReminder';
 import { singleLineInput } from '@/constants/inputStyles';
 import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, ScrollView, Share, StyleSheet, Text as RNText, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
@@ -931,6 +932,7 @@ export function RiderHomeReference() {
         <View style={styles.heroCopy}>
           <Text style={styles.heroTitle}>Hey {firstName} - <Text style={styles.heroAccent}>{heroPrompt}</Text></Text>
         </View>
+        <StudentVerificationReminder role="rider" />
         {(nextRide || nextRequest) && confirmedRideStatus !== 'COMPLETED' ? (
           <View style={styles.homePrimaryBlock}>
             {nextRide ? <LiveRideCard ride={nextRide} /> : <RiderActivityCard request={nextRequest} offerInfo={nextRequestOfferInfo} confirmedRideStatus={confirmedRideStatus} confirmedRideId={confirmedRideId} driverEnRoute={driverEnRoute} verificationCode={verificationCode} />}

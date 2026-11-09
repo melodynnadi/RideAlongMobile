@@ -1,3 +1,4 @@
+import { StudentVerificationReminder } from '@/components/StudentVerificationReminder';
 import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import {
@@ -3821,6 +3822,8 @@ export default function HomeScreen() {
               Hey {firstName} - <Text style={s.heroAccent}>{driverHeroPrompt}</Text>
             </Text>
           </View>
+
+          <StudentVerificationReminder role="driver" />
 
           <View style={[s.section, s.homePrimaryBlock]}>
             {loading ? (
