@@ -22,6 +22,7 @@ import { setupChatNotificationListeners } from '@/src/services/notificationListe
 import { resetRideAlertSync, syncRideAlertLocation } from '@/src/services/rideAlerts';
 import { readEmergencyContacts } from '@/src/services/privateProfile';
 import { firebaseAuth } from '@/constants/services';
+import { attachPendingReferral } from '@/services/referrals';
 
 // Crash reporting — set EXPO_PUBLIC_SENTRY_DSN in .env to enable
 const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
@@ -56,9 +57,10 @@ function AuthGate() {
   useEffect(() => {
     if (isLoading) return;
 
-    // Links from emails (https://ridealongapp.com/open/...) route themselves
-    // once auth has loaded — see app/open/[...slug].tsx.
-    if ((segments[0] as string) === 'open') return;
+    // Links from emails (https://ridealongapp.com/open/...) and invite links
+    // (/r/CODE) route themselves once auth has loaded — see
+    // app/open/[...slug].tsx and app/r/[code].tsx.
+    if ((segments[0] as string) === 'open' || (segments[0] as string) === 'r') return;
 
     const inAuth = segments[0] === '(auth)';
     const inRider = segments[0] === '(rider)';
@@ -171,6 +173,18 @@ export default function RootLayout() {
       console.warn('[RootLayout] Failed to register push token:', error);
     });
   }, [isAuthenticated, activeRole]);
+
+  // A referral saved from an invite link or the sign-up form is attached once
+  // there's an account, and retried on later launches/foregrounds if the
+  // server couldn't be reached (a no-op when nothing is pending).
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    attachPendingReferral().catch(() => undefined);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') attachPendingReferral().catch(() => undefined);
+    });
+    return () => sub.remove();
+  }, [isAuthenticated]);
 
   // Move emergency contacts off the publicly readable users/{uid} doc (a no-op once moved).
   useEffect(() => {

@@ -381,6 +381,12 @@ class NotificationService {
           router.replace('/(driver)/earnings');
           break;
 
+        // Referral reward unlocked / bonus payable / bonus paid → the Invite
+        // friends screen (it lists every reward on the account in either mode).
+        case 'referral':
+          router.push({ pathname: isDriver ? '/(driver)/settings/invite-friends' : '/(rider)/settings/invite-friends', params: { returnTo: isDriver ? '/(driver)' : '/(rider)' } } as any);
+          break;
+
         case 'new_message': {
           const chatId = (data as any).chatId;
           if (chatId) {

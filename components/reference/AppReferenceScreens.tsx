@@ -2502,7 +2502,7 @@ function RiderSettingsReferenceInner() {
       <View style={[s.menuCard, s.settingsMenuCard]}>
         <MenuRow icon="person" title="Account" sub="Email, phone, password" href="/(rider)/settings/account-settings" returnTo="/(rider)/settings" />
         <MenuRow icon="school" title="Student verification" sub={riderVerLabel} href="/(rider)/settings/student-verification" returnTo="/(rider)/settings" />
-
+        <MenuRow icon="gift" title="Invite friends" sub="Share your code and track rewards" href="/(rider)/settings/invite-friends" returnTo="/(rider)/settings" />
       </View>
       <Text style={s.settingsSectionLabel}>RIDE</Text>
       <View style={[s.menuCard, s.settingsMenuCard]}>

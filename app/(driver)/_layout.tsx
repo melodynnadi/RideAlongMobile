@@ -52,6 +52,7 @@ export default function DriverTabLayout() {
       <Tabs.Screen name="settings/payout-history" options={{ href: null }} />
       <Tabs.Screen name="settings/driver-documents" options={{ href: null }} />
       <Tabs.Screen name="settings/vehicle-info" options={{ href: null }} />
+      <Tabs.Screen name="settings/invite-friends" options={{ href: null }} />
       <Tabs.Screen name="messages/[chatId]" options={{ href: null }} />
       <Tabs.Screen name="request/[id]" options={{ href: null }} />
       <Tabs.Screen name="trip/[confirmedRideId]" options={{ href: null }} />

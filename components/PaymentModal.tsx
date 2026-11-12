@@ -168,6 +168,8 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
     : { rideFee: localTotals.rideFee, platformFee: localTotals.platformFee, discount: 0, stripeFee: localTotals.stripeFee, total: localTotals.total, totalInCents: localTotals.totalInCents };
   // Scope of the applied discount, from the server's own price breakdown.
   const discountIsRide = (serverPricing?.discountAppliesTo ?? quote?.promotion?.appliesTo) === 'ride';
+  // Account-bound referral rewards come through checkout as promotion "referral:<id>".
+  const discountIsReferral = (quote?.promotion?.id || '').startsWith('referral:');
   const bookingKey = booking ? JSON.stringify(booking) : null;
 
   // Load the server quote and the available checkout offers each time the modal opens.
@@ -739,7 +741,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
               </View>
               {totals.discount > 0 ? (
                 <View style={styles.rowBetween}>
-                  <Text style={styles.lineLabel}>{discountIsRide ? 'Promo (ride)' : 'Promo (RideAlong fee)'}</Text>
+                  <Text style={styles.lineLabel}>{discountIsReferral ? 'Referral reward' : discountIsRide ? 'Promo (ride)' : 'Promo (RideAlong fee)'}</Text>
                   <Text style={styles.discountValue}>−${totals.discount.toFixed(2)}</Text>
                 </View>
               ) : null}

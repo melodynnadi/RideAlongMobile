@@ -84,6 +84,7 @@ module.exports = ({ config }) => ({
             { scheme: "https", host: "ridealongapp.com", pathPrefix: "/open" },
             { scheme: "https", host: "ridealongapp.com", pathPrefix: "/ride" },
             { scheme: "https", host: "ridealongapp.com", pathPrefix: "/request" },
+            { scheme: "https", host: "ridealongapp.com", pathPrefix: "/r/" },
           ],
           category: [
             "BROWSABLE",

@@ -24,6 +24,7 @@ import { DatePickerModal } from '@/components/DateTimePickerModals';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { type SignupUniversity } from '@/services/authSignup';
+import { normalizeReferralCode, pendingReferral } from '@/services/referrals';
 import { hitSlop } from '@/theme/designSystem';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { useAuthStore } from '@/stores/authStore';
@@ -537,6 +538,15 @@ export function DriverSignUpScreen() {
   const [insuranceDoc, setInsuranceDoc] = useState<DocAsset | null>(null);
 
   // Step 5 – Agreements
+  // Optional invite code (new applicants only), pre-filled from an invite
+  // link. It's sent with the application and attached by the server to the
+  // account created when the application is approved.
+  const [referralCode, setReferralCode] = useState('');
+  useEffect(() => {
+    if (isUpgrade) return;
+    pendingReferral.get().then((p) => { if (p) setReferralCode((cur) => cur || p.code); }).catch(() => undefined);
+  }, [isUpgrade]);
+
   const [agreedTerms, setAgreedTerms] = useState(false);
   const [agreedDriver, setAgreedDriver] = useState(false);
   const [agreedBackground, setAgreedBackground] = useState(false);
@@ -797,6 +807,9 @@ export function DriverSignUpScreen() {
   const submit = async () => {
     const err = validate();
     if (err) { setError(err); return; }
+    const typedCode = isUpgrade ? '' : referralCode.trim();
+    const inviteCode = typedCode ? normalizeReferralCode(typedCode) : null;
+    if (typedCode && !inviteCode) { setError('Check the invite code — it’s letters and numbers, like ABC7K9.'); return; }
     setError('');
     setLoading(true);
     try {
@@ -826,6 +839,7 @@ export function DriverSignUpScreen() {
       form.append('policyNumber', policyNumber.trim());
       form.append('insuranceExpiry', isoToMonthYear(insuranceExpiry));
       form.append('seats', seats);
+      if (inviteCode) form.append('referralCode', inviteCode);
       if (emailToken) form.append('emailVerificationToken', emailToken);
       form.append('licenseFront', fileField(licenseFront!, `license_front.${(licenseFront!.mimeType ?? 'image/jpeg').split('/')[1]}`) as any);
       form.append('licenseBack', fileField(licenseBack!, `license_back.${(licenseBack!.mimeType ?? 'image/jpeg').split('/')[1]}`) as any);
@@ -879,6 +893,8 @@ export function DriverSignUpScreen() {
       }
 
       const applicationId = submitData.applicationId;
+      // The application carries the invite code now; the server attaches it on approval.
+      if (inviteCode) void pendingReferral.clear();
       // Submitted — drop the saved draft. Its photos stay until we know the result,
       // since "Fix & reapply" after a rejection reuses them.
       void AsyncStorage.removeItem(DRAFT_KEY).catch(() => undefined);
@@ -1284,6 +1300,10 @@ export function DriverSignUpScreen() {
               <Text style={s.reviewRow}><Text style={s.reviewKey}>Plate  </Text>{licensePlate}</Text>
               <Text style={s.reviewRow}><Text style={s.reviewKey}>Insurance  </Text>{insuranceCompany}</Text>
             </View>
+
+            {!isUpgrade ? (
+              <Input label="INVITE CODE (OPTIONAL)" value={referralCode} onChangeText={setReferralCode} placeholder="From a driver friend, e.g. ABC7K9" autoCapitalize="characters" s={s} colors={colors} />
+            ) : null}
 
             <AgreementRow checked={agreedTerms} onToggle={() => setAgreedTerms((v) => !v)} s={s}>
               I agree to RideAlong&apos;s{' '}

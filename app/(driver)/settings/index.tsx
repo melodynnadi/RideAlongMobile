@@ -143,6 +143,14 @@ export default function SettingsScreen() {
               label=".edu verification"
               sub={verLabel}
               onPress={() => router.push({ pathname: '/(driver)/settings/driver-student-verification', params: { returnTo: '/(driver)/settings' } } as any)}
+            />
+            <NavRow
+              colors={colors}
+              s={s}
+              icon="gift-outline"
+              label="Invite friends"
+              sub="Share your code and track bonuses"
+              onPress={() => router.push({ pathname: '/(driver)/settings/invite-friends', params: { returnTo: '/(driver)/settings' } } as any)}
               isLast
             />
           </View>

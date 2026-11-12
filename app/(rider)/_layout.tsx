@@ -114,6 +114,7 @@ export default function RiderTabLayout() {
       <Tabs.Screen name="settings/saved-routes" options={{ href: null, tabBarStyle: { display: 'none' } }} />
       <Tabs.Screen name="settings/student-verification" options={{ href: null, tabBarStyle: { display: 'none' } }} />
       <Tabs.Screen name="settings/payment-methods-enhanced" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="settings/invite-friends" options={{ href: null, tabBarStyle: { display: 'none' } }} />
       <Tabs.Screen name="messages/[chatId]" options={{ href: null }} />
       <Tabs.Screen name="ride/[id]" options={{ href: null }} />
       <Tabs.Screen name="trip/[confirmedRideId]" options={{ href: null }} />

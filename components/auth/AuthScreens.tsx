@@ -21,6 +21,7 @@ import { StatusBar } from 'expo-status-bar';
 import { UniversitySearch } from '@/components/ui/UniversitySearch';
 import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import { emailDomainMismatch, getAuthErrorMessage, type SignupUniversity } from '@/services/authSignup';
+import { attachPendingReferral, normalizeReferralCode, pendingReferral } from '@/services/referrals';
 import { useAuthStore } from '@/stores/authStore';
 import { hitSlop } from '@/theme/designSystem';
 import { WebView } from 'react-native-webview';
@@ -750,6 +751,16 @@ export function SignUpScreen({ forcedRole }: { forcedRole?: Role }) {
   const [accepted, setAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState('');
+  // Optional invite code, pre-filled from an invite link opened earlier.
+  const [referralCode, setReferralCode] = useState('');
+  const [linkedCode, setLinkedCode] = useState<string | null>(null);
+  useEffect(() => {
+    pendingReferral.get().then((p) => {
+      if (!p) return;
+      setReferralCode((cur) => cur || p.code);
+      if (p.source === 'link') setLinkedCode(p.code);
+    }).catch(() => undefined);
+  }, []);
 
   const { title, accent } = SIGNUP_STEPS[step - 1];
   const subtitle = step === 3 && email.trim()
@@ -787,9 +798,16 @@ export function SignUpScreen({ forcedRole }: { forcedRole?: Role }) {
     if (pwErr) { setFormError(pwErr); return; }
     if (password !== confirmPassword) { setFormError('Passwords do not match.'); return; }
     if (!accepted) { setFormError('Accept the Terms and Privacy Policy to continue.'); return; }
+    const typedCode = referralCode.trim();
+    const inviteCode = typedCode ? normalizeReferralCode(typedCode) : null;
+    if (typedCode && !inviteCode) { setFormError('Check the invite code — it’s letters and numbers, like ABC7K9.'); return; }
     try {
       setLoading(true);
       setFormError('');
+      // Kept on the device until it's attached to the new account (retried if
+      // the server can't be reached). Eligibility is decided by the server.
+      if (inviteCode) await pendingReferral.save(inviteCode, inviteCode === linkedCode ? 'link' : 'code');
+      else await pendingReferral.clear();
       await signUp({
         email,
         password,
@@ -799,6 +817,8 @@ export function SignUpScreen({ forcedRole }: { forcedRole?: Role }) {
         universityData: university!,
         role,
       });
+      // Never blocks or fails sign-up; a pending code is retried later if needed.
+      attachPendingReferral().catch(() => undefined);
       // AuthGate takes it from here: verify-email first, then (riders) the profile steps.
     } catch (submitError) {
       setFormError(getAuthErrorMessage(submitError, 'sign-up'));
@@ -866,6 +886,7 @@ export function SignUpScreen({ forcedRole }: { forcedRole?: Role }) {
         <>
           <AuthInput label="CREATE A PASSWORD" value={password} onChangeText={setPassword} placeholder="8+ characters" textContentType="newPassword" secure />
           <AuthInput label="CONFIRM PASSWORD" value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Enter it again" textContentType="newPassword" secure />
+          <AuthInput label="INVITE CODE (OPTIONAL)" value={referralCode} onChangeText={setReferralCode} placeholder="From a friend, e.g. ABC7K9" autoCapitalize="characters" />
           <View style={styles.termsRow}>
             <TouchableOpacity onPress={() => setAccepted((c) => !c)} accessibilityRole="checkbox" accessibilityState={{ checked: accepted }}>
               <View style={[styles.checkbox, accepted && styles.checkboxChecked]}>
