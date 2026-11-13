@@ -51,7 +51,7 @@ import { ensurePushRegistered } from '@/utils/registerPushToken';
 import { settingsService, type ThemeMode } from '@/src/services/settingsService';
 import { AppearanceSelector } from '@/components/ui/AppearanceSelector';
 import { NearbyAlertsSetting } from '@/components/NearbyAlertsSetting';
-import { hasUserRatedRide } from '@/src/services/ratings';
+import { hasUserRatedRide, skipRating } from '@/src/services/ratings';
 const FONT_SANS = Platform.OS === 'web' ? '"Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, sans-serif' : undefined;
 const FONT_MONO = Platform.OS === 'web' ? '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace' : undefined;
 
@@ -1713,12 +1713,25 @@ function RateTripReferenceInner() {
         const ratedField = role === 'rider' ? 'riderRated' : 'driverRated';
         await updateDoc(doc(firestore, 'confirmedRides', confirmedRideId), { [ratedField]: true }).catch(() => undefined);
         router.replace(role === 'driver' ? '/(driver)/' as any : '/(rider)/' as any);
+      } else if (code.includes('deadline-exceeded')) {
+        // Ratings close 14 days after the ride; don't keep bringing it back.
+        await skipRating(uid, confirmedRideId);
+        Alert.alert('This ride can’t be rated anymore', 'Ratings close 14 days after a ride.', [
+          { text: 'OK', onPress: () => router.replace(role === 'driver' ? '/(driver)/' as any : '/(rider)/' as any) },
+        ]);
       } else {
         Alert.alert('Rating not submitted', error?.message || 'Please check your connection and try again.');
       }
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // Rating is encouraged but never required to keep using the app.
+  const handleSkip = async () => {
+    if (submitting) return;
+    if (uid && confirmedRideId) await skipRating(uid, confirmedRideId);
+    router.replace(role === 'driver' ? '/(driver)/' as any : '/(rider)/' as any);
   };
 
   const firstName = otherName.split(' ')[0] || (role === 'rider' ? 'Driver' : 'Rider');
@@ -1741,7 +1754,7 @@ function RateTripReferenceInner() {
       >
         <SafeAreaView edges={['top']} />
         <ScrollView
-          contentContainerStyle={{ paddingBottom: insets.bottom + 110 }}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 160 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -1805,6 +1818,14 @@ function RateTripReferenceInner() {
             {submitting
               ? <ActivityIndicator color={colors.textInverse} />
               : <RNText style={{ color: colors.textInverse, fontSize: 16, fontWeight: '800' }}>Submit</RNText>}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={{ alignItems: 'center', paddingVertical: 12 }}
+            onPress={() => void handleSkip()}
+            disabled={submitting}
+            accessibilityRole="button"
+          >
+            <RNText style={{ color: colors.textSecondary, fontSize: 14, fontWeight: '700' }}>Skip for now</RNText>
           </TouchableOpacity>
         </View>
       </LinearGradient>

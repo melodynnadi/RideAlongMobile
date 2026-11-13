@@ -1,5 +1,32 @@
 import { collection, doc, documentId, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { firestore } from '@/constants/services';
+
+/** Same window the submitRating Cloud Function enforces (functions/index.js). */
+export const RATING_WINDOW_DAYS = 14;
+
+const skippedKey = (userId: string) => `ridealong.skippedRatings.v1.${userId}`;
+
+async function skippedRatings(userId: string): Promise<Set<string>> {
+  try {
+    const raw = await AsyncStorage.getItem(skippedKey(userId));
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Don't prompt this user to rate this ride again on this device. */
+export async function skipRating(userId: string, rideId: string): Promise<void> {
+  if (!userId || !rideId) return;
+  const ids = await skippedRatings(userId);
+  ids.add(rideId);
+  // Keep the list small; only recent rides can be prompted anyway.
+  await AsyncStorage.setItem(skippedKey(userId), JSON.stringify([...ids].slice(-100))).catch(() => undefined);
+}
+
+const completedMillis = (d: any): number | null =>
+  d?.completedAt?.toMillis?.() ?? d?.updatedAt?.toMillis?.() ?? d?.createdAt?.toMillis?.() ?? null;
 
 export async function hasUserRatedRide(rideId: string, userId: string): Promise<boolean> {
   if (!rideId || !userId) return false;
@@ -46,8 +73,14 @@ export async function findPendingRatingRide(
       return bt - at;
     });
 
+  const skipped = await skippedRatings(userId);
+  const oldest = Date.now() - RATING_WINDOW_DAYS * 24 * 3600 * 1000;
   for (const ride of rides) {
     if (ride.data?.[ratedField] === true) continue;
+    if (skipped.has(ride.id)) continue;
+    // Too old to rate: the server would reject it, so don't ask.
+    const at = completedMillis(ride.data);
+    if (at != null && at < oldest) continue;
     const alreadyRated = await hasUserRatedRide(ride.id, userId);
     if (!alreadyRated) return ride.id;
   }
