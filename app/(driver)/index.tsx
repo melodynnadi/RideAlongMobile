@@ -23,7 +23,7 @@ import {
 import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { ReportIssueModal } from '@/components/ReportIssueModal';
 import { Button } from '@/components/ui/Button';
-import { computeFilteredAverageRating, hasUserRatedRide } from '@/src/services/ratings';
+import { computeFilteredAverageRating, shouldPromptRating } from '@/src/services/ratings';
 import { useProfileCompleteness, ProfileCompletionItem } from '@/hooks/useProfileCompleteness';
 import { useDriverBonuses, DriverBonus } from '@/hooks/useDriverBonuses';
 import { openStudentVerification } from '@/src/utils/studentVerificationNav';
@@ -2798,9 +2798,11 @@ export default function HomeScreen() {
         driverRatingNavRef.current.add(id);
         try {
           const snap = await getDoc(doc(firestore, 'confirmedRides', id));
-          const alreadyRated = !!snap.data()?.driverRated || !!(uid && await hasUserRatedRide(id, uid));
-          if (alreadyRated) return;
-        } catch {}
+          // Not rated, not skipped, and still inside the 14-day rating window.
+          if (!uid || !(await shouldPromptRating(id, snap.data(), uid, 'driver'))) return;
+        } catch {
+          return;
+        }
         setTimeout(() => {
           router.push({ pathname: '/(driver)/rate-trip', params: { confirmedRideId: id } } as any);
         }, 500);

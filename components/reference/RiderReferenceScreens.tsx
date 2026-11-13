@@ -40,7 +40,7 @@ import { appHeader, hitSlop, layout } from '@/theme/designSystem';
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 import { badgeLabel, useRiderUnreadCounts } from '@/hooks/useRiderUnreadCounts';
 import { riderCompleteRide } from '@/src/services/rideActions';
-import { hasUserRatedRide } from '@/src/services/ratings';
+import { hasUserRatedRide, shouldPromptRating } from '@/src/services/ratings';
 import { useRideBrowseStore, type RiderRideFilter } from '@/stores/rideBrowseStore';
 import { ReportIssueModal } from '@/components/ReportIssueModal';
 import { CityAutocomplete } from '@/components/CityAutocomplete';
@@ -828,8 +828,8 @@ export function RiderHomeReference() {
       setVerificationCode(rideData.verificationCode || null);
       if (status === 'COMPLETED' && !ratingNavRef.current.has(docId)) {
         ratingNavRef.current.add(docId);
-        const alreadyRated = !!rideData.riderRated || await hasUserRatedRide(docId, uid ?? '');
-        if (!alreadyRated) router.push({ pathname: '/(rider)/rate-trip', params: { confirmedRideId: docId } } as any);
+        // Not rated, not skipped, and still inside the 14-day rating window.
+        if (uid && await shouldPromptRating(docId, rideData, uid, 'rider')) router.push({ pathname: '/(rider)/rate-trip', params: { confirmedRideId: docId } } as any);
       }
     };
 

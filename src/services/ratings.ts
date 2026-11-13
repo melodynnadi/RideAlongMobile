@@ -28,6 +28,25 @@ export async function skipRating(userId: string, rideId: string): Promise<void> 
 const completedMillis = (d: any): number | null =>
   d?.completedAt?.toMillis?.() ?? d?.updatedAt?.toMillis?.() ?? d?.createdAt?.toMillis?.() ?? null;
 
+/** False once the server would reject a rating (14 days after completion). */
+export function isRatingWindowOpen(rideData: any): boolean {
+  const at = completedMillis(rideData);
+  return at == null || at >= Date.now() - RATING_WINDOW_DAYS * 24 * 3600 * 1000;
+}
+
+/**
+ * Whether to send this user to the rate screen for this completed ride:
+ * not rated yet, not skipped, and still inside the rating window. Every
+ * place that opens the rate screen automatically should ask this first.
+ */
+export async function shouldPromptRating(rideId: string, rideData: any, userId: string, role: 'rider' | 'driver'): Promise<boolean> {
+  if (!rideId || !userId) return false;
+  if (rideData?.[role === 'rider' ? 'riderRated' : 'driverRated'] === true) return false;
+  if (!isRatingWindowOpen(rideData)) return false;
+  if ((await skippedRatings(userId)).has(rideId)) return false;
+  return !(await hasUserRatedRide(rideId, userId));
+}
+
 export async function hasUserRatedRide(rideId: string, userId: string): Promise<boolean> {
   if (!rideId || !userId) return false;
   try {
@@ -73,16 +92,9 @@ export async function findPendingRatingRide(
       return bt - at;
     });
 
-  const skipped = await skippedRatings(userId);
-  const oldest = Date.now() - RATING_WINDOW_DAYS * 24 * 3600 * 1000;
   for (const ride of rides) {
     if (ride.data?.[ratedField] === true) continue;
-    if (skipped.has(ride.id)) continue;
-    // Too old to rate: the server would reject it, so don't ask.
-    const at = completedMillis(ride.data);
-    if (at != null && at < oldest) continue;
-    const alreadyRated = await hasUserRatedRide(ride.id, userId);
-    if (!alreadyRated) return ride.id;
+    if (await shouldPromptRating(ride.id, ride.data, userId, role)) return ride.id;
   }
 
   return null;

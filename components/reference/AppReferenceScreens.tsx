@@ -51,7 +51,7 @@ import { ensurePushRegistered } from '@/utils/registerPushToken';
 import { settingsService, type ThemeMode } from '@/src/services/settingsService';
 import { AppearanceSelector } from '@/components/ui/AppearanceSelector';
 import { NearbyAlertsSetting } from '@/components/NearbyAlertsSetting';
-import { hasUserRatedRide, skipRating } from '@/src/services/ratings';
+import { hasUserRatedRide, isRatingWindowOpen, skipRating } from '@/src/services/ratings';
 const FONT_SANS = Platform.OS === 'web' ? '"Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, sans-serif' : undefined;
 const FONT_MONO = Platform.OS === 'web' ? '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace' : undefined;
 
@@ -1641,6 +1641,13 @@ function RateTripReferenceInner() {
       setRole(currentRole);
 
       if (d[ratedField] || await hasUserRatedRide(confirmedRideId, uid)) {
+        router.replace(currentRole === 'rider' ? '/(rider)/' as any : '/(driver)/' as any);
+        return;
+      }
+      // Safety net for any path that opens this screen: a ride past the rating
+      // window can't be rated, so close it instead of trapping the user here.
+      if (!isRatingWindowOpen(d)) {
+        await skipRating(uid, confirmedRideId);
         router.replace(currentRole === 'rider' ? '/(rider)/' as any : '/(driver)/' as any);
         return;
       }
