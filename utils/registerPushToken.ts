@@ -41,6 +41,23 @@ export async function setupAndroidChannels() {
   ]);
 }
 
+let permissionRequest: Promise<Notifications.NotificationPermissionsStatus> | null = null;
+
+/**
+ * Ask for notification permission once, shared by every caller. On sign-in
+ * several places register at the same moment; iOS shows a single prompt and
+ * answers a second, simultaneous request right away with "not granted yet" —
+ * which used to show "Notifications Disabled" while the user was tapping Allow.
+ */
+export async function ensurePushPermission(): Promise<Notifications.NotificationPermissionsStatus> {
+  const current = await Notifications.getPermissionsAsync();
+  if (current.status === 'granted' || current.canAskAgain === false) return current;
+  if (!permissionRequest) {
+    permissionRequest = Notifications.requestPermissionsAsync().finally(() => { permissionRequest = null; });
+  }
+  return permissionRequest;
+}
+
 async function getExpoPushToken(): Promise<string | null> {
   const projectId = Constants.expoConfig?.extra?.eas?.projectId;
   if (!projectId) {
@@ -52,11 +69,8 @@ async function getExpoPushToken(): Promise<string | null> {
   // create channels first (Expo's documented order).
   await setupAndroidChannels();
 
-  const perms = await Notifications.getPermissionsAsync();
-  if (perms.status !== 'granted') {
-    const req = await Notifications.requestPermissionsAsync();
-    if (req.status !== 'granted') return null;
-  }
+  const perms = await ensurePushPermission();
+  if (perms.status !== 'granted') return null;
 
   const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
   return tokenData.data;

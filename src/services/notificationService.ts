@@ -15,7 +15,7 @@ import { buildToastKey, shouldShowToastEvent } from '../utils/toastDeduper';
 import { settingsService } from './settingsService';
 import { useAuthStore } from '@/stores/authStore';
 import { firebaseAuth, firestore } from '@/constants/services';
-import { setupAndroidChannels } from '@/utils/registerPushToken';
+import { ensurePushPermission, setupAndroidChannels } from '@/utils/registerPushToken';
 
 // ============================================================================
 // NOTIFICATION DEDUPLICATION
@@ -164,18 +164,13 @@ class NotificationService {
       // so create channels before asking (Expo's documented order).
       await setupAndroidChannels();
 
-      // Request notification permissions
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus;
-
-      if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        finalStatus = status;
-      }
+      // Request notification permissions (one shared prompt — see ensurePushPermission).
+      const { status: finalStatus } = await ensurePushPermission();
 
       if (finalStatus !== 'granted') {
         console.warn('Failed to get push notification permissions');
-        showToast('warning', 'Notifications Disabled', 'Please enable notifications in settings');
+        // Only when the user actually said no — not while the prompt is still open.
+        if (finalStatus === 'denied') showToast('warning', 'Notifications Disabled', 'Please enable notifications in settings');
         return null;
       }
 
