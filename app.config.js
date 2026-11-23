@@ -53,8 +53,8 @@ module.exports = ({ config }) => ({
     },
     android: {
       adaptiveIcon: {
-        foregroundImage: "./assets/adaptive-icon.png",
-        backgroundColor: "#0B1220",
+        foregroundImage: "./assets/ridealong-android-icon-foreground.png",
+        backgroundColor: "#F85902",
       },
       statusBarStyle: "dark",
       notification: {
@@ -65,7 +65,7 @@ module.exports = ({ config }) => ({
       predictiveBackGestureEnabled: false,
       config: {
         googleMaps: {
-          apiKey: "AIzaSyDWOpCIVn_oPxn4qWYE4eG3teKtn0c5G-w",
+          apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
         },
       },
       permissions: [
@@ -106,6 +106,12 @@ module.exports = ({ config }) => ({
           backgroundColor: "#FBFAF7",
           dark: {
             backgroundColor: "#FBFAF7",
+          },
+          android: {
+            image: "./assets/ridealonglogo-mark.png",
+            dark: {
+              image: "./assets/ridealonglogo-mark.png",
+            },
           },
         },
       ],
