@@ -10,6 +10,7 @@ import { PreferredRoute, usePreferredRoutesStore } from '@/stores/preferredRoute
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 import { hitSlop, layout } from '@/theme/designSystem';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 
 function displayLocation(value: string) {
   return value.replace(/(^|[\s,-])([a-z])/g, (_, prefix: string, letter: string) => `${prefix}${letter.toUpperCase()}`);
@@ -255,6 +256,7 @@ export default function SavedRoutesScreen() {
                 {isSaving ? <ActivityIndicator color={colors.textInverse} /> : <Text style={styles.saveButtonText}>{editing ? 'Update route' : 'Save route'}</Text>}
               </TouchableOpacity>
             </ScrollView>
+            <AndroidBottomSpacer />
           </View>
         </KeyboardAwareModalView>
       </Modal>

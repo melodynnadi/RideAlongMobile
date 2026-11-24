@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Modal, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform, TextInput } from 'react-native';
+import { KeyboardAvoidingView } from '@/components/ui/KeyboardAvoidingView';
 import { Check, CreditCard, Plus, ShieldCheck, Smartphone, Tag, X } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { firebaseAuth, firestore, getApiBaseUrl } from '@/constants/services';
@@ -14,6 +15,7 @@ import {
 } from '@/services/promoCheckout';
 import { Promotion } from '@/types';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 import { AddCardModal } from '@/components/AddCardModal';
 
 export type PaymentModalProps = {
@@ -700,7 +702,8 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
   return (
     <>
     <Modal animationType="slide" transparent visible={visible && !showAddCard} onRequestClose={handleCancel}>
-      <View style={styles.modalOverlay}>
+      {/* Android doesn't resize edge-to-edge dialogs for the keyboard (promo code field). */}
+      <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'android' ? 'height' : undefined}>
         <View style={styles.modalContent}>
           <View style={styles.sheetHandle} />
           <View style={styles.modalHeader}>
@@ -909,9 +912,10 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
                 <Text style={styles.confirmBtnText}>{confirmLabel || 'Confirm and request ride'} - ${totals.total.toFixed(2)}</Text>
               )}
             </TouchableOpacity>
+            <AndroidBottomSpacer />
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
     <AddCardModal
       visible={showAddCard}

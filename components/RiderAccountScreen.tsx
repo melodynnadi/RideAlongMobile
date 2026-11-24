@@ -17,6 +17,7 @@ import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
 import { UniversitySearch } from '@/components/ui/UniversitySearch';
 import { MAJORS } from '@/constants/universities';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 
 function AccountField({ label, value, onChangeText, placeholder, keyboardType, editable = true, note, styles, colors }: {
   label: string;
@@ -368,6 +369,7 @@ export default function RiderAccountScreen() {
             <TouchableOpacity style={[styles.deleteButton, (!deletePassword || deleting) && styles.buttonDisabled]} onPress={() => void deleteAccount()} disabled={!deletePassword || deleting}>
               {deleting ? <ActivityIndicator color={colors.textInverse} /> : <Text style={styles.saveText}>Delete account permanently</Text>}
             </TouchableOpacity>
+            <AndroidBottomSpacer />
           </View>
         </KeyboardAwareModalView>
       </Modal>
@@ -420,6 +422,7 @@ export default function RiderAccountScreen() {
                 <View style={styles.pickerEmpty}><Text style={styles.pickerEmptyText}>{`No majors match "${majorSearch}"`}</Text></View>
               ) : null}
             </ScrollView>
+            <AndroidBottomSpacer />
           </View>
         </View>
       </Modal>

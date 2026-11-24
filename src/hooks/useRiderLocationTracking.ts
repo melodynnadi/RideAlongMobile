@@ -50,7 +50,7 @@ export function useRiderLocationTracking(target: RiderTrackTarget | null) {
           return;
         }
 
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: false });
         if (cancelled) return;
 
         await setDoc(doc(firestore, 'riderTracking', rideKey), {
@@ -67,7 +67,7 @@ export function useRiderLocationTracking(target: RiderTrackTarget | null) {
 
         intervalRef.current = setInterval(async () => {
           try {
-            const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: false });
             await updateDoc(doc(firestore, 'riderTracking', rideKey), {
               lat: pos.coords.latitude,
               lng: pos.coords.longitude,

@@ -13,6 +13,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useBottomNavExtra } from '@/components/ui/AndroidBottomInset';
 import { router } from 'expo-router';
 import { DriverBottomNav } from '@/components/DriverBottomNav';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -65,6 +66,7 @@ const warnedRideIds = new Set<string>();
 
 export default function MessagesScreen() {
   const { colors } = useAppTheme();
+  const navExtra = useBottomNavExtra();
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -597,7 +599,7 @@ export default function MessagesScreen() {
         <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
           <ScrollView
             style={s.scroll}
-            contentContainerStyle={s.scrollContent}
+            contentContainerStyle={[s.scrollContent, { paddingBottom: 102 + navExtra }]}
             showsVerticalScrollIndicator={false}
           >
             <View style={s.pageHeader}>
@@ -621,7 +623,7 @@ export default function MessagesScreen() {
           data={chats}
           renderItem={renderChatItem}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={s.scrollContent}
+          contentContainerStyle={[s.scrollContent, { paddingBottom: 102 + navExtra }]}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl

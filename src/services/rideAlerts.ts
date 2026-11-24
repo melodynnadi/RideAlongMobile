@@ -71,7 +71,7 @@ export async function getRideAlertPrefs(role: AlertRole): Promise<RoleAlertPrefs
 
 async function readPosition(): Promise<{ lat: number; lng: number } | null> {
   const pos = (await Location.getLastKnownPositionAsync({ maxAge: 15 * 60 * 1000 }))
-    || (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+    || (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: false }));
   if (!pos?.coords) return null;
   return { lat: pos.coords.latitude, lng: pos.coords.longitude };
 }

@@ -1,8 +1,10 @@
 ﻿import React, { useContext, useEffect, useMemo, useState } from 'react';
 import * as WebBrowser from 'expo-web-browser';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Switch, Text as RNText, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Linking, Modal, Platform, ScrollView, StyleSheet, Switch, Text as RNText, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, useAndroidKeyboardOpen } from '@/components/ui/KeyboardAvoidingView';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AndroidBottomSpacer, useBottomNavExtra, useBottomNavOffset } from '@/components/ui/AndroidBottomInset';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
@@ -111,7 +113,7 @@ function Phone({
 }) {
   const { colors, s } = useScreenCtx();
   const insets = useSafeAreaInsets();
-  const bottomNavHeight = 78;
+  const bottomNavHeight = 78 + useBottomNavExtra();
   const { returnTo: returnToParam } = useLocalSearchParams<{ returnTo?: string | string[] }>();
   const returnTo = Array.isArray(returnToParam) ? returnToParam[0] : returnToParam;
 
@@ -278,6 +280,7 @@ function GhostButton({ children, onPress }: { children: React.ReactNode; onPress
 
 function BottomNav({ active }: { active: TabKey }) {
   const { colors, s } = useScreenCtx();
+  const navBottom = useBottomNavOffset();
   const { messageCount } = useRiderUnreadCounts();
   const tabs: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap; href: string }[] = [
     { key: 'home', label: 'Home', icon: 'home', href: '/(rider)' },
@@ -287,7 +290,7 @@ function BottomNav({ active }: { active: TabKey }) {
     { key: 'profile', label: 'Profile', icon: 'person', href: '/(rider)/profile' },
   ];
   return (
-    <View style={s.tabs}>
+    <View style={[s.tabs, { bottom: navBottom }]}>
       {tabs.map((tab) => {
         const selected = active === tab.key;
         return (
@@ -1846,6 +1849,7 @@ export function RiderMessagesReference() {
 }
 function RiderMessagesReferenceInner() {
   const { colors, s } = useScreenCtx();
+  const navExtra = useBottomNavExtra();
   const uid = firebaseAuth.currentUser?.uid;
   const [chats, setChats] = useState<MobileConversation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1932,7 +1936,7 @@ function RiderMessagesReferenceInner() {
           data={chats}
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 102, flexGrow: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 102 + navExtra, flexGrow: 1 }}
           showsVerticalScrollIndicator={false}
           ListHeaderComponent={
             <View style={{ marginBottom: 4 }}>
@@ -1970,6 +1974,7 @@ function RiderChatReferenceInner() {
   const id = Array.isArray(chatId) ? chatId[0] : chatId;
   const uid = firebaseAuth.currentUser?.uid || '';
   const insets = useSafeAreaInsets();
+  const keyboardOpen = useAndroidKeyboardOpen();
 
   const [messages, setMessages] = useState<MobileMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -2181,7 +2186,7 @@ function RiderChatReferenceInner() {
 
 
           {/* Input bar */}
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 14, paddingVertical: 12, paddingBottom: 12 + insets.bottom, borderTopWidth: 1, borderTopColor: colors.border, gap: 10, backgroundColor: colors.bgCard }}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 14, paddingVertical: 12, paddingBottom: 12 + (keyboardOpen ? 0 : insets.bottom), borderTopWidth: 1, borderTopColor: colors.border, gap: 10, backgroundColor: colors.bgCard }}>
             {messagingBlocked ? (
               <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 14, backgroundColor: colors.bgSecondary, borderRadius: 16, borderWidth: 1, borderColor: colors.border }}>
                 <Ionicons name="lock-closed-outline" size={14} color={colors.textSecondary} />
@@ -2699,6 +2704,7 @@ function RiderEmergencyReferenceInner() {
               {isLoading ? <ActivityIndicator color={colors.textInverse} /> : <Ionicons name="shield-checkmark-outline" size={20} color={colors.textInverse} />}
               <Text style={s.addContactButtonText}>{isLoading ? 'Adding contact...' : 'Add contact'}</Text>
             </TouchableOpacity>
+            <AndroidBottomSpacer />
           </View>
         </KeyboardAwareModalView>
       </Modal>

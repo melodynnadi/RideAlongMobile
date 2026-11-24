@@ -1,5 +1,6 @@
 import React, { type PropsWithChildren } from 'react';
-import { KeyboardAvoidingView, Platform, StyleProp, ViewStyle } from 'react-native';
+import { Platform, StyleProp, ViewStyle } from 'react-native';
+import { KeyboardAvoidingView } from '@/components/ui/KeyboardAvoidingView';
 
 import DismissKeyboardView from '@/components/DismissKeyboardView';
 

@@ -8,13 +8,14 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
   Alert,
   StatusBar,
 } from 'react-native';
+import { KeyboardAvoidingView, useAndroidKeyboardOpen } from '@/components/ui/KeyboardAvoidingView';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAndroidBottomInset } from '@/components/ui/AndroidBottomInset';
 import { useLocalSearchParams, router, Stack, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -58,6 +59,9 @@ interface Message {
 
 export default function ChatDetailScreen() {
   const { colors } = useAppTheme();
+  const keyboardOpen = useAndroidKeyboardOpen();
+  const bottomInset = useAndroidBottomInset();
+  const androidInset = keyboardOpen ? 0 : bottomInset;
   const { chatId } = useLocalSearchParams();
   const goToMessages = useCallback(() => router.replace('/(driver)/messages' as any), []);
 
@@ -419,7 +423,7 @@ export default function ChatDetailScreen() {
           />
 
 
-          <View style={s.inputBar}>
+          <View style={[s.inputBar, androidInset > 0 && { paddingBottom: 12 + androidInset }]}>
             {!messagingAllowed ? (
               <View style={s.disabledNotice}>
                 <Ionicons name="lock-closed-outline" size={14} color={colors.textSecondary} />

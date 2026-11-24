@@ -4,6 +4,7 @@ import {
   TouchableOpacity, Linking, Animated, AppState, ActivityIndicator, StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useDriverPayouts } from '@/hooks/useDriverPayouts';
@@ -648,6 +649,7 @@ export default function EarningsScreen() {
                   </>
                 )}
               </TouchableOpacity>
+              <AndroidBottomSpacer />
             </View>
           </>
         )}

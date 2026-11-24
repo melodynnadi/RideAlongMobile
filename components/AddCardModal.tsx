@@ -16,6 +16,7 @@ import { createSetupIntent, savePaymentMethod } from '@/services/payments';
 import { usePaymentStore } from '@/stores/paymentStore';
 import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 
 interface AddCardModalProps {
   visible: boolean;
@@ -232,6 +233,7 @@ export function AddCardModal({ visible, onClose, onSuccess }: AddCardModalProps)
               </LinearGradient>
             </TouchableOpacity>
           </View>
+          <AndroidBottomSpacer />
         </View>
       </KeyboardAwareModalView>
     </Modal>

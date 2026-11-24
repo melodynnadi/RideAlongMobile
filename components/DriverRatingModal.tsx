@@ -7,12 +7,13 @@ import {
   StyleSheet,
   TextInput,
   Platform,
-  KeyboardAvoidingView,
   TouchableWithoutFeedback,
   Keyboard,
 } from 'react-native';
+import { KeyboardAvoidingView } from '@/components/ui/KeyboardAvoidingView';
 import { Star, X } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 
 export type DriverRatingModalProps = {
   visible: boolean;               // ✅ visible={ratingModalVisible}
@@ -111,6 +112,7 @@ export function DriverRatingModal({ visible, riderName, onClose, onSubmit, submi
               >
                 <Text style={styles.submitText}>{submitting ? 'Submitting…' : 'Submit rating'}</Text>
               </TouchableOpacity>
+              <AndroidBottomSpacer />
             </View>
           </TouchableWithoutFeedback>
         </KeyboardAvoidingView>

@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import {
   Modal, View, Text, TouchableOpacity, TextInput,
-  ActivityIndicator, Alert, ScrollView, StyleSheet, Platform, KeyboardAvoidingView,
+  ActivityIndicator, Alert, ScrollView, StyleSheet, Platform,
 } from 'react-native';
+import { KeyboardAvoidingView } from '@/components/ui/KeyboardAvoidingView';
 import { Ionicons } from '@expo/vector-icons';
 import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 
 const ISSUE_TYPES = [
   { key: 'safety',        label: 'Safety concern',         icon: 'shield-outline' as const },
@@ -139,6 +141,7 @@ export function ReportIssueModal({ visible, onClose, confirmedRideId, reportedDu
                 ? <ActivityIndicator size="small" color="#FFF" />
                 : <Text style={s.submitText}>Submit Report</Text>}
             </TouchableOpacity>
+            <AndroidBottomSpacer />
           </View>
         </View>
       </View>

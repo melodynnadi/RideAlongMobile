@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   StyleSheet,
@@ -10,9 +9,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { KeyboardAvoidingView } from '@/components/ui/KeyboardAvoidingView';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 import { formatMoney } from '@/services/offers';
 import { singleLineInput } from '@/constants/inputStyles';
 
@@ -100,7 +101,7 @@ export function PriceOfferModal({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={s.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={s.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={s.sheet}>
           <View style={s.handle} />
           <View style={s.headRow}>
@@ -157,6 +158,7 @@ export function PriceOfferModal({
           >
             {busy ? <ActivityIndicator color={colors.textInverse} /> : <Text style={s.confirmText}>{confirmLabel.replace('{amount}', formatMoney(amount))}</Text>}
           </TouchableOpacity>
+          <AndroidBottomSpacer />
         </View>
       </KeyboardAvoidingView>
     </Modal>

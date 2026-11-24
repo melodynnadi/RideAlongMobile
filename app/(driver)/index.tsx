@@ -7,6 +7,7 @@ import {
   RefreshControl, useColorScheme, StatusBar, Animated,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 import MapView, { Marker, Circle, PROVIDER_GOOGLE } from '@/components/platform/NativeMaps';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -84,7 +85,7 @@ async function getCurrentLocationAddressAsync(): Promise<string | null> {
     if (status !== 'granted') return null;
     const pos =
       (await Location.getLastKnownPositionAsync()) ||
-      (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+      (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: false }));
     if (!pos) return null;
     const rev = await Location.reverseGeocodeAsync({
       latitude: pos.coords.latitude,
@@ -1067,6 +1068,8 @@ export default function HomeScreen() {
 
         const current = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
+          // Background lookup: never open Android's Location Accuracy pop-up for it.
+          mayShowUserSettingsDialog: false,
         });
 
         if (!mounted) return;
@@ -4544,6 +4547,7 @@ export default function HomeScreen() {
                   <View style={{ height: 40 }} />
                 </ScrollView>
               )}
+              <AndroidBottomSpacer />
             </View>
           </View>
         </Modal>

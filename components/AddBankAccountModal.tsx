@@ -1,15 +1,17 @@
 import React, { useState, useRef, useMemo } from 'react';
 import {
   Modal, View, Text, TextInput, StyleSheet, TouchableOpacity,
-  ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator,
+  ScrollView, Platform, ActivityIndicator,
   Animated,
 } from 'react-native';
+import { KeyboardAvoidingView } from '@/components/ui/KeyboardAvoidingView';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import DismissKeyboardView from '@/components/DismissKeyboardView';
 import { Ionicons } from '@expo/vector-icons';
 import type { AddBankAccountPayload } from '@/types';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 
 // ─── Styled Input ─────────────────────────────────────────────────────────────
 function StyledInput({ label, value, onChangeText, placeholder, keyboardType, maxLength,
@@ -290,6 +292,7 @@ export function AddBankAccountModal({ visible, onClose, onSubmit, loading = fals
               </LinearGradient>
             </TouchableOpacity>
           </View>
+          <AndroidBottomSpacer />
         </View>
         </KeyboardAvoidingView>
       </DismissKeyboardView>

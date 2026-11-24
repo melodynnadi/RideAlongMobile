@@ -11,6 +11,7 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 import { Promotion } from '@/types';
 import { promotionService } from '@/services/promotions';
 import * as Notifications from 'expo-notifications';
@@ -289,6 +290,7 @@ export const PromotionDetailsModal: React.FC<PromotionDetailsModalProps> = ({
       <View style={styles.modalOverlay}>
         <View style={styles.modalSheet}>
           {renderContent()}
+          <AndroidBottomSpacer />
         </View>
       </View>
     </Modal>

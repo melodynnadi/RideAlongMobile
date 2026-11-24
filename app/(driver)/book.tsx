@@ -13,12 +13,12 @@ import {
   Keyboard,
   Modal,
   Platform,
-  KeyboardAvoidingView,
   Share,
   Switch,
   ActivityIndicator,
   StatusBar,
 } from 'react-native';
+import { KeyboardAvoidingView } from '@/components/ui/KeyboardAvoidingView';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { singleLineInput } from '@/constants/inputStyles';
@@ -1199,7 +1199,7 @@ export default function BookScreen() {
       }
       const pos =
         (await Location.getLastKnownPositionAsync()) ||
-        (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+        (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: !silent }));
       if (!pos) return;
       const results = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
   const r = results?.[0];

@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useBottomNavExtra } from '@/components/ui/AndroidBottomInset';
 import { useRouter } from 'expo-router';
 
 import { firebaseAuth, firestore, storage } from '@/constants/services';
@@ -403,6 +404,7 @@ function relativeDayLabel(dateStr?: string | null): string {
 
 export default function RequestsInboxScreen() {
   const { colors } = useAppTheme();
+  const navExtra = useBottomNavExtra();
   const s = useMemo(() => StyleSheet.create({
     root: { flex: 1, backgroundColor: colors.bg },
     safe: { flex: 1 },
@@ -1114,7 +1116,7 @@ export default function RequestsInboxScreen() {
           data={finalItems}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={s.content}
+          contentContainerStyle={[s.content, { paddingBottom: 102 + navExtra }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           ListHeaderComponent={

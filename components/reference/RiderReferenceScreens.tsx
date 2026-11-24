@@ -1,9 +1,11 @@
 import { singleLineInput } from '@/constants/inputStyles';
 import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, ScrollView, Share, StyleSheet, Text as RNText, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Platform, ScrollView, Share, StyleSheet, Text as RNText, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { KeyboardAvoidingView } from '@/components/ui/KeyboardAvoidingView';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AndroidBottomSpacer, useBottomNavExtra, useBottomNavOffset } from '@/components/ui/AndroidBottomInset';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { firebaseAuth, firestore, GOOGLE_MAPS_API_KEY } from '@/constants/services';
@@ -78,7 +80,7 @@ async function getCurrentLocationAddressAsync(): Promise<string | null> {
     if (status !== 'granted') return null;
     const pos =
       (await Location.getLastKnownPositionAsync()) ||
-      (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+      (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: false }));
     if (!pos) return null;
     const rev = await Location.reverseGeocodeAsync({
       latitude: pos.coords.latitude,
@@ -161,7 +163,7 @@ function PhoneScreen({
   const { goBack } = useReturnNavigation('/(rider)');
   const { colors } = useAppTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const bottomNavHeight = 78;
+  const bottomNavHeight = 78 + useBottomNavExtra();
 
   return (
     <StylesCtx.Provider value={styles}>
@@ -242,6 +244,7 @@ function BottomNav({ active }: { active: TabKey }) {
   const styles = useRiderStyles();
   const { colors } = useAppTheme();
   const { messageCount } = useRiderUnreadCounts();
+  const navBottom = useBottomNavOffset();
   const tabs: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap; href?: string }[] = [
     { key: 'home', label: 'Home', icon: 'home', href: '/(rider)' },
     { key: 'find', label: 'Request', icon: 'add-circle-outline', href: '/(rider)/book' },
@@ -251,7 +254,7 @@ function BottomNav({ active }: { active: TabKey }) {
   ];
 
   return (
-    <View style={styles.bottomNav}>
+    <View style={[styles.bottomNav, { bottom: navBottom }]}>
       {tabs.map((tab) => {
         const selected = tab.key === active;
         return (
@@ -3483,6 +3486,7 @@ export function RiderDetailReference() {
             >
               <Text style={{ color: colors.red, fontSize: 15, fontWeight: '700' }}>Cancel Ride</Text>
             </TouchableOpacity>
+            <AndroidBottomSpacer />
           </View>
         </SafeAreaView>
       </View>

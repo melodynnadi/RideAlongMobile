@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import { useDriverUnreadCounts } from '@/hooks/useRiderUnreadCounts';
 import { hitSlop } from '@/theme/designSystem';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { useBottomNavOffset } from '@/components/ui/AndroidBottomInset';
 import type { AppColors } from '@/constants/theme';
 
 export type DriverTab = 'home' | 'offer' | 'requests' | 'inbox' | 'profile';
@@ -17,6 +18,7 @@ export function DriverBottomNav({ activeTab }: { activeTab: DriverTab }) {
   const { colors } = useAppTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { messageCount: totalUnread } = useDriverUnreadCounts();
+  const bottom = useBottomNavOffset();
 
   const tabs: { key: DriverTab; label: string; icon: keyof typeof Ionicons.glyphMap; href: string }[] = [
     { key: 'home', label: 'Home', icon: 'home', href: '/(driver)' },
@@ -27,7 +29,7 @@ export function DriverBottomNav({ activeTab }: { activeTab: DriverTab }) {
   ];
 
   return (
-    <View style={styles.bottomNav}>
+    <View style={[styles.bottomNav, { bottom }]}>
       {tabs.map((tab) => {
         const selected = tab.key === activeTab;
         return (

@@ -7,13 +7,14 @@ import {
   StyleSheet,
   TextInput,
   ActivityIndicator,
-  KeyboardAvoidingView,
   Platform,
   TouchableWithoutFeedback,
   Keyboard,
 } from 'react-native';
+import { KeyboardAvoidingView } from '@/components/ui/KeyboardAvoidingView';
 import { Star, X } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 
 type Props = {
   visible: boolean;
@@ -102,6 +103,7 @@ export function RatingModal({ visible, onClose, onSubmit, title, subtitle, submi
                     <Text style={styles.submitText}>Submit Rating</Text>
                   )}
                 </TouchableOpacity>
+                <AndroidBottomSpacer />
               </View>
             </TouchableWithoutFeedback>
           </KeyboardAvoidingView>

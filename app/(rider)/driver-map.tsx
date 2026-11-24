@@ -10,6 +10,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { firestore, GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 
 const MAP_STYLE = [
   { elementType: 'geometry',                                          stylers: [{ color: '#F5EDE3' }] },
@@ -121,7 +122,7 @@ export default function DriverMapScreen() {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') return;
-        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: false });
         setRiderCoords({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
       } catch {}
     })();
@@ -291,6 +292,7 @@ export default function DriverMapScreen() {
               </View>
             </View>
           )}
+          <AndroidBottomSpacer />
         </View>
       )}
     </View>

@@ -43,3 +43,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Firebase Android config (EAS: GOOGLE_SERVICES_JSON file variable)
+google-services.json

@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { X, DollarSign, CreditCard } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 import { useTheme } from '@/hooks/useTheme';
 import { useRidePayments } from '@/hooks/useRidePayments';
 import { useAuthStore } from '@/stores/authStore';
@@ -191,6 +192,7 @@ export function RidePaymentModal({
               )}
             </TouchableOpacity>
           </View>
+          <AndroidBottomSpacer />
         </View>
       </View>
     </Modal>

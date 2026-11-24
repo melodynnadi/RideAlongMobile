@@ -1,3 +1,12 @@
+const fs = require('fs');
+const path = require('path');
+
+// Firebase config for Android push (FCM), kept out of this public repo: EAS builds
+// get it from the GOOGLE_SERVICES_JSON file variable, local builds from google-services.json.
+const localGoogleServices = path.join(__dirname, 'google-services.json');
+const googleServicesFile = process.env.GOOGLE_SERVICES_JSON
+  || (fs.existsSync(localGoogleServices) ? './google-services.json' : undefined);
+
 module.exports = ({ config }) => ({
   expo: {
     name: "RideAlong",
@@ -68,10 +77,17 @@ module.exports = ({ config }) => ({
           apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
         },
       },
+      ...(googleServicesFile ? { googleServicesFile } : {}),
       permissions: [
-        "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
+      ],
+      // Added by libraries but unused. (READ/WRITE_EXTERNAL_STORAGE stay: photo
+      // uploads need them on Android 12 and older.)
+      blockedPermissions: [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.SYSTEM_ALERT_WINDOW",
       ],
       package: "com.ridealong.mobile",
       intentFilters: [

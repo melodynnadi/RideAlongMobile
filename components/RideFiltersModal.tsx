@@ -6,6 +6,7 @@ import { TimeBucket, type RideFilterOptions, getDefaultFilters } from '@/utils/r
 import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 
 type Suggestion = { description: string; place_id: string; mainText: string; secondaryText: string };
 
@@ -660,6 +661,7 @@ export function RideFiltersModal({
               </Text>
             </TouchableOpacity>
           </View>
+          <AndroidBottomSpacer />
         </View>
       </KeyboardAwareModalView>
     </Modal>

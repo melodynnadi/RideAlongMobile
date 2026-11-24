@@ -2,8 +2,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, ScrollView, TouchableOpacity,
-  Alert, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform,
+  Alert, ActivityIndicator, StyleSheet,
 } from 'react-native';
+import { KeyboardAvoidingView } from '@/components/ui/KeyboardAvoidingView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -175,7 +176,7 @@ export default function EditPostingScreen() {
   return (
     <KeyboardAvoidingView
       style={s.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
     >
       <StatusBar style={colors.statusBar === 'dark-content' ? 'dark' : 'light'} />
       <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>

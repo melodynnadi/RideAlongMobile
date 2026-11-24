@@ -103,7 +103,7 @@ export function useDriverTracking(trackingKey: string | null, isEnRoute: boolean
           return;
         }
 
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: false });
         if (cancelled) return;
 
         await setDoc(doc(firestore, 'driverTracking', trackingKey), {
@@ -120,7 +120,7 @@ export function useDriverTracking(trackingKey: string | null, isEnRoute: boolean
 
         intervalRef.current = setInterval(async () => {
           try {
-            const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: false });
             await updateDoc(doc(firestore, 'driverTracking', trackingKey), {
               lat: pos.coords.latitude,
               lng: pos.coords.longitude,

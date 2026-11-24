@@ -9,10 +9,10 @@ import {
   Alert,
   Modal,
   ActivityIndicator,
-  KeyboardAvoidingView,
   Platform,
   StatusBar,
 } from 'react-native';
+import { KeyboardAvoidingView } from '@/components/ui/KeyboardAvoidingView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
@@ -35,6 +35,7 @@ import { hitSlop, layout } from '@/theme/designSystem';
 
 import { useReturnNavigation } from '@/src/hooks/useReturnNavigation';
 import { useAppTheme } from '@/hooks/ThemeContext';
+import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
 import { AppColors } from '@/constants/theme';
 
 export default function AccountSettingsScreen() {
@@ -491,6 +492,7 @@ export default function AccountSettingsScreen() {
                     </View>
                   )}
                 </ScrollView>
+                <AndroidBottomSpacer />
               </View>
             </View>
           </Modal>
@@ -526,6 +528,7 @@ export default function AccountSettingsScreen() {
                 <TouchableOpacity style={[s.deleteButton, (!deletePassword || deleting) && { opacity: 0.5 }]} onPress={() => void deleteAccount()} disabled={!deletePassword || deleting}>
                   {deleting ? <ActivityIndicator color={colors.textInverse} /> : <Text style={s.saveBtnText}>Delete account permanently</Text>}
                 </TouchableOpacity>
+                <AndroidBottomSpacer />
               </View>
             </KeyboardAwareModalView>
           </Modal>
