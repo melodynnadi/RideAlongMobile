@@ -281,6 +281,7 @@ function GhostButton({ children, onPress }: { children: React.ReactNode; onPress
 function BottomNav({ active }: { active: TabKey }) {
   const { colors, s } = useScreenCtx();
   const navBottom = useBottomNavOffset();
+  const keyboardOpen = useAndroidKeyboardOpen();
   const { messageCount } = useRiderUnreadCounts();
   const tabs: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap; href: string }[] = [
     { key: 'home', label: 'Home', icon: 'home', href: '/(rider)' },
@@ -289,6 +290,9 @@ function BottomNav({ active }: { active: TabKey }) {
     { key: 'inbox', label: 'Inbox', icon: 'chatbubble', href: '/(rider)/messages' },
     { key: 'profile', label: 'Profile', icon: 'person', href: '/(rider)/profile' },
   ];
+  // Otherwise the bar rides up on top of the keyboard and covers the form.
+  if (keyboardOpen) return null;
+
   return (
     <View style={[s.tabs, { bottom: navBottom }]}>
       {tabs.map((tab) => {

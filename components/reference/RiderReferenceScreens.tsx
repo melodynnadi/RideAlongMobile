@@ -1,7 +1,7 @@
 import { singleLineInput } from '@/constants/inputStyles';
 import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Platform, ScrollView, Share, StyleSheet, Text as RNText, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
-import { KeyboardAvoidingView } from '@/components/ui/KeyboardAvoidingView';
+import { KeyboardAvoidingView, useAndroidKeyboardOpen } from '@/components/ui/KeyboardAvoidingView';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -245,6 +245,7 @@ function BottomNav({ active }: { active: TabKey }) {
   const { colors } = useAppTheme();
   const { messageCount } = useRiderUnreadCounts();
   const navBottom = useBottomNavOffset();
+  const keyboardOpen = useAndroidKeyboardOpen();
   const tabs: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap; href?: string }[] = [
     { key: 'home', label: 'Home', icon: 'home', href: '/(rider)' },
     { key: 'find', label: 'Request', icon: 'add-circle-outline', href: '/(rider)/book' },
@@ -252,6 +253,9 @@ function BottomNav({ active }: { active: TabKey }) {
     { key: 'inbox', label: 'Inbox', icon: 'chatbubble', href: '/(rider)/messages' },
     { key: 'profile', label: 'Profile', icon: 'person', href: '/(rider)/profile' },
   ];
+
+  // Otherwise the bar rides up on top of the keyboard and covers the form.
+  if (keyboardOpen) return null;
 
   return (
     <View style={[styles.bottomNav, { bottom: navBottom }]}>

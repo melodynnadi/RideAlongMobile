@@ -6,6 +6,7 @@ import { useDriverUnreadCounts } from '@/hooks/useRiderUnreadCounts';
 import { hitSlop } from '@/theme/designSystem';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { useBottomNavOffset } from '@/components/ui/AndroidBottomInset';
+import { useAndroidKeyboardOpen } from '@/components/ui/KeyboardAvoidingView';
 import type { AppColors } from '@/constants/theme';
 
 export type DriverTab = 'home' | 'offer' | 'requests' | 'inbox' | 'profile';
@@ -19,6 +20,7 @@ export function DriverBottomNav({ activeTab }: { activeTab: DriverTab }) {
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { messageCount: totalUnread } = useDriverUnreadCounts();
   const bottom = useBottomNavOffset();
+  const keyboardOpen = useAndroidKeyboardOpen();
 
   const tabs: { key: DriverTab; label: string; icon: keyof typeof Ionicons.glyphMap; href: string }[] = [
     { key: 'home', label: 'Home', icon: 'home', href: '/(driver)' },
@@ -27,6 +29,9 @@ export function DriverBottomNav({ activeTab }: { activeTab: DriverTab }) {
     { key: 'inbox', label: 'Inbox', icon: 'chatbubble', href: '/(driver)/messages' },
     { key: 'profile', label: 'Profile', icon: 'person', href: '/(driver)/profile' },
   ];
+
+  // Otherwise the bar rides up on top of the keyboard and covers the form.
+  if (keyboardOpen) return null;
 
   return (
     <View style={[styles.bottomNav, { bottom }]}>
