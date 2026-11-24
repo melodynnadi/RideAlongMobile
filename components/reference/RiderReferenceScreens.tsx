@@ -26,7 +26,7 @@ type OfferInfo = {
 import { RideFiltersModal } from '@/components/RideFiltersModal';
 import { useProfileCompleteness, ProfileCompletionItem } from '@/hooks/useProfileCompleteness';
 import { useHomeOffers } from '@/hooks/useHomeOffers';
-import { applyFiltersToRide, getDefaultFilters, hasActiveFilters, type RideFilterOptions } from '@/utils/rideFilters';
+import { applyFiltersToRide, filtersFromRouteSearch, getDefaultFilters, hasActiveFilters, timeBucketFromSelection, type RideFilterOptions } from '@/utils/rideFilters';
 import { addDoc, collection, doc, getDoc, getDocs, limit as fsLimit, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
 import { StatusBar } from 'expo-status-bar';
 import {
@@ -338,7 +338,7 @@ function RouteCard({ footer = true, cta = false, from = '', to = '', onChangeFro
   to?: string;
   onChangeFrom?: (value: string) => void;
   onChangeTo?: (value: string) => void;
-  onSearch?: () => void;
+  onSearch?: (when: { date: string; time: string }) => void;
 }) {
   const styles = useRiderStyles();
   const [date, setDate] = useState('');
@@ -376,7 +376,7 @@ function RouteCard({ footer = true, cta = false, from = '', to = '', onChangeFro
       {footer ? (
         <View style={[styles.metaRow, styles.homeMetaRowFullWidth]}>
           <TouchableOpacity style={styles.metaPill} onPress={() => setDateModalOpen(true)} activeOpacity={0.78} accessibilityRole="button">
-            <Text style={[styles.metaText, !date && styles.metaPlaceholderText]}>{date ? formatDateLabel(date) : 'Fri, Nov 20'}</Text>
+            <Text style={[styles.metaText, !date && styles.metaPlaceholderText]}>{date ? formatDateLabel(date) : 'Any date'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.metaPill} onPress={() => setTimeModalOpen(true)} activeOpacity={0.78} accessibilityRole="button">
             <Text style={[styles.metaText, !time && styles.metaPlaceholderText]}>{time || 'Anytime'}</Text>
@@ -386,7 +386,7 @@ function RouteCard({ footer = true, cta = false, from = '', to = '', onChangeFro
         </View>
       ) : null}
       {cta ? (
-        <TouchableOpacity style={styles.searchPrimaryBtn} onPress={onSearch || (() => router.push('/(rider)/available-rides' as any))} accessibilityRole="button" accessibilityLabel="Find a ride">
+        <TouchableOpacity style={styles.searchPrimaryBtn} onPress={() => onSearch ? onSearch({ date, time }) : router.push('/(rider)/available-rides' as any)} accessibilityRole="button" accessibilityLabel="Find a ride">
           <Text style={styles.primaryText}>{'Find a ride ->'}</Text>
         </TouchableOpacity>
       ) : null}
@@ -922,7 +922,11 @@ export function RiderHomeReference() {
     }
     return 'where to?';
   }, [nextRequest, nextRide, nextRequestHasOffer, nextRequestIsConfirmed, isRideInProgress, isDriverCompleted, activeRideStatus]);
-  const search = () => router.push({ pathname: '/(rider)/available-rides', params: { from: from.trim(), to: to.trim() } } as any);
+  const search = ({ date, time }: { date: string; time: string }) => router.push({
+    pathname: '/(rider)/available-rides',
+    // searchId makes each tap a new search, even with the same route.
+    params: { from: from.trim(), to: to.trim(), date, time, searchId: String(Date.now()) },
+  } as any);
 
   if (!initialized) {
     return (
@@ -2333,7 +2337,7 @@ export function RiderRequestReference() {
         </View>
         <View style={styles.metaRow}>
           <TouchableOpacity style={styles.metaPill} onPress={() => setDateModalOpen(true)} activeOpacity={0.78} accessibilityRole="button">
-            <Text style={[styles.metaText, !date && styles.metaPlaceholderText]}>{date ? formatDateLabel(date) : 'Fri, Nov 20'}</Text>
+            <Text style={[styles.metaText, !date && styles.metaPlaceholderText]}>{date ? formatDateLabel(date) : 'Select date'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.metaPill, time?.includes('–') && styles.metaPillWide]} onPress={() => setTimeModalOpen(true)} activeOpacity={0.78} accessibilityRole="button">
             <Text style={[styles.metaText, !time && styles.metaPlaceholderText]} numberOfLines={1}>{time || 'Anytime'}</Text>
@@ -2453,7 +2457,7 @@ export function RiderAvailableReference() {
   const styles = useRiderStyles();
   const { colors } = useAppTheme();
   const riderPageTitleColor = colors.statusBar === 'light-content' ? '#FFFFFF' : colors.textPrimary;
-  const { from, to } = useLocalSearchParams<{ from?: string; to?: string }>();
+  const { from, to, date: searchDate, time: searchTime, searchId } = useLocalSearchParams<{ from?: string; to?: string; date?: string; time?: string; searchId?: string }>();
   const uid = firebaseAuth.currentUser?.uid;
   const [liveRides, setLiveRides] = useState<MobileRidePosting[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2466,13 +2470,11 @@ export function RiderAvailableReference() {
   const [showFilterModal, setShowFilterModal] = useState(false);
 
   useEffect(() => {
-    const routeSearch = [from, to]
-      .map((value) => Array.isArray(value) ? value[0] : value)
-      .filter(Boolean)
-      .join(' ')
-      .trim();
-    if (routeSearch && !useRideBrowseStore.getState().riderSearch) setSearchQuery(routeSearch);
-  }, [from, to, setSearchQuery]);
+    if (!searchId) return;
+    setFilterOptions(filtersFromRouteSearch({ from, to, date: searchDate }));
+    setTimeFilter(timeBucketFromSelection(searchTime) ?? 'all');
+    setSearchQuery('');
+  }, [searchId, from, to, searchDate, searchTime, setSearchQuery, setTimeFilter]);
 
   useEffect(() => subscribeAvailableRides((items) => { setLiveRides(items); setLoading(false); }, () => setLoading(false)), []);
 

@@ -5,6 +5,7 @@ import { getApiBaseUrl, firebaseAuth } from '@/constants/services';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import type { AppColors } from '@/constants/theme';
 import { singleLineInput } from '@/constants/inputStyles';
+import { useStartOfTextWhenBlurred } from '@/components/ui/useStartOfTextWhenBlurred';
 
 type Suggestion = { description: string; place_id: string; displayText: string };
 
@@ -34,6 +35,7 @@ export function CityAutocomplete({
   const { colors } = useAppTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [open, setOpen] = useState(false);
+  const startOfText = useStartOfTextWhenBlurred();
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<Suggestion[]>([]);
   const [timer, setTimer] = useState<any>(null);
@@ -118,8 +120,9 @@ export function CityAutocomplete({
         placeholder={placeholder}
         placeholderTextColor={colors.textSecondary}
         value={value}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        selection={startOfText.selection}
+        onFocus={() => { startOfText.onFocusChange(true); setOpen(true); }}
+        onBlur={() => { startOfText.onFocusChange(false); setTimeout(() => setOpen(false), 150); }}
         onChangeText={(t) => {
           onChangeText(t);
           setOpen(true);

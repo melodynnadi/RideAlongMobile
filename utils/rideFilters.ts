@@ -278,6 +278,11 @@ function extractTime(ride: any): string | null {
       return parts[1];
     }
   }
+
+  // Postings loaded in the app only carry a combined date and time.
+  if (dateField instanceof Date && !isNaN(dateField.getTime())) {
+    return `${dateField.getHours()}:${String(dateField.getMinutes()).padStart(2, '0')}`;
+  }
   
   return null;
 }
@@ -456,6 +461,47 @@ export function filterRides(rides: any[], filters: RideFilterOptions, isRider: b
   if (!filters) return rides;
   
   return rides.filter(ride => applyFiltersToRide(ride, filters, isRider));
+}
+
+const US_STATES = new Set(('alabama alaska arizona arkansas california colorado connecticut delaware florida georgia hawaii idaho illinois indiana iowa kansas kentucky louisiana maine maryland massachusetts michigan minnesota mississippi missouri montana nebraska nevada ohio oklahoma oregon pennsylvania tennessee texas utah vermont virginia washington wisconsin wyoming').split(' ').concat([
+  'new hampshire', 'new jersey', 'new mexico', 'new york', 'north carolina', 'north dakota', 'rhode island', 'south carolina', 'south dakota', 'west virginia', 'district of columbia',
+]));
+
+/**
+ * City part of an address: "123 Main St, Tyler, TX 75701, USA" -> "Tyler".
+ * Riders and drivers rarely use the same street address, so searches compare cities.
+ */
+export function cityFromAddress(address: string | null | undefined): string | null {
+  const parts = String(address || '').split(',').map((part) => part.trim()).filter(Boolean);
+  if (parts.length > 1 && /^(usa?|u\.s\.a?\.?|united states( of america)?)$/i.test(parts[parts.length - 1])) parts.pop();
+  if (parts.length > 1) {
+    const region = parts[parts.length - 1].replace(/\s*\d{5}(-\d{4})?$/, '').toLowerCase();
+    if (!region || /^[a-z]{2}$/.test(region) || US_STATES.has(region)) parts.pop();
+  }
+  return parts[parts.length - 1] || null;
+}
+
+/** Filters for the rider home search card. */
+export function filtersFromRouteSearch(search: { from?: string; to?: string; date?: string }): RideFilterOptions {
+  return {
+    ...getDefaultFilters(),
+    pickupLocation: cityFromAddress(search.from),
+    dropoffLocation: cityFromAddress(search.to),
+    date: search.date || null,
+  };
+}
+
+/**
+ * Part of day for a picked time ("3:00 PM"), or for a window ("1:00 PM – 4:00 PM")
+ * that stays inside one part of the day. Null means any time.
+ */
+export function timeBucketFromSelection(time: string | null | undefined): TimeBucketType | null {
+  const buckets = String(time || '').split('–').map((part) => {
+    const hour = parseTimeToHour(part.trim());
+    if (hour === null || isNaN(hour)) return null;
+    return hour < 12 ? TimeBucket.MORNING : hour < 17 ? TimeBucket.AFTERNOON : TimeBucket.EVENING;
+  });
+  return buckets.every((bucket) => bucket === buckets[0]) ? buckets[0] : null;
 }
 
 /**

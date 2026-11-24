@@ -22,6 +22,7 @@ import { KeyboardAvoidingView } from '@/components/ui/KeyboardAvoidingView';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { singleLineInput } from '@/constants/inputStyles';
+import { useStartOfTextWhenBlurred } from '@/components/ui/useStartOfTextWhenBlurred';
 import { router, useLocalSearchParams } from 'expo-router';
 import { firestore, firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import { addDoc, collection, serverTimestamp, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
@@ -138,6 +139,7 @@ function AddressAutocomplete({
   const [timer, setTimer] = useState<any>(null);
   const justSelected = useRef(false);
   const token = useMemo(() => newToken(), []);
+  const startOfText = useStartOfTextWhenBlurred();
 
   const fetchAuto = async (q: string) => {
     if (!q || q.trim().length < 2) {
@@ -187,7 +189,9 @@ function AddressAutocomplete({
         placeholder={placeholder}
         placeholderTextColor={acColors.textSecondary}
         value={value}
-        onFocus={() => setOpen(true)}
+        selection={startOfText.selection}
+        onFocus={() => { startOfText.onFocusChange(true); setOpen(true); }}
+        onBlur={() => startOfText.onFocusChange(false)}
         onChangeText={(t) => {
           if (justSelected.current) { justSelected.current = false; return; }
           onChangeText(t);
@@ -1441,7 +1445,7 @@ export default function BookScreen() {
                 <Text style={styles.fieldGroupLabel}>WHEN</Text>
                 <View style={styles.whenRow}>
                   <TouchableOpacity style={styles.ceoInputBtn} onPress={() => setCalendarOpen(true)}>
-                    <Text style={[styles.ceoInputText, !date && styles.ceoInputPlaceholder]}>{date ? formatDateLabel(date) : 'Fri, Nov 20'}</Text>
+                    <Text style={[styles.ceoInputText, !date && styles.ceoInputPlaceholder]}>{date ? formatDateLabel(date) : 'Select date'}</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity style={[styles.ceoInputBtn, styles.timeBtn]} onPress={() => setTimeOpen(true)}>

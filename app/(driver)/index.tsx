@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
+import { useStartOfTextWhenBlurred } from '@/components/ui/useStartOfTextWhenBlurred';
 import MapView, { Marker, Circle, PROVIDER_GOOGLE } from '@/components/platform/NativeMaps';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -114,6 +115,7 @@ function DriverHomeAutocomplete({
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<DriverHomeSuggestion[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startOfText = useStartOfTextWhenBlurred();
 
   useEffect(() => {
     const sub = Keyboard.addListener('keyboardDidHide', () => setOpen(false));
@@ -171,11 +173,13 @@ function DriverHomeAutocomplete({
           if (timerRef.current) clearTimeout(timerRef.current);
           timerRef.current = setTimeout(() => void fetchSuggestions(text), 250);
         }}
+        selection={startOfText.selection}
         onFocus={() => {
+          startOfText.onFocusChange(true);
           setOpen(true);
           if (value.trim().length >= 2) void fetchSuggestions(value);
         }}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onBlur={() => { startOfText.onFocusChange(false); setTimeout(() => setOpen(false), 150); }}
         placeholder={placeholder}
         placeholderTextColor={colors.textSecondary}
         returnKeyType="next"
@@ -369,7 +373,7 @@ function DriverHomePostRideCard() {
       </View>
       <View style={s.driverHomeMetaRow}>
         <TouchableOpacity style={s.driverHomeMetaPill} onPress={() => setDateModalOpen(true)} activeOpacity={0.78} accessibilityRole="button">
-          <Text style={[s.driverHomeMetaText, !date && s.driverHomePlaceholderText]}>{date ? formatDateLabel(date) : 'Fri, Nov 20'}</Text>
+          <Text style={[s.driverHomeMetaText, !date && s.driverHomePlaceholderText]}>{date ? formatDateLabel(date) : 'Select date'}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={s.driverHomeMetaPill} onPress={() => setTimeModalOpen(true)} activeOpacity={0.78} accessibilityRole="button">
           <Text style={[s.driverHomeMetaText, !time && s.driverHomePlaceholderText]}>{time || 'Anytime'}</Text>
