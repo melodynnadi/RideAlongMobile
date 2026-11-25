@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AndroidBottomSpacer } from '@/components/ui/AndroidBottomInset';
+import { prioritizeDriverHomeCards } from '@/utils/driverHomeOrder';
 import { useStartOfTextWhenBlurred } from '@/components/ui/useStartOfTextWhenBlurred';
 import MapView, { Marker, Circle, PROVIDER_GOOGLE } from '@/components/platform/NativeMaps';
 import * as Location from 'expo-location';
@@ -2786,14 +2787,15 @@ export default function HomeScreen() {
   // Filter out any items that are cancelled so we do not render cancelled cards in Upcoming
   const displayUpcoming = useMemo(() => {
     const inactiveStatuses = new Set(['cancelled', 'canceled', 'expired', 'completed', 'complete', 'finished', 'rejected', 'declined']);
-    return (sortedUpcoming || []).filter((r) => {
+    const active = (sortedUpcoming || []).filter((r) => {
       const s = String((r as any)?.status || '').replace(/[-\s]/g, '_').toLowerCase();
       const cs = String((r as any)?.confirmedStatus || '').replace(/[-\s]/g, '_').toLowerCase();
       const raw = (r as any)?.raw || {};
       const statusAtFlag = String((r as any)?.statusAtFlag || (r as any)?.statusBeforeFlag || (r as any)?.flaggedFromStatus || (r as any)?.previousStatus || raw.statusAtFlag || raw.statusBeforeFlag || raw.flaggedFromStatus || raw.previousStatus || '').replace(/[-\s]/g, '_').toLowerCase();
       return !inactiveStatuses.has(s) && !inactiveStatuses.has(cs) && statusAtFlag !== 'completed';
     });
-  }, [sortedUpcoming]);
+    return prioritizeDriverHomeCards(active, postingReqByPostingId);
+  }, [sortedUpcoming, postingReqByPostingId]);
 
   // Navigate to rate-trip when a confirmed ride reaches COMPLETED (rider confirmed arrival)
   const driverRatingNavRef = useRef<Set<string>>(new Set());
