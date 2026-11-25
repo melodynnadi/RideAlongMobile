@@ -152,6 +152,8 @@ module.exports = ({ config }) => ({
       [
         "expo-notifications",
         {
+          // Android status bar icon: must be white on transparent.
+          icon: "./assets/notification-icon.png",
           color: "#DE5D20",
         },
       ],
