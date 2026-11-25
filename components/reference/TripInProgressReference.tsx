@@ -33,6 +33,7 @@ import { completeRide, riderCompleteRide, groupComplete, confirmPickup } from '@
 import { getOrCreateRideChat } from '@/src/services/chatAvailability';
 import { hasUserRatedRide } from '@/src/services/ratings';
 import { usePickupCodePrompt } from '@/components/usePickupCodePrompt';
+import { MapMarkerBox } from '@/components/ui/MapMarkerBox';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { type AppColors } from '@/constants/theme';
 
@@ -613,6 +614,8 @@ export function RiderTripInProgressReference() {
 // in progress or beyond.
 const PICKED_UP_STATUSES = new Set(['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED', 'COMPLETED']);
 
+const FALLBACK_CENTER = { latitude: 30.2672, longitude: -97.7431 };
+
 export function DriverTripInProgressReference() {
   const { colors, isDark } = useAppTheme();
   const s = useMemo(() => makeStyles(colors), [colors]);
@@ -1007,7 +1010,7 @@ export function DriverTripInProgressReference() {
     if (coords.length > 1 && mapRef.current) {
       setTimeout(() => {
         mapRef.current?.fitToCoordinates(coords, {
-          edgePadding: { top: 80, right: 40, bottom: 300, left: 40 },
+          edgePadding: { top: 180, right: 40, bottom: 345, left: 40 },
           animated: true,
         });
       }, 500);
@@ -1046,7 +1049,7 @@ export function DriverTripInProgressReference() {
     if (coords.length > 1 && mapRef.current) {
       setFollowMode(false);
       mapRef.current.fitToCoordinates(coords, {
-        edgePadding: { top: 80, right: 40, bottom: 300, left: 40 },
+        edgePadding: { top: 180, right: 40, bottom: 345, left: 40 },
         animated: true,
       });
     }
@@ -1184,45 +1187,63 @@ export function DriverTripInProgressReference() {
         onRegionChangeComplete={(r) => setCurrentRegion(r)}
         onPanDrag={() => setFollowMode(false)}
       >
-        {routePoints.length > 1 && (
-          <Polyline
-            coordinates={routePoints}
-            strokeColor={colors.primary}
-            strokeWidth={3.5}
-            lineCap="round"
-            lineJoin="round"
-          />
-        )}
-        {/* toDropoff shows pickup + dropoff dots; toPickup shows the live rider marker */}
-        {phase === 'toDropoff' && pickupCoords && (
-          <Marker coordinate={pickupCoords} anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={s.dotPickup} />
-          </Marker>
-        )}
-        {phase === 'toDropoff' && dropoffCoords && (
-          <Marker coordinate={dropoffCoords} anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={s.dotDropoff} />
-          </Marker>
-        )}
+        {/* These three stay mounted (hidden with opacity) and the route goes last: on Android,
+            inserting a child before a marker removes that marker. toDropoff shows the pickup and
+            dropoff dots; toPickup shows the live rider markers. */}
+        <Marker
+          key="driver"
+          coordinate={driverLoc ?? pickupCoords ?? FALLBACK_CENTER}
+          opacity={driverLoc ? 1 : 0}
+          anchor={{ x: 0.5, y: 0.5 }}
+          zIndex={10}
+          // Android snapshots the view: frozen too early, the icon never appears.
+          tracksViewChanges={Platform.OS === 'android'}
+        >
+          <MapMarkerBox size={40}>
+            <View style={s.driverCarMarker}>
+              <Ionicons name="car" size={20} color={colors.textInverse} />
+            </View>
+          </MapMarkerBox>
+        </Marker>
+        <Marker
+          key="pickup"
+          coordinate={pickupCoords ?? FALLBACK_CENTER}
+          opacity={phase === 'toDropoff' && pickupCoords ? 1 : 0}
+          anchor={{ x: 0.5, y: 0.5 }}
+        >
+          <MapMarkerBox size={14}><View style={s.dotPickup} /></MapMarkerBox>
+        </Marker>
+        <Marker
+          key="dropoff"
+          coordinate={dropoffCoords ?? FALLBACK_CENTER}
+          opacity={phase === 'toDropoff' && dropoffCoords ? 1 : 0}
+          anchor={{ x: 0.5, y: 0.5 }}
+        >
+          <MapMarkerBox size={14}><View style={s.dotDropoff} /></MapMarkerBox>
+        </Marker>
         {phase === 'toPickup' && pendingMembers.map((m) => {
           const c = liveCoordsByRide[m.confirmedRideId] ?? pickupCoords;
           if (!c) return null;
           const isCurrent = m.confirmedRideId === currentTarget?.confirmedRideId;
           return (
             <Marker key={m.confirmedRideId} coordinate={c} anchor={{ x: 0.5, y: 1 }} opacity={isCurrent ? 1 : 0.55}>
-              <View style={[s.riderPinMarker, !isCurrent && { backgroundColor: colors.textSecondary }]}>
-                <Ionicons name="person" size={16} color={colors.textInverse} />
-              </View>
+              <MapMarkerBox size={30} align="bottom">
+                <View style={[s.riderPinMarker, !isCurrent && { backgroundColor: colors.textSecondary }]}>
+                  <Ionicons name="person" size={16} color={colors.textInverse} />
+                </View>
+              </MapMarkerBox>
             </Marker>
           );
         })}
-        {/* Driver's own position — pulsing car marker */}
-        {driverLoc && (
-          <Marker coordinate={driverLoc} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false}>
-            <View style={s.driverCarMarker}>
-              <Ionicons name="car" size={20} color={colors.textInverse} />
-            </View>
-          </Marker>
+        {routePoints.length > 1 && (
+          <Polyline
+            key={`route-${phase}`}
+            coordinates={routePoints}
+            strokeColor={colors.primary}
+            strokeWidth={3.5}
+            lineCap="round"
+            lineJoin="round"
+          />
         )}
       </MapView>
 

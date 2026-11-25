@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
+  Platform,
   View,
   Text,
   TextInput,
@@ -9,6 +10,7 @@ import {
   ActivityIndicator,
   Modal,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Search, X, MapPin, Plus } from 'lucide-react-native';
 import { firebaseAuth, getApiBaseUrl } from '@/constants/services';
 import KeyboardAwareModalView from '@/components/KeyboardAwareModalView';
@@ -75,6 +77,7 @@ export function UniversitySearch({
   placeholder = 'Search any U.S. university...',
   allowCustom = true,
 }: UniversitySearchProps) {
+  const insets = useSafeAreaInsets();
   const { colors } = useAppTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [modalVisible, setModalVisible] = useState(false);
@@ -256,7 +259,8 @@ export function UniversitySearch({
         onRequestClose={() => setModalVisible(false)}
       >
         <KeyboardAwareModalView style={styles.modal}>
-          <View style={styles.modalHeader}>
+          {/* A page sheet on iOS, but full screen (under the status bar) on Android. */}
+          <View style={[styles.modalHeader, Platform.OS === 'android' && { paddingTop: 16 + insets.top }]}>
             <Text style={styles.modalTitle}>Select University</Text>
             <TouchableOpacity
               onPress={() => setModalVisible(false)}
@@ -298,7 +302,7 @@ export function UniversitySearch({
             renderItem={renderUniversityItem}
             keyExtractor={(item) => item.id}
             ListEmptyComponent={renderEmptyState}
-            contentContainerStyle={styles.resultsList}
+            contentContainerStyle={[styles.resultsList, Platform.OS === 'android' && { paddingBottom: 16 + insets.bottom }]}
             keyboardShouldPersistTaps="handled"
             ListFooterComponent={
               allowCustom && searchQuery.trim().length >= 2 ? (

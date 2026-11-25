@@ -490,7 +490,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           emailVerified: false,
           create: true,
         });
-        await sendVerificationEmailWithFallback(user);
+        // The account and profile exist now. An email that can't be sent must not undo
+        // them: that left a profile with no login. The next screen can resend it.
+        await sendVerificationEmailWithFallback(user).catch((emailError) => {
+          console.warn('[signUp] verification email not sent:', emailError);
+        });
 
         const profiles = await fetchProfiles(user.uid);
         set({
