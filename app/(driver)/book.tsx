@@ -30,6 +30,7 @@ import { GOOGLE_MAPS_API_KEY } from '@/constants/services';
 import * as Location from 'expo-location';
 import { computeMaxPrice, computeDriverMaxPrice, formatContributionRange } from '@/src/utils/pricing';
 import EmailTriggerService from '@/services/EmailTriggerService';
+import { authedFetch } from '@/services/authedFetch';
 import { Ionicons } from '@expo/vector-icons';
 import { DriverBottomNav } from '@/components/DriverBottomNav';
 import { DatePickerModal, TimePickerModal, formatDateLabel } from '@/components/DateTimePickerModals';
@@ -1119,7 +1120,7 @@ export default function BookScreen() {
         }
 
         // One-time posting path
-        const response = await fetch(`${apiUrl}/api/ride-postings`, {
+        const response = await authedFetch(`${apiUrl}/api/ride-postings`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
