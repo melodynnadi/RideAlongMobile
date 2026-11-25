@@ -614,6 +614,10 @@ export function RiderTripInProgressReference() {
 // in progress or beyond.
 const PICKED_UP_STATUSES = new Set(['IN_PROGRESS', 'DRIVER_COMPLETED', 'RIDER_COMPLETED', 'COMPLETED']);
 
+// Measured against the Android layout; iOS keeps its original values.
+const ROUTE_PADDING = Platform.OS === 'android'
+  ? { top: 180, right: 40, bottom: 345, left: 40 }
+  : { top: 80, right: 40, bottom: 300, left: 40 };
 const FALLBACK_CENTER = { latitude: 30.2672, longitude: -97.7431 };
 
 export function DriverTripInProgressReference() {
@@ -1010,7 +1014,7 @@ export function DriverTripInProgressReference() {
     if (coords.length > 1 && mapRef.current) {
       setTimeout(() => {
         mapRef.current?.fitToCoordinates(coords, {
-          edgePadding: { top: 180, right: 40, bottom: 345, left: 40 },
+          edgePadding: ROUTE_PADDING,
           animated: true,
         });
       }, 500);
@@ -1049,7 +1053,7 @@ export function DriverTripInProgressReference() {
     if (coords.length > 1 && mapRef.current) {
       setFollowMode(false);
       mapRef.current.fitToCoordinates(coords, {
-        edgePadding: { top: 180, right: 40, bottom: 345, left: 40 },
+        edgePadding: ROUTE_PADDING,
         animated: true,
       });
     }
@@ -1187,40 +1191,46 @@ export function DriverTripInProgressReference() {
         onRegionChangeComplete={(r) => setCurrentRegion(r)}
         onPanDrag={() => setFollowMode(false)}
       >
-        {/* These three stay mounted (hidden with opacity) and the route goes last: on Android,
-            inserting a child before a marker removes that marker. toDropoff shows the pickup and
+        {/* On Android these three stay mounted (hidden with opacity) and the route goes last:
+            inserting a child before a marker removes that marker there. toDropoff shows the pickup and
             dropoff dots; toPickup shows the live rider markers. */}
-        <Marker
-          key="driver"
-          coordinate={driverLoc ?? pickupCoords ?? FALLBACK_CENTER}
-          opacity={driverLoc ? 1 : 0}
-          anchor={{ x: 0.5, y: 0.5 }}
-          zIndex={10}
-          // Android snapshots the view: frozen too early, the icon never appears.
-          tracksViewChanges={Platform.OS === 'android'}
-        >
-          <MapMarkerBox size={40}>
-            <View style={s.driverCarMarker}>
-              <Ionicons name="car" size={20} color={colors.textInverse} />
-            </View>
-          </MapMarkerBox>
-        </Marker>
-        <Marker
-          key="pickup"
-          coordinate={pickupCoords ?? FALLBACK_CENTER}
-          opacity={phase === 'toDropoff' && pickupCoords ? 1 : 0}
-          anchor={{ x: 0.5, y: 0.5 }}
-        >
-          <MapMarkerBox size={14}><View style={s.dotPickup} /></MapMarkerBox>
-        </Marker>
-        <Marker
-          key="dropoff"
-          coordinate={dropoffCoords ?? FALLBACK_CENTER}
-          opacity={phase === 'toDropoff' && dropoffCoords ? 1 : 0}
-          anchor={{ x: 0.5, y: 0.5 }}
-        >
-          <MapMarkerBox size={14}><View style={s.dotDropoff} /></MapMarkerBox>
-        </Marker>
+        {(Platform.OS === 'android' || driverLoc) && (
+          <Marker
+            key="driver"
+            coordinate={driverLoc ?? pickupCoords ?? FALLBACK_CENTER}
+            opacity={driverLoc ? 1 : 0}
+            anchor={{ x: 0.5, y: 0.5 }}
+            zIndex={10}
+            // Android snapshots the view: frozen too early, the icon never appears.
+            tracksViewChanges={Platform.OS === 'android'}
+          >
+            <MapMarkerBox size={40}>
+              <View style={s.driverCarMarker}>
+                <Ionicons name="car" size={20} color={colors.textInverse} />
+              </View>
+            </MapMarkerBox>
+          </Marker>
+        )}
+        {(Platform.OS === 'android' || (phase === 'toDropoff' && pickupCoords)) && (
+          <Marker
+            key="pickup"
+            coordinate={pickupCoords ?? FALLBACK_CENTER}
+            opacity={phase === 'toDropoff' && pickupCoords ? 1 : 0}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <MapMarkerBox size={14}><View style={s.dotPickup} /></MapMarkerBox>
+          </Marker>
+        )}
+        {(Platform.OS === 'android' || (phase === 'toDropoff' && dropoffCoords)) && (
+          <Marker
+            key="dropoff"
+            coordinate={dropoffCoords ?? FALLBACK_CENTER}
+            opacity={phase === 'toDropoff' && dropoffCoords ? 1 : 0}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <MapMarkerBox size={14}><View style={s.dotDropoff} /></MapMarkerBox>
+          </Marker>
+        )}
         {phase === 'toPickup' && pendingMembers.map((m) => {
           const c = liveCoordsByRide[m.confirmedRideId] ?? pickupCoords;
           if (!c) return null;

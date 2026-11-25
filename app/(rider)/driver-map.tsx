@@ -71,6 +71,9 @@ type DriverLocation = {
   isActive: boolean;
 };
 
+const ROUTE_PADDING = Platform.OS === 'android'
+  ? { top: 140, right: 70, bottom: 200, left: 70 }
+  : { top: 120, right: 80, bottom: 120, left: 80 };
 const FALLBACK_COORDS = { latitude: 30.2672, longitude: -97.7431 };
 
 export default function DriverMapScreen() {
@@ -161,7 +164,7 @@ export default function DriverMapScreen() {
           { latitude: driverLoc.lat, longitude: driverLoc.lng },
           riderCoords,
         ],
-        { edgePadding: { top: 140, right: 70, bottom: 200, left: 70 }, animated: true },
+        { edgePadding: ROUTE_PADDING, animated: true },
       );
     } else {
       (mapRef.current as any).animateToRegion({
@@ -188,30 +191,34 @@ export default function DriverMapScreen() {
         showsCompass={false}
         showsTraffic={false}
       >
-        {/* Both stay mounted (hidden with opacity) and the route goes last: on Android, inserting
-            a child before a marker removes that marker. */}
-        <Marker
-          key="driver"
-          coordinate={driverLoc ? { latitude: driverLoc.lat, longitude: driverLoc.lng } : FALLBACK_COORDS}
-          opacity={driverLoc ? 1 : 0}
-          anchor={{ x: 0.5, y: 0.5 }}
-          // Android snapshots the view: frozen too early, the icon never appears.
-          tracksViewChanges={Platform.OS === 'android'}
-        >
-          <MapMarkerBox size={40}>
-            <View style={s.driverMarker}>
-              <Ionicons name="car" size={20} color="#fff" />
-            </View>
-          </MapMarkerBox>
-        </Marker>
-        <Marker
-          key="rider"
-          coordinate={riderCoords ?? FALLBACK_COORDS}
-          opacity={riderCoords ? 1 : 0}
-          anchor={{ x: 0.5, y: 0.5 }}
-        >
-          <MapMarkerBox size={14}><View style={s.riderDot} /></MapMarkerBox>
-        </Marker>
+        {/* On Android both stay mounted (hidden with opacity) and the route goes last: inserting
+            a child before a marker removes that marker there. */}
+        {(Platform.OS === 'android' || driverLoc) && (
+          <Marker
+            key="driver"
+            coordinate={driverLoc ? { latitude: driverLoc.lat, longitude: driverLoc.lng } : FALLBACK_COORDS}
+            opacity={driverLoc ? 1 : 0}
+            anchor={{ x: 0.5, y: 0.5 }}
+            // Android snapshots the view: frozen too early, the icon never appears.
+            tracksViewChanges={Platform.OS === 'android'}
+          >
+            <MapMarkerBox size={40}>
+              <View style={s.driverMarker}>
+                <Ionicons name="car" size={20} color="#fff" />
+              </View>
+            </MapMarkerBox>
+          </Marker>
+        )}
+        {(Platform.OS === 'android' || riderCoords) && (
+          <Marker
+            key="rider"
+            coordinate={riderCoords ?? FALLBACK_COORDS}
+            opacity={riderCoords ? 1 : 0}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <MapMarkerBox size={14}><View style={s.riderDot} /></MapMarkerBox>
+          </Marker>
+        )}
         {routeCoords.length > 0 && (
           <Polyline
             coordinates={routeCoords}
