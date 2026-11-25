@@ -123,10 +123,13 @@ module.exports = ({ config }) => ({
           dark: {
             backgroundColor: "#FBFAF7",
           },
+          // Android 12+ always shows its own launch screen with an icon. Keep it blank (as on
+          // iOS) and the same color as components/SplashScreen, so only one splash is seen.
           android: {
-            image: "./assets/ridealonglogo-mark.png",
+            image: "./assets/splash-blank.png",
             dark: {
-              image: "./assets/ridealonglogo-mark.png",
+              image: "./assets/splash-blank.png",
+              backgroundColor: "#0B1635",
             },
           },
         },
