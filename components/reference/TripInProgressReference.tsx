@@ -32,6 +32,7 @@ import { firebaseAuth, firestore, GOOGLE_MAPS_API_KEY } from '@/constants/servic
 import { completeRide, riderCompleteRide, groupComplete, confirmPickup } from '@/src/services/rideActions';
 import { getOrCreateRideChat } from '@/src/services/chatAvailability';
 import { hasUserRatedRide } from '@/src/services/ratings';
+import { usePickupCodePrompt } from '@/components/usePickupCodePrompt';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { type AppColors } from '@/constants/theme';
 
@@ -648,6 +649,7 @@ export function DriverTripInProgressReference() {
   const [liveCoordsByRide, setLiveCoordsByRide] = useState<Record<string, { latitude: number; longitude: number }>>({});
   const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const [pickingUp, setPickingUp] = useState(false);
+  const { askForPickupCode, pickupCodePrompt } = usePickupCodePrompt();
   const driverLocRef = useRef<{ latitude: number; longitude: number } | null>(null);
   const startAnnouncedPhaseRef = useRef<string | null>(null);
 
@@ -1120,21 +1122,11 @@ export function DriverTripInProgressReference() {
       });
       setPickingUp(false);
     };
-    // Prompt for this rider's verification code when they have one (iOS supports
-    // Alert.prompt; mirrors the existing home-screen pickup flow).
-    if (target.verificationCode && Platform.OS === 'ios') {
-      Alert.prompt(
-        pendingMembers.length > 1 ? `Enter ${target.name}'s code` : "Enter rider's code",
-        "Ask your rider for their 4-digit verification code",
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Confirm', onPress: (input?: string) => {
-            if (!input || !input.trim()) { Alert.alert('Code required', "Please enter the rider's verification code."); return; }
-            doConfirm(input.trim());
-          } },
-        ],
-        'plain-text', '', 'number-pad',
-      );
+    if (target.verificationCode) {
+      askForPickupCode({
+        title: pendingMembers.length > 1 ? `Enter ${target.name}'s code` : "Enter rider's code",
+        onSubmit: (code) => void doConfirm(code),
+      });
     } else {
       doConfirm();
     }
@@ -1173,6 +1165,7 @@ export function DriverTripInProgressReference() {
 
   return (
     <View style={s.root}>
+      {pickupCodePrompt}
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFill}

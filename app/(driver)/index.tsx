@@ -25,6 +25,7 @@ import {
 } from '@/src/services/rideActions';
 import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { ReportIssueModal } from '@/components/ReportIssueModal';
+import { usePickupCodePrompt } from '@/components/usePickupCodePrompt';
 import { Button } from '@/components/ui/Button';
 import { computeFilteredAverageRating, shouldPromptRating } from '@/src/services/ratings';
 import { useProfileCompleteness, ProfileCompletionItem } from '@/hooks/useProfileCompleteness';
@@ -408,6 +409,7 @@ function DriverHomePostRideCard() {
 function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRequestId, onAcceptRequest, onRejectRequest, onPartialStart, onCancelOffer }: { ride: UpcomingRideCard; hasOfferReceived?: boolean; seatsFilled?: number; pendingRequestId?: string; onAcceptRequest?: () => void; onRejectRequest?: () => void; onPartialStart?: () => void; onCancelOffer?: () => void }) {
   const { colors } = useAppTheme();
   const s = useDriverHomeStyles();
+  const { askForPickupCode, pickupCodePrompt } = usePickupCodePrompt();
   const [pickingUp,      setPickingUp]      = React.useState(false);
   const [completing,     setCompleting]     = React.useState(false);
   const [reportVisible,  setReportVisible]  = React.useState(false);
@@ -535,23 +537,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
     // If the confirmedRide has a verification code, prompt driver to enter it
     const rawCode = (ride.raw as any)?.verificationCode;
     if (rawCode && ride.type !== 'groupRide') {
-      Alert.prompt(
-        'Enter rider\'s code',
-        'Ask your rider for their 4-digit verification code',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Confirm', onPress: async (code?: string) => {
-            if (!code || code.trim().length === 0) {
-              Alert.alert('Code required', 'Please enter the rider\'s verification code.');
-              return;
-            }
-            await doPickup(code.trim());
-          }},
-        ],
-        'plain-text',
-        '',
-        'number-pad',
-      );
+      askForPickupCode({ title: "Enter rider's code", onSubmit: (code) => void doPickup(code) });
     } else {
       doPickup();
     }
@@ -880,6 +866,7 @@ function DriverHomeActivityCard({ ride, hasOfferReceived, seatsFilled, pendingRe
           reportedDuringRide={isInProgress || isConfirmedOnly}
         />
       )}
+      {pickupCodePrompt}
     </View>
   );
 }
