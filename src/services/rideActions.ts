@@ -5,6 +5,7 @@ import { updateRideStatus } from '@/src/services/functions';
 import { resolveConfirmedDocId } from '@/src/services/ridesData';
 import { logActivity } from '@/src/services/activity';
 import EmailTriggerService from '../../services/EmailTriggerService';
+import { authedFetch } from '@/services/authedFetch';
 import { captureRidePayment } from '@/services/payments';
 
 function showRideError(e: any) {
@@ -59,11 +60,8 @@ export async function confirmPickup(card: RideCardRef & { verificationCode?: str
       }
     } catch {}
     try {
-      // Mark driver pickup locally (mirrors web flow) to satisfy any preconditions
-      await updateDoc(doc(firestore, 'confirmedRides', rideId), {
-        driverPickupConfirmed: true,
-        updatedAt: serverTimestamp(),
-      }).catch(() => {});
+      // The backend records the pickup, and only once it accepts the rider's code:
+      // payment capture relies on driverPickupConfirmed.
       const result = await callUpdateRideStatus(rideId, 'driver_pickup', card.verificationCode ? { verificationCode: card.verificationCode } : undefined);
       if (!result.ok) {
         if (result.code === 'code_invalid' || result.code === 'code_required') {
@@ -89,7 +87,7 @@ export async function confirmPickup(card: RideCardRef & { verificationCode?: str
       if (code === 'failed-precondition') {
         try {
           await updateDoc(doc(firestore, 'confirmedRides', rideId), { status: 'CONFIRMED' });
-          const r2 = await callUpdateRideStatus(rideId, 'driver_pickup');
+          const r2 = await callUpdateRideStatus(rideId, 'driver_pickup', card.verificationCode ? { verificationCode: card.verificationCode } : undefined);
           if (!r2.ok) throw new Error('pickup_failed_retry');
           return true;
         } catch (e2) {
@@ -217,7 +215,7 @@ export async function cancelRide(card: RideCardRef): Promise<boolean> {
     // propagated to the originating request docs, and — for group rides — the
     // seat is released back to the parent posting (reopening it if it was full).
     const base = getApiBaseUrl();
-    const resp = await fetch(`${base}/api/rides/${encodeURIComponent(rideId)}/cancel`, {
+    const resp = await authedFetch(`${base}/api/rides/${encodeURIComponent(rideId)}/cancel`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ collection: 'confirmedRides', cancelledBy: 'driver' }),
@@ -266,11 +264,6 @@ export async function groupPickup(ridePostingId: string): Promise<{ ok: boolean;
     const confirmedRideIds: string[] = [];
     for (const id of targets) {
       try {
-        // Local mark then backend callable (mirrors single-ride flow)
-        await updateDoc(doc(firestore, 'confirmedRides', id), {
-          driverPickupConfirmed: true,
-          updatedAt: serverTimestamp(),
-        }).catch(() => {});
         const { ok: pickupOk } = await callUpdateRideStatus(id, 'driver_pickup');
         if (!pickupOk) throw new Error('pickup_failed');
         updated++;

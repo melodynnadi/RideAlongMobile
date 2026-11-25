@@ -12,6 +12,7 @@ import {
   Platform,
   StatusBar,
 } from 'react-native';
+import { authedFetch } from '@/services/authedFetch';
 import { KeyboardAvoidingView } from '@/components/ui/KeyboardAvoidingView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -178,7 +179,7 @@ export default function AccountSettingsScreen() {
     try {
       await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, deletePassword));
 
-      fetch(`${getApiBaseUrl()}/api/send-account-deletion-email`, {
+      await authedFetch(`${getApiBaseUrl()}/api/send-account-deletion-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: user.email, name: fullName || 'there' }),

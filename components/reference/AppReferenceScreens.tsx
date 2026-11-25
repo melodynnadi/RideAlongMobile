@@ -2,6 +2,7 @@
 import * as WebBrowser from 'expo-web-browser';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ActivityIndicator, Alert, FlatList, Linking, Modal, Platform, ScrollView, StyleSheet, Switch, Text as RNText, TextInput, TouchableOpacity, View } from 'react-native';
+import { authedFetch } from '@/services/authedFetch';
 import { KeyboardAvoidingView, useAndroidKeyboardOpen } from '@/components/ui/KeyboardAvoidingView';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AndroidBottomSpacer, useBottomNavExtra, useBottomNavOffset } from '@/components/ui/AndroidBottomInset';
@@ -606,7 +607,7 @@ function RiderRequestsReferenceInner() {
     } catch {}
     try {
       const { getApiBaseUrl } = await import('@/constants/services');
-      const res = await fetch(`${getApiBaseUrl()}/api/accept-ride-offer`, {
+      const res = await authedFetch(`${getApiBaseUrl()}/api/accept-ride-offer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ offerId: offer.offerId, riderId: uid, driverId: offer.driverId, paymentIntentId }),

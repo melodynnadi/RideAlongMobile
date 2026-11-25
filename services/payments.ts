@@ -4,6 +4,7 @@
  */
 
 import { getApiBaseUrl, firestore } from '@/constants/services';
+import { authedFetch } from '@/services/authedFetch';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import {
   PaymentMethod,
@@ -32,7 +33,7 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout 
   const timeoutId = setTimeout(() => controller.abort(), timeout);
   
   try {
-    const response = await fetch(url, {
+    const response = await authedFetch(url, {
       ...options,
       signal: controller.signal,
     });

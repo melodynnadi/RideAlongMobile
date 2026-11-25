@@ -1,6 +1,8 @@
 import { singleLineInput } from '@/constants/inputStyles';
 import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Platform, ScrollView, Share, StyleSheet, Text as RNText, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { authedFetch } from '@/services/authedFetch';
+import { withoutConfirmedRequests } from '@/utils/riderHomeRequests';
 import { KeyboardAvoidingView, useAndroidKeyboardOpen } from '@/components/ui/KeyboardAvoidingView';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
@@ -745,13 +747,15 @@ export function RiderHomeReference() {
       return at - bt;
     });
   }, [confirmed, activeConfirmedStatuses]);
+  // A confirmed ride replaces the request it came from.
+  const openRequests = useMemo(() => withoutConfirmedRequests(activeRequests, confirmed), [activeRequests, confirmed]);
   const sortedActiveRequests = useMemo(() => {
-    return [...activeRequests].sort((a, b) => {
+    return [...openRequests].sort((a, b) => {
       const at = rideDateFromData(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
       const bt = rideDateFromData(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
       return at - bt;
     });
-  }, [activeRequests]);
+  }, [openRequests]);
   const soonestConfirmed = sortedConfirmed[0] || null;
   const soonestRequest = sortedActiveRequests[0] || null;
   const soonestConfirmedIsActive = !!soonestConfirmed && activeConfirmedStatuses.has(String(soonestConfirmed.status || '').toUpperCase());
@@ -781,12 +785,12 @@ export function RiderHomeReference() {
       })
       .map((r) => ({ key: `ride:${r.id}`, date: r.date ? r.date.getTime() : Number.MAX_SAFE_INTEGER, kind: 'ride' as const, ride: r }));
 
-    const requestEntries: Entry[] = activeRequests
+    const requestEntries: Entry[] = openRequests
       .filter((r) => r.id !== heroRequestId)
       .map((r) => ({ key: `request:${r.id}`, date: rideDateFromData(r)?.getTime() ?? Number.MAX_SAFE_INTEGER, kind: 'request' as const, request: r }));
 
     return [...rideEntries, ...requestEntries].sort((a, b) => a.date - b.date);
-  }, [confirmed, activeRequests, nextRide, nextRequest]);
+  }, [confirmed, openRequests, nextRide, nextRequest]);
   const firstName = profile?.firstName || profile?.displayName?.split(' ')[0] || firebaseAuth.currentUser?.displayName?.split(' ')[0] || 'there';
   const nextRequestOfferInfo = useMemo(() => {
     if (!nextRequest) return null;
@@ -844,18 +848,18 @@ export function RiderHomeReference() {
       // Strategy 1: direct doc reference — no query, no index
       const directId = `${_postingId}_${_requestId}`;
       const directRef = doc(firestore, 'confirmedRides', directId);
+      let foundDirectly = false;
       const unsub1 = onSnapshot(directRef, (snap) => {
-        if (snap.exists()) {
-          applySnap(snap.id, snap.data());
-        } else {
-          // Only clear if the collection query also finds nothing (handled by unsub2)
-        }
+        foundDirectly = snap.exists();
+        // Not found: cleared only if the collection query finds nothing either.
+        if (snap.exists()) applySnap(snap.id, snap.data());
       }, (error) => {
         console.warn('[RiderHomeReference] confirmed direct listener error:', error);
       });
 
       // Strategy 2: collection query by postingId — handles accepted-with-different-requestId
-      const q = query(collection(firestore, 'confirmedRides'), where('ridePostingId', '==', _postingId));
+      // Security rules only allow a query limited to this rider's own rides.
+      const q = query(collection(firestore, 'confirmedRides'), where('ridePostingId', '==', _postingId), where('riderId', '==', uid));
       const unsub2 = onSnapshot(q, (snap) => {
         // A posting can have multiple passengers. Never let another rider's
         // CONFIRMED snapshot overwrite this rider's completion state.
@@ -869,13 +873,12 @@ export function RiderHomeReference() {
         }) ?? snap.docs.find((candidate) => candidate.data().riderId === uid) ?? null;
         if (d) {
           applySnap(d.id, d.data());
-        } else if (!snap.docs.length) {
+        } else if (!snap.docs.length && !foundDirectly) {
           setConfirmedRideId(null);
           setConfirmedRideStatus(null);
         }
       }, (error) => {
-        setConfirmedRideId(null);
-        setConfirmedRideStatus(null);
+        // Keep what the direct lookup found.
         console.warn('[RiderHomeReference] confirmed posting listener error:', error);
       });
 
@@ -1408,7 +1411,7 @@ function RiderActivityCard({ request, offerInfo, confirmedRideStatus, confirmedR
     const timeout = setTimeout(() => controller.abort(), 30000);
     try {
       const { getApiBaseUrl } = await import('@/constants/services');
-      const res = await fetch(`${getApiBaseUrl()}/api/accept-ride-offer`, {
+      const res = await authedFetch(`${getApiBaseUrl()}/api/accept-ride-offer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ offerId: offerInfo.offerId, riderId: uid, driverId: offerInfo.driverId, paymentIntentId }),
@@ -3319,7 +3322,7 @@ export function RiderDetailReference() {
                 const { getApiBaseUrl } = await import('@/constants/services');
                 const targetCollection = confirmedRideDocId ? 'confirmedRides' : 'rideRequests';
                 const targetId = confirmedRideDocId || rideId!;
-                const res = await fetch(`${getApiBaseUrl()}/api/rides/${targetId}/cancel`, {
+                const res = await authedFetch(`${getApiBaseUrl()}/api/rides/${targetId}/cancel`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ collection: targetCollection, cancelledBy: 'rider' }),
@@ -3839,7 +3842,7 @@ export function RiderDetailReference() {
             try {
               const { getApiBaseUrl } = await import('@/constants/services');
               const base = getApiBaseUrl();
-              await fetch(`${base}/api/rides/${targetPostingId}/request`, {
+              await authedFetch(`${base}/api/rides/${targetPostingId}/request`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ paymentIntentId, riderId, driverId }),

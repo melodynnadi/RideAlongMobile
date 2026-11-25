@@ -1,4 +1,5 @@
 import { singleLineInput } from '@/constants/inputStyles';
+import { authedFetch } from '@/services/authedFetch';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
@@ -231,7 +232,7 @@ export default function RiderAccountScreen() {
     try {
       await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, deletePassword));
 
-      fetch(`${getApiBaseUrl()}/api/send-account-deletion-email`, {
+      await authedFetch(`${getApiBaseUrl()}/api/send-account-deletion-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: user.email, name: user.displayName || profile?.firstName || 'there' }),

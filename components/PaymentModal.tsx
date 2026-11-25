@@ -8,6 +8,7 @@ import { computeTotals } from '@/utils/fees';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs, addDoc, Timestamp } from 'firebase/firestore';
 import { useStripe, isPlatformPaySupported, PlatformPay } from '@/components/platform/stripe';
 import { listPaymentMethods } from '@/services/payments';
+import { authedFetch } from '@/services/authedFetch';
 import { promotionService } from '@/services/promotions';
 import {
   CheckoutBooking, CheckoutPricing, CheckoutQuote, PromoSelection,
@@ -370,7 +371,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
       if (pendingIntentId) {
         const url = `${baseUrl}/api/payments/cancel-intent`;
         log('Cancel intent', { url, pendingIntentId });
-        await fetch(url, {
+        await authedFetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ paymentIntentId: pendingIntentId }),
@@ -396,7 +397,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
       // Cancel any PI left over from a previous failed attempt before creating a new one
       if (pendingIntentId) {
         try {
-          const cancelResp = await fetch(`${baseUrl}/api/payments/cancel-intent`, {
+          const cancelResp = await authedFetch(`${baseUrl}/api/payments/cancel-intent`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ paymentIntentId: pendingIntentId }),
@@ -542,7 +543,7 @@ export function PaymentModal({ visible, onClose, rideId, driverId, baseFare, boo
       // Never authorize an amount the rider wasn't shown (e.g. the driver
       // changed the price after the quote). Void it and show the new total.
       if (charged && charged.totalCents !== totals.totalInCents) {
-        await fetch(`${baseUrl}/api/payments/cancel-intent`, {
+        await authedFetch(`${baseUrl}/api/payments/cancel-intent`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ paymentIntentId: id }),
